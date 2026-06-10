@@ -30,6 +30,7 @@ export type EditorContext = {
 };
 
 export type EditorContextPathFormatter = (filePath: string) => string;
+export type EditorContextNow = () => number;
 
 // Global tracker for currently open editor files.
 const openEditorOpenedAtByPath = new Map<string, number>();
@@ -39,10 +40,11 @@ export const MAX_OPEN_EDITORS = 5;
 
 // Maximum context text length to prevent token overflow
 export const MAX_CONTEXT_LENGTH = 5000;
+export const MAX_CONTEXT_PATH_LENGTH = 240;
 
 const TRUNCATION_SUFFIX = '… [truncated]';
 
-function truncateText(text: string, maxLength: number): string {
+export function truncateText(text: string, maxLength: number): string {
   if (maxLength <= 0) {
     return '';
   }
@@ -70,8 +72,11 @@ function getBoundedSelectionText(
     const segment = `${lineNumber === selection.start.line ? '' : '\n'}${lineText.slice(startCharacter, endCharacter)}`;
 
     if (text.length + segment.length > maxLength) {
-      const boundedSegment = segment.slice(0, maxLength - text.length + 1);
-      return truncateText(text + boundedSegment, maxLength);
+      if (maxLength <= TRUNCATION_SUFFIX.length) {
+        return (text + segment).slice(0, maxLength);
+      }
+      const prefixLength = maxLength - TRUNCATION_SUFFIX.length;
+      return (text + segment).slice(0, prefixLength) + TRUNCATION_SUFFIX;
     }
 
     text += segment;
@@ -80,17 +85,44 @@ function getBoundedSelectionText(
   return text;
 }
 
+function getOpenEditorCanonicalKey(filePath: string): string {
+  const normalizedPath = path.normalize(filePath);
+  // Keep the key simple: do not force lowercase on Windows, even if that can
+  // duplicate entries for the same file with different casing.
+  return normalizedPath;
+}
+
+function rememberOpenEditorPath(filePath: string, now: EditorContextNow): number {
+  const normalizedPath = path.normalize(filePath);
+  let openedAt = openEditorOpenedAtByPath.get(normalizedPath);
+  if (openedAt === undefined) {
+    openedAt = now();
+    openEditorOpenedAtByPath.set(normalizedPath, openedAt);
+  }
+  return openedAt;
+}
+
+function pruneOpenEditorTracker(files: readonly OpenEditorFile[]): void {
+  const currentKeys = new Set(files.map(file => getOpenEditorCanonicalKey(file.path)));
+
+  for (const trackedPath of openEditorOpenedAtByPath.keys()) {
+    if (!currentKeys.has(getOpenEditorCanonicalKey(trackedPath))) {
+      openEditorOpenedAtByPath.delete(trackedPath);
+    }
+  }
+}
+
 // Initialize tracker with VS Code document events.
-export function initializeOpenEditorsTracker(): vscode.Disposable[] {
+export function initializeOpenEditorsTracker(now: EditorContextNow = Date.now): vscode.Disposable[] {
   const openDocDisposable = vscode.workspace.onDidOpenTextDocument(doc => {
     if (doc.uri.scheme === 'file') {
-      openEditorOpenedAtByPath.set(doc.uri.fsPath, Date.now());
+      rememberOpenEditorPath(doc.uri.fsPath, now);
     }
   });
 
   const closeDocDisposable = vscode.workspace.onDidCloseTextDocument(doc => {
     if (doc.uri.scheme === 'file') {
-      openEditorOpenedAtByPath.delete(doc.uri.fsPath);
+      openEditorOpenedAtByPath.delete(path.normalize(doc.uri.fsPath));
     }
   });
 
@@ -131,18 +163,30 @@ export function captureEditorContext(
   };
 }
 
-export function captureOpenEditorPaths(tabGroups: readonly vscode.TabGroup[]): OpenEditorFile[] {
+export function getFilePathsFromTabInput(input: unknown): string[] {
+  if (input instanceof vscode.TabInputText && input.uri.scheme === 'file') {
+    return [input.uri.fsPath];
+  }
+
+  if (input instanceof vscode.TabInputTextDiff) {
+    return [input.original, input.modified]
+      .filter(uri => uri.scheme === 'file')
+      .map(uri => uri.fsPath);
+  }
+
+  return [];
+}
+
+export function captureOpenEditorPaths(
+  tabGroups: readonly vscode.TabGroup[],
+  now: EditorContextNow = Date.now,
+): OpenEditorFile[] {
   const files: OpenEditorFile[] = [];
 
   for (const group of tabGroups) {
     for (const tab of group.tabs) {
-      if (tab.input instanceof vscode.TabInputText && tab.input.uri.scheme === 'file') {
-        const fsPath = tab.input.uri.fsPath;
-        let openedAt = openEditorOpenedAtByPath.get(fsPath);
-        if (openedAt === undefined) {
-          openedAt = Date.now();
-          openEditorOpenedAtByPath.set(fsPath, openedAt);
-        }
+      for (const fsPath of getFilePathsFromTabInput(tab.input)) {
+        const openedAt = rememberOpenEditorPath(fsPath, now);
         files.push({
           path: fsPath,
           openedAt,
@@ -151,6 +195,7 @@ export function captureOpenEditorPaths(tabGroups: readonly vscode.TabGroup[]): O
     }
   }
 
+  pruneOpenEditorTracker(files);
   return normalizeOpenEditorPaths(files);
 }
 
@@ -163,10 +208,7 @@ export function normalizeOpenEditorPaths(files: readonly OpenEditorFile[]): Open
     }
 
     const normalizedPath = path.normalize(file.path);
-    // Keep case-sensitive keys even on case-insensitive filesystems. This can
-    // leave duplicate entries when the same file is opened with different
-    // casing.
-    const canonicalKey = normalizedPath;
+    const canonicalKey = getOpenEditorCanonicalKey(normalizedPath);
     const existing = fileMap.get(canonicalKey);
 
     if (!existing || file.openedAt > existing.openedAt) {
@@ -191,10 +233,25 @@ export function getSafeFenceMarker(contextText: string): string {
 }
 
 const workspacePathFormatter: EditorContextPathFormatter = filePath => {
-  return vscode.workspace.workspaceFolders?.length
-    ? vscode.workspace.asRelativePath(filePath)
-    : filePath;
+  return formatEditorContextPath(filePath);
 };
+
+export function formatEditorContextPath(
+  filePath: string,
+  workspaceFolders: readonly vscode.WorkspaceFolder[] | undefined = vscode.workspace.workspaceFolders,
+): string {
+  const normalizedPath = path.normalize(filePath);
+  const workspaceFolder = workspaceFolders?.find(folder => {
+    const relativePath = path.relative(path.normalize(folder.uri.fsPath), normalizedPath);
+    return relativePath === '' || (!relativePath.startsWith('..') && !path.isAbsolute(relativePath));
+  });
+
+  const displayPath = workspaceFolder
+    ? path.relative(path.normalize(workspaceFolder.uri.fsPath), normalizedPath) || path.basename(normalizedPath)
+    : path.basename(normalizedPath);
+
+  return truncateText(displayPath, MAX_CONTEXT_PATH_LENGTH);
+}
 
 export function buildEditorContextSection(
   context: EditorContext | null,

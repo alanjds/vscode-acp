@@ -7,10 +7,14 @@ import {
   buildPromptWithEditorContext,
   captureEditorContext,
   captureOpenEditorPaths,
+  formatEditorContextPath,
+  getFilePathsFromTabInput,
   getSafeFenceMarker,
   MAX_CONTEXT_LENGTH,
+  MAX_CONTEXT_PATH_LENGTH,
   MAX_OPEN_EDITORS,
   normalizeOpenEditorPaths,
+  truncateText,
   type EditorContext,
   type OpenEditorFile,
 } from '../ui/EditorContext';
@@ -19,6 +23,16 @@ suite('EditorContext', () => {
   const workspaceRoot = path.join(path.parse(process.cwd()).root, 'workspace');
   const workspacePath = (...segments: string[]) => path.join(workspaceRoot, ...segments);
   const formatPathForTest = (filePath: string) => filePath;
+
+  test('truncateText strictly respects max length including suffix', () => {
+    assert.strictEqual(truncateText('abcdef', 0), '');
+    assert.strictEqual(truncateText('abcdef', 3), 'abc');
+    assert.strictEqual(truncateText('abcdef', 6), 'abcdef');
+
+    const result = truncateText('a'.repeat(100), 20);
+    assert.strictEqual(result.length, 20);
+    assert.ok(result.endsWith('… [truncated]'));
+  });
 
   test('formats selection context with file section', () => {
     const examplePath = workspacePath('src', 'example.ts');
@@ -187,8 +201,7 @@ suite('EditorContext', () => {
   });
 
   test('reuses initialized timestamps across repeated open editor captures', () => {
-    const originalDateNow = Date.now;
-    const uri = vscode.Uri.file(workspacePath(`stable-timestamp-${originalDateNow()}.ts`));
+    const uri = vscode.Uri.file(workspacePath('stable-timestamp.ts'));
     const tabGroups = [
       {
         tabs: [
@@ -199,20 +212,88 @@ suite('EditorContext', () => {
       },
     ];
 
-    try {
-      Date.now = () => 1000;
-      const first = captureOpenEditorPaths(tabGroups as any);
+    const first = captureOpenEditorPaths(tabGroups as any, () => 1000);
+    const second = captureOpenEditorPaths(tabGroups as any, () => 2000);
 
-      Date.now = () => 2000;
-      const second = captureOpenEditorPaths(tabGroups as any);
+    assert.strictEqual(first.length, 1);
+    assert.strictEqual(second.length, 1);
+    assert.strictEqual(first[0].openedAt, 1000);
+    assert.strictEqual(second[0].openedAt, 1000);
+  });
 
-      assert.strictEqual(first.length, 1);
-      assert.strictEqual(second.length, 1);
-      assert.strictEqual(first[0].openedAt, 1000);
-      assert.strictEqual(second[0].openedAt, 1000);
-    } finally {
-      Date.now = originalDateNow;
-    }
+  test('captures file paths from text and diff tabs', () => {
+    const originalUri = vscode.Uri.file(workspacePath('src', 'before.ts'));
+    const modifiedUri = vscode.Uri.file(workspacePath('src', 'after.ts'));
+    const textUri = vscode.Uri.file(workspacePath('src', 'current.ts'));
+
+    assert.deepStrictEqual(
+      getFilePathsFromTabInput(new vscode.TabInputText(textUri)),
+      [textUri.fsPath],
+    );
+    assert.deepStrictEqual(
+      getFilePathsFromTabInput(new vscode.TabInputTextDiff(originalUri, modifiedUri)),
+      [originalUri.fsPath, modifiedUri.fsPath],
+    );
+  });
+
+  test('prunes closed tabs from the open editor tracker', () => {
+    const firstUri = vscode.Uri.file(workspacePath('src', 'first.ts'));
+    const secondUri = vscode.Uri.file(workspacePath('src', 'second.ts'));
+    const firstCapture = [
+      {
+        tabs: [
+          { input: new vscode.TabInputText(firstUri) },
+          { input: new vscode.TabInputText(secondUri) },
+        ],
+      },
+    ];
+    const secondCapture = [
+      {
+        tabs: [
+          { input: new vscode.TabInputText(secondUri) },
+        ],
+      },
+    ];
+
+    assert.deepStrictEqual(
+      captureOpenEditorPaths(firstCapture as any, () => 1000).map(file => file.path).sort(),
+      [firstUri.fsPath, secondUri.fsPath].sort(),
+    );
+
+    const result = captureOpenEditorPaths(secondCapture as any, () => 2000);
+
+    assert.strictEqual(result.length, 1);
+    assert.strictEqual(result[0].path, secondUri.fsPath);
+    assert.strictEqual(result[0].openedAt, 1000);
+  });
+
+  test('formats workspace paths as relative and non-workspace paths as basename', () => {
+    const workspaceFolder = {
+      uri: vscode.Uri.file(workspaceRoot),
+      name: 'workspace',
+      index: 0,
+    };
+
+    assert.strictEqual(
+      formatEditorContextPath(workspacePath('src', 'example.ts'), [workspaceFolder]),
+      path.join('src', 'example.ts'),
+    );
+    assert.strictEqual(
+      formatEditorContextPath(path.join(path.parse(process.cwd()).root, 'outside', 'secret.ts'), [workspaceFolder]),
+      'secret.ts',
+    );
+    assert.strictEqual(
+      formatEditorContextPath(workspacePath('src', 'example.ts'), []),
+      'example.ts',
+    );
+  });
+
+  test('truncates formatted paths to MAX_CONTEXT_PATH_LENGTH', () => {
+    const longFileName = `${'a'.repeat(MAX_CONTEXT_PATH_LENGTH + 100)}.ts`;
+    const result = formatEditorContextPath(workspacePath(longFileName), []);
+
+    assert.strictEqual(result.length, MAX_CONTEXT_PATH_LENGTH);
+    assert.ok(result.endsWith('… [truncated]'));
   });
 
   test('truncates large selections without reading the full selection text', () => {

@@ -175,7 +175,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     }
 
     const editorContext = this.editorContextLinked ? this.getEditorContext() : null;
-    const finalText = this.editorContextLinked && editorContext
+    const agentText = this.editorContextLinked && editorContext
       ? buildPromptWithEditorContext(text, editorContext)
       : text;
 
@@ -189,7 +189,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     sendEvent('chat/messageSent', {
       agentName: this.sessionManager.getActiveAgentName() ?? '',
     }, {
-      messageLength: finalText.length,
+      messageLength: agentText.length,
     });
 
     // Record the original user text for the history store (used as a label
@@ -201,7 +201,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     this.postMessage({ type: 'promptStart' });
 
     try {
-      const response = await this.sessionManager.sendPrompt(activeId, finalText);
+      const response = await this.sessionManager.sendPrompt(activeId, agentText);
       // Render the accumulated assistant text as markdown
       // The webview will have sent us the raw text via promptEnd handling
       this.postMessage({
@@ -617,6 +617,13 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       background: var(--vscode-inputValidation-errorBackground);
       color: var(--vscode-inputValidation-errorForeground);
       border: 1px solid var(--vscode-inputValidation-errorBorder);
+    }
+
+    .message.info {
+      align-self: center;
+      background: var(--vscode-editorInfo-background, var(--vscode-editorWidget-background));
+      color: var(--vscode-editorInfo-foreground, var(--vscode-foreground));
+      border: 1px solid var(--vscode-editorInfo-border, var(--vscode-panel-border));
     }
 
     /* Turn container — groups assistant text + tool calls */
@@ -2352,6 +2359,10 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 
         case 'error':
           addMessage('error', msg.message || 'An error occurred');
+          break;
+
+        case 'info':
+          addMessage('info', msg.message || 'Information');
           break;
 
         case 'sessionUpdate':

@@ -3,11 +3,11 @@ import * as vscode from 'vscode';
 
 suite('Extension Test Suite', () => {
 	test('Extension should be present', () => {
-		assert.ok(vscode.extensions.getExtension('formulahendry.acp-client'));
+		assert.ok(vscode.extensions.getExtension('damien-huyet.acp-client'));
 	});
 
 	test('Should activate extension', async () => {
-		const ext = vscode.extensions.getExtension('formulahendry.acp-client');
+		const ext = vscode.extensions.getExtension('damien-huyet.acp-client');
 		assert.ok(ext);
 		await ext.activate();
 		assert.strictEqual(ext.isActive, true);

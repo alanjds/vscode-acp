@@ -22,7 +22,7 @@ suite('PermissionHandler', () => {
     const delays: number[] = [30, 10, 20]; // Different delays to verify ordering
 
     // Mock showQuickPick with sequential delays
-    vscode.window.showQuickPick = async function(items, options) {
+    vscode.window.showQuickPick = async function(_items: any, _options: any) {
       const callIndex = callOrder.length;
       callOrder.push(callIndex);
       
@@ -37,10 +37,12 @@ suite('PermissionHandler', () => {
     };
 
     // Mock getConfiguration to return no auto-approve (default 'ask')
-    vscode.workspace.getConfiguration = function(section) {
+    vscode.workspace.getConfiguration = function(_section) {
       return {
         get: (key: string) => {
-          if (key.startsWith('autoApprove.')) return 'ask';
+          if (key.startsWith('autoApprove.')) {
+            return 'ask';
+          }
           return undefined;
         }
       } as any;
@@ -49,18 +51,19 @@ suite('PermissionHandler', () => {
     const handler = new PermissionHandler();
     
     const params = {
-      toolCall: { title: 'Test Permission', kind: 'read' },
+      sessionId: 'test-session-1',
+      toolCall: { toolCallId: 'test-tool-1', title: 'Test Permission', kind: 'read' as const },
       options: [
-        { optionId: 'allow_once', name: 'Allow once', kind: 'allow_once' },
-        { optionId: 'deny', name: 'Deny', kind: 'deny' }
+        { optionId: 'allow_once', name: 'Allow once', kind: 'allow_once' as const },
+        { optionId: 'deny', name: 'Deny', kind: 'reject_once' as const }
       ]
     };
 
     // Fire multiple requests concurrently
     const results = await Promise.all([
       handler.requestPermission(params),
-      handler.requestPermission(params),
-      handler.requestPermission(params)
+      handler.requestPermission({...params, sessionId: 'test-session-2', toolCall: {...params.toolCall, toolCallId: 'test-tool-2'}}),
+      handler.requestPermission({...params, sessionId: 'test-session-3', toolCall: {...params.toolCall, toolCallId: 'test-tool-3'}})
     ]);
 
     // All should be processed
@@ -78,15 +81,17 @@ suite('PermissionHandler', () => {
   test('autoApprove with allow for read skips prompt', async () => {
     let promptCalled = false;
 
-    vscode.window.showQuickPick = async function() {
+    vscode.window.showQuickPick = async function(_items: any, _options: any) {
       promptCalled = true;
       return undefined;
     };
 
-    vscode.workspace.getConfiguration = function(section) {
+    vscode.workspace.getConfiguration = function(_section) {
       return {
         get: (key: string) => {
-          if (key === 'autoApprove.read') return 'allow';
+          if (key === 'autoApprove.read') {
+            return 'allow';
+          }
           return undefined;
         }
       } as any;
@@ -95,11 +100,12 @@ suite('PermissionHandler', () => {
     const handler = new PermissionHandler();
     
     const params = {
-      toolCall: { title: 'Test Permission', kind: 'read' },
+      sessionId: 'test-session-1',
+      toolCall: { toolCallId: 'test-tool-1', title: 'Test Permission', kind: 'read' as const },
       options: [
-        { optionId: 'allow_once', name: 'Allow once', kind: 'allow_once' },
-        { optionId: 'deny', name: 'Deny', kind: 'deny' },
-        { optionId: 'allow_always', name: 'Always allow', kind: 'allow_always' }
+        { optionId: 'allow_once', name: 'Allow once', kind: 'allow_once' as const },
+        { optionId: 'deny', name: 'Deny', kind: 'reject_once' as const },
+        { optionId: 'allow_always', name: 'Always allow', kind: 'allow_always' as const }
       ]
     };
 
@@ -115,15 +121,17 @@ suite('PermissionHandler', () => {
   test('autoApprove with allow for edit skips prompt', async () => {
     let promptCalled = false;
 
-    vscode.window.showQuickPick = async function() {
+    vscode.window.showQuickPick = async function(_items: any, _options: any) {
       promptCalled = true;
       return undefined;
     };
 
-    vscode.workspace.getConfiguration = function(section) {
+    vscode.workspace.getConfiguration = function(_section) {
       return {
         get: (key: string) => {
-          if (key === 'autoApprove.edit') return 'allow';
+          if (key === 'autoApprove.edit') {
+            return 'allow';
+          }
           return undefined;
         }
       } as any;
@@ -132,10 +140,11 @@ suite('PermissionHandler', () => {
     const handler = new PermissionHandler();
     
     const params = {
-      toolCall: { title: 'Test Permission', kind: 'edit' },
+      sessionId: 'test-session-1',
+      toolCall: { toolCallId: 'test-tool-1', title: 'Test Permission', kind: 'edit' as const },
       options: [
-        { optionId: 'allow_once', name: 'Allow once', kind: 'allow_once' },
-        { optionId: 'deny', name: 'Deny', kind: 'deny' }
+        { optionId: 'allow_once', name: 'Allow once', kind: 'allow_once' as const },
+        { optionId: 'deny', name: 'Deny', kind: 'reject_once' as const }
       ]
     };
 
@@ -149,15 +158,17 @@ suite('PermissionHandler', () => {
   test('autoApprove with allow for execute skips prompt', async () => {
     let promptCalled = false;
 
-    vscode.window.showQuickPick = async function() {
+    vscode.window.showQuickPick = async function(_items: any, _options: any) {
       promptCalled = true;
       return undefined;
     };
 
-    vscode.workspace.getConfiguration = function(section) {
+    vscode.workspace.getConfiguration = function(_section) {
       return {
         get: (key: string) => {
-          if (key === 'autoApprove.execute') return 'allow';
+          if (key === 'autoApprove.execute') {
+            return 'allow';
+          }
           return undefined;
         }
       } as any;
@@ -166,10 +177,11 @@ suite('PermissionHandler', () => {
     const handler = new PermissionHandler();
     
     const params = {
-      toolCall: { title: 'Test Permission', kind: 'execute' },
+      sessionId: 'test-session-1',
+      toolCall: { toolCallId: 'test-tool-1', title: 'Test Permission', kind: 'execute' as const },
       options: [
-        { optionId: 'allow_once', name: 'Allow once', kind: 'allow_once' },
-        { optionId: 'deny', name: 'Deny', kind: 'deny' }
+        { optionId: 'allow_once', name: 'Allow once', kind: 'allow_once' as const },
+        { optionId: 'deny', name: 'Deny', kind: 'reject_once' as const }
       ]
     };
 
@@ -183,7 +195,7 @@ suite('PermissionHandler', () => {
   test('autoApprove with ask shows prompt', async () => {
     let promptCalled = false;
 
-    vscode.window.showQuickPick = async function() {
+    vscode.window.showQuickPick = async function(_items: any, _options: any) {
       promptCalled = true;
       return {
         label: 'Allow',
@@ -192,10 +204,12 @@ suite('PermissionHandler', () => {
       } as any;
     };
 
-    vscode.workspace.getConfiguration = function(section) {
+    vscode.workspace.getConfiguration = function(_section) {
       return {
         get: (key: string) => {
-          if (key.startsWith('autoApprove.')) return 'ask';
+          if (key.startsWith('autoApprove.')) {
+            return 'ask';
+          }
           return undefined;
         }
       } as any;
@@ -204,10 +218,11 @@ suite('PermissionHandler', () => {
     const handler = new PermissionHandler();
     
     const params = {
-      toolCall: { title: 'Test Permission', kind: 'read' },
+      sessionId: 'test-session-1',
+      toolCall: { toolCallId: 'test-tool-1', title: 'Test Permission', kind: 'read' as const },
       options: [
-        { optionId: 'allow_once', name: 'Allow once', kind: 'allow_once' },
-        { optionId: 'deny', name: 'Deny', kind: 'deny' }
+        { optionId: 'allow_once', name: 'Allow once', kind: 'allow_once' as const },
+        { optionId: 'deny', name: 'Deny', kind: 'reject_once' as const }
       ]
     };
 
@@ -220,14 +235,16 @@ suite('PermissionHandler', () => {
   });
 
   test('cancelled permission returns cancelled outcome', async () => {
-    vscode.window.showQuickPick = async function() {
+    vscode.window.showQuickPick = async function(_items: any, _options: any) {
       return undefined; // User cancelled
     };
 
-    vscode.workspace.getConfiguration = function(section) {
+    vscode.workspace.getConfiguration = function(_section) {
       return {
         get: (key: string) => {
-          if (key.startsWith('autoApprove.')) return 'ask';
+          if (key.startsWith('autoApprove.')) {
+            return 'ask';
+          }
           return undefined;
         }
       } as any;
@@ -236,10 +253,11 @@ suite('PermissionHandler', () => {
     const handler = new PermissionHandler();
     
     const params = {
-      toolCall: { title: 'Test Permission', kind: 'read' },
+      sessionId: 'test-session-1',
+      toolCall: { toolCallId: 'test-tool-1', title: 'Test Permission', kind: 'read' as const },
       options: [
-        { optionId: 'allow_once', name: 'Allow once', kind: 'allow_once' },
-        { optionId: 'deny', name: 'Deny', kind: 'deny' }
+        { optionId: 'allow_once', name: 'Allow once', kind: 'allow_once' as const },
+        { optionId: 'deny', name: 'Deny', kind: 'reject_once' as const }
       ]
     };
 
@@ -249,7 +267,7 @@ suite('PermissionHandler', () => {
   });
 
   test('selecting an option returns selected outcome with optionId', async () => {
-    vscode.window.showQuickPick = async function() {
+    vscode.window.showQuickPick = async function(_items: any, _options: any) {
       return {
         label: 'Allow',
         optionId: 'allow_once',
@@ -257,10 +275,12 @@ suite('PermissionHandler', () => {
       } as any;
     };
 
-    vscode.workspace.getConfiguration = function(section) {
+    vscode.workspace.getConfiguration = function(_section) {
       return {
         get: (key: string) => {
-          if (key.startsWith('autoApprove.')) return 'ask';
+          if (key.startsWith('autoApprove.')) {
+            return 'ask';
+          }
           return undefined;
         }
       } as any;
@@ -269,10 +289,11 @@ suite('PermissionHandler', () => {
     const handler = new PermissionHandler();
     
     const params = {
-      toolCall: { title: 'Test Permission', kind: 'read' },
+      sessionId: 'test-session-1',
+      toolCall: { toolCallId: 'test-tool-1', title: 'Test Permission', kind: 'read' as const },
       options: [
-        { optionId: 'allow_once', name: 'Allow once', kind: 'allow_once' },
-        { optionId: 'deny', name: 'Deny', kind: 'deny' }
+        { optionId: 'allow_once', name: 'Allow once', kind: 'allow_once' as const },
+        { optionId: 'deny', name: 'Deny', kind: 'reject_once' as const }
       ]
     };
 
@@ -283,14 +304,16 @@ suite('PermissionHandler', () => {
   });
 
   test('autoApprove selects allow_always over allow_once', async () => {
-    vscode.window.showQuickPick = async function() {
+    vscode.window.showQuickPick = async function(_items: any, _options: any) {
       throw new Error('should not be called');
     };
 
-    vscode.workspace.getConfiguration = function(section) {
+    vscode.workspace.getConfiguration = function(_section) {
       return {
         get: (key: string) => {
-          if (key === 'autoApprove.edit') return 'allow';
+          if (key === 'autoApprove.edit') {
+            return 'allow';
+          }
           return undefined;
         }
       } as any;
@@ -299,11 +322,12 @@ suite('PermissionHandler', () => {
     const handler = new PermissionHandler();
     
     const params = {
-      toolCall: { title: 'Test Permission', kind: 'edit' },
+      sessionId: 'test-session-1',
+      toolCall: { toolCallId: 'test-tool-1', title: 'Test Permission', kind: 'edit' as const },
       options: [
-        { optionId: 'deny', name: 'Deny', kind: 'deny' },
-        { optionId: 'allow_always', name: 'Always allow', kind: 'allow_always' },
-        { optionId: 'allow_once', name: 'Allow once', kind: 'allow_once' }
+        { optionId: 'deny', name: 'Deny', kind: 'reject_once' as const },
+        { optionId: 'allow_always', name: 'Always allow', kind: 'allow_always' as const },
+        { optionId: 'allow_once', name: 'Allow once', kind: 'allow_once' as const }
       ]
     };
 

@@ -1,6 +1,9 @@
 # ACP Client for VS Code
 
-A [Visual Studio Code extension](https://marketplace.visualstudio.com/items?itemName=formulahendry.acp-client) that provides a client for the [Agent Client Protocol (ACP)](https://agentclientprotocol.com/) — connect to any ACP-compatible AI coding agent directly from your editor.
+A [Visual Studio Code extension](https://marketplace.visualstudio.com/items?itemName=damien-huyet.acp-client) that provides a client for the [Agent Client Protocol (ACP)](https://agentclientprotocol.com/) — connect to any ACP-compatible AI coding agent directly from your editor.
+
+> [!NOTE]
+> This is a fork of the original [vscode-acp](https://github.com/formulahendry/vscode-acp) by [formulahendry](https://github.com/formulahendry).
 
 ![ACP Client Screenshot](resources/screenshot.png)
 
@@ -23,7 +26,7 @@ A [Visual Studio Code extension](https://marketplace.visualstudio.com/items?item
 
 ## Quick Start
 
-1. Install: [Visual Studio Code Marketplace](https://marketplace.visualstudio.com/items?itemName=formulahendry.acp-client) | [Open in VS Code](https://vscode.dev/redirect?url=vscode%3Aextension%2Fformulahendry.acp-client) | [Open VSX Marketplace](https://open-vsx.org/extension/formulahendry/acp-client)
+1. Install: [Visual Studio Code Marketplace](https://marketplace.visualstudio.com/items?itemName=damien-huyet.acp-client) | [Open in VS Code](https://vscode.dev/redirect?url=vscode%3Aextension%2Fdamien-huyet.acp-client) | [Open VSX Marketplace](https://open-vsx.org/extension/damien-huyet/acp-client)
 2. Open the ACP Client panel from the Activity Bar (ACP icon)
 3. Click **+** to add an agent configuration, or use the defaults
 4. Click an agent to connect
@@ -104,7 +107,7 @@ All commands are accessible via the Command Palette (`Ctrl+Shift+P`):
 ### Setup
 
 ```bash
-git clone https://github.com/formulahendry/vscode-acp.git
+git clone https://github.com/maurice30120/vscode-acp.git
 cd vscode-acp
 npm install
 ```
@@ -152,14 +155,9 @@ Communication with agents uses the ACP protocol (JSON-RPC 2.0 over stdio).
 
 ## Links
 
-- [ACP Client on Visual Studio Code Marketplace](https://marketplace.visualstudio.com/items?itemName=formulahendry.acp-client)
+- [ACP Client on Visual Studio Code Marketplace](https://marketplace.visualstudio.com/items?itemName=damien-huyet.acp-client)
 - [Agent Client Protocol](https://agentclientprotocol.com/)
-- [GitHub Repository](https://github.com/formulahendry/vscode-acp)
-
-## Related Projects
-
-- [ACP UI](https://github.com/formulahendry/acp-ui) — A modern, cross-platform desktop client for the Agent Client Protocol (ACP)
-- [WeChat ACP](https://github.com/formulahendry/wechat-acp) — Bridge WeChat chat messages to any ACP-compatible AI agent (Claude, Codex, Copilot, Qwen, Gemini, OpenCode and more)
+- [GitHub Repository](https://github.com/maurice30120/vscode-acp)
 
 ## License
 

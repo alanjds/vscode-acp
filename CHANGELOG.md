@@ -21,7 +21,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Bumped `@agentclientprotocol/sdk` from `^0.14.1` to `^0.21.1`. Migrated `unstable_listSessions` / `unstable_resumeSession` to their stable equivalents.
 
 ### Fixed
-- Agent / model picker labels no longer truncate at 140 px — names display fully and pickers wrap to a second row when the panel is narrow ([#36](https://github.com/formulahendry/vscode-acp/issues/36)).
+- Agent / model picker labels no longer truncate at 140 px — names display fully and pickers wrap to a second row when the panel is narrow ([#36](https://github.com/maurice30120/vscode-acp/issues/36)).
 - Slash-command autocomplete now appears reliably when the agent advertises commands. Notifications like `available_commands_update` that arrive during session creation are persisted on the session even before `activeSessionId` is set.
 - Per-session state (config options, available commands, title) carries forward correctly when the active session is set after the notification arrives.
 

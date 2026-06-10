@@ -57,7 +57,6 @@ export type AppAction =
   | { type: 'appendUserChunk'; text: string }
   | { type: 'appendErrorMessage'; text: string }
   | { type: 'appendInfoMessage'; text: string }
-  | { type: 'attachFile'; text: string }
   | { type: 'promptStart'; turnId: string }
   | { type: 'promptEnd' }
   | { type: 'clearChat' }
@@ -353,13 +352,6 @@ export function appReducer(state: AppState, action: AppAction): AppState {
             { kind: 'message', role: 'info', text: action.text },
           ],
         },
-      };
-
-    case 'attachFile':
-      return {
-        ...state,
-        promptText: action.text,
-        composerUnlocked: true,
       };
 
     case 'promptStart':

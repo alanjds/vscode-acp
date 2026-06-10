@@ -1,9 +1,15 @@
 import type { SlashCommand } from '../chatTypes';
-import type { HostToWebviewMessage } from '../vscode';
+import type { SelectedFileMention } from '../chatTypes';
 
 export type ParsedUserMessage = {
   badgeText: string;
   body?: string;
+};
+
+export type ActiveFileMention = {
+  start: number;
+  end: number;
+  query: string;
 };
 
 export function parseUserMessage(text: string): ParsedUserMessage | null {
@@ -24,40 +30,67 @@ export function parseUserMessage(text: string): ParsedUserMessage | null {
   };
 }
 
-export function buildAttachedFilePrompt(
-  message: Extract<HostToWebviewMessage, { type: 'file-attached' }>,
-  promptText: string,
+export function getActiveFileMention(text: string, cursorPosition: number): ActiveFileMention | null {
+  const cursor = Math.max(0, Math.min(cursorPosition, text.length));
+  const prefix = text.slice(0, cursor);
+  const tokenStart = Math.max(
+    prefix.lastIndexOf(' '),
+    prefix.lastIndexOf('\n'),
+    prefix.lastIndexOf('\t'),
+  ) + 1;
+
+  if (text[tokenStart] !== '@') {
+    return null;
+  }
+
+  if (tokenStart > 0 && /\S/.test(text[tokenStart - 1])) {
+    return null;
+  }
+
+  let end = cursor;
+  while (end < text.length && !/\s/.test(text[end])) {
+    end += 1;
+  }
+
+  const query = text.slice(tokenStart + 1, cursor);
+  if (query.includes('@')) {
+    return null;
+  }
+
+  return {
+    start: tokenStart,
+    end,
+    query,
+  };
+}
+
+export function replaceActiveFileMention(
+  text: string,
+  mention: ActiveFileMention,
+  displayText: string,
+): { text: string; cursorPosition: number } {
+  const suffix = text[mention.end] && !/\s/.test(text[mention.end]) ? '' : ' ';
+  const replacement = `@${displayText}${suffix}`;
+  const nextText = `${text.slice(0, mention.start)}${replacement}${text.slice(mention.end)}`;
+  return {
+    text: nextText,
+    cursorPosition: mention.start + replacement.length,
+  };
+}
+
+export function expandFileMentionsForPrompt(
+  text: string,
+  selectedMentions: readonly SelectedFileMention[],
 ): string {
-  const name = message.name || message.path || 'attached file';
-  const selection = message.selection;
-  const cursorLine = selection?.cursorLine ?? selection?.startLine;
-  const cursorCharacter = selection?.cursorCharacter ?? selection?.startCharacter;
-  const existingText = promptText || '';
-  const existingSuffix = existingText.length > 0 ? existingText : '';
-
-  if (selection?.text) {
-    const rangeTag =
-      selection.startLine &&
-      selection.startCharacter &&
-      selection.endLine &&
-      selection.endCharacter
-        ? ` [${selection.startLine}:${selection.startCharacter}-${selection.endLine}:${selection.endCharacter}]`
-        : '';
-    const cursorTag = cursorLine && cursorCharacter ? ` [cursor ${cursorLine}:${cursorCharacter}]` : '';
-    return `${name}${rangeTag}${cursorTag}\n${selection.text}\n\n${existingSuffix}`;
-  }
-
-  if (selection && (cursorLine || cursorCharacter)) {
-    const lineValue = cursorLine ?? '?';
-    const characterValue = cursorCharacter ?? '?';
-    return `${name} (${message.path}) [cursor ${lineValue}:${characterValue}]\n\n${existingSuffix}`;
-  }
-
-  return `${name} (${message.path})\n\n${existingSuffix}`;
+  return selectedMentions.reduce((nextText, mention) => {
+    return nextText.split(mention.token).join(`@${mention.path}`);
+  }, text);
 }
 
 export function getBasePlaceholder(commands: SlashCommand[]): string {
-  return commands.length > 0 ? 'Type a message or / for commands...' : 'Type a message...';
+  return commands.length > 0
+    ? 'Type a message, @ for files, or / for commands...'
+    : 'Type a message or @ for files...';
 }
 
 export function getSlashFilteredCommands(promptText: string, commands: SlashCommand[]): SlashCommand[] {

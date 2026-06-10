@@ -1,6 +1,5 @@
 import type {
   ChatHistoryItem,
-  FileSelection,
   MarkdownRenderedItem,
   MessageHistoryItem,
   ModelOption,
@@ -194,23 +193,6 @@ export function normalizePlanUpdate(value: unknown): PlanUpdate {
     entries: Array.isArray(candidate.entries)
       ? candidate.entries.map(normalizePlanEntry).filter((entry): entry is PlanEntry => entry !== null)
       : [],
-  };
-}
-
-export function normalizeFileSelection(value: unknown): FileSelection | undefined {
-  if (!value || typeof value !== 'object') {
-    return undefined;
-  }
-
-  const candidate = value as Partial<FileSelection>;
-  return {
-    startLine: typeof candidate.startLine === 'number' ? candidate.startLine : undefined,
-    startCharacter: typeof candidate.startCharacter === 'number' ? candidate.startCharacter : undefined,
-    endLine: typeof candidate.endLine === 'number' ? candidate.endLine : undefined,
-    endCharacter: typeof candidate.endCharacter === 'number' ? candidate.endCharacter : undefined,
-    text: typeof candidate.text === 'string' ? candidate.text : undefined,
-    cursorLine: typeof candidate.cursorLine === 'number' ? candidate.cursorLine : undefined,
-    cursorCharacter: typeof candidate.cursorCharacter === 'number' ? candidate.cursorCharacter : undefined,
   };
 }
 

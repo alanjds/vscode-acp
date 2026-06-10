@@ -472,18 +472,6 @@ export function activate(context: vscode.ExtensionContext): void {
     sendEvent('agent/removed', { agentName: name });
   });
 
-  // Attach File
-  const attachFileCmd = vscode.commands.registerCommand('acp.attachFile', async () => {
-    const uris = await vscode.window.showOpenDialog({
-      canSelectMany: false,
-      openLabel: 'Attach',
-      title: 'Attach File to Chat',
-    });
-    if (uris && uris.length > 0) {
-      chatWebviewProvider.attachFile(uris[0]);
-    }
-  });
-
   const setEditorContextLinked = async (linked: boolean) => {
     chatWebviewProvider.setEditorContextLinked(linked);
     await context.workspaceState.update(EDITOR_CONTEXT_LINK_STATE_KEY, linked);
@@ -549,7 +537,6 @@ export function activate(context: vscode.ExtensionContext): void {
     forgetSessionCmd,
     addAgentCmd,
     removeAgentCmd,
-    attachFileCmd,
     enableEditorContextLinkCmd,
     disableEditorContextLinkCmd,
     browseRegistryCmd,

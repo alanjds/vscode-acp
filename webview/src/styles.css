@@ -683,11 +683,11 @@ body {
   flex: 1;
   min-height: 0;
   display: flex;
+  position: relative;
 }
 
-.input-editor-wrap textarea {
+.prompt-input {
   flex: 1;
-  resize: none;
   background: var(--vscode-input-background);
   color: var(--vscode-input-foreground);
   border: 1px solid var(--vscode-input-border);
@@ -698,9 +698,28 @@ body {
   line-height: 1.4;
   min-height: 38px;
   outline: none;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
-.input-editor-wrap textarea:focus {
+.prompt-input:empty::before {
+  color: var(--vscode-input-placeholderForeground);
+  content: attr(data-placeholder);
+  pointer-events: none;
+}
+
+.prompt-inline-file-link {
+  color: var(--vscode-textLink-foreground);
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.prompt-inline-file-link:hover {
+  color: var(--vscode-textLink-activeForeground, var(--vscode-textLink-foreground));
+}
+
+.prompt-input:focus {
   border-color: var(--vscode-focusBorder);
 }
 
@@ -755,7 +774,8 @@ body {
   opacity: 0.9;
 }
 
-.slash-popup {
+.slash-popup,
+.file-popup {
   display: none;
   position: absolute;
   bottom: 100%;
@@ -771,7 +791,8 @@ body {
   margin-bottom: 4px;
 }
 
-.slash-popup.open {
+.slash-popup.open,
+.file-popup.open {
   display: block;
 }
 
@@ -784,7 +805,8 @@ body {
   letter-spacing: 0.5px;
 }
 
-.slash-popup-item {
+.slash-popup-item,
+.file-popup-item {
   padding: 6px 10px;
   cursor: pointer;
   display: flex;
@@ -793,7 +815,9 @@ body {
 }
 
 .slash-popup-item:hover,
-.slash-popup-item.active {
+.slash-popup-item.active,
+.file-popup-item:hover,
+.file-popup-item.active {
   background: var(--vscode-list-hoverBackground);
 }
 
@@ -811,6 +835,27 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
   flex: 1;
+}
+
+.file-popup-item .file-name {
+  font-weight: 600;
+  color: var(--vscode-textLink-foreground);
+  white-space: nowrap;
+  font-family: var(--vscode-editor-font-family);
+  min-width: 80px;
+  max-width: 42%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-popup-item .file-path {
+  font-size: 0.9em;
+  opacity: 0.7;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  font-family: var(--vscode-editor-font-family);
 }
 
 .spinner {

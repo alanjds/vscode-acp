@@ -17,15 +17,7 @@ type WebviewMessage = {
   [key: string]: unknown;
 };
 
-type FileSelection = {
-  startLine?: number;
-  startCharacter?: number;
-  endLine?: number;
-  endCharacter?: number;
-  text?: string;
-  cursorLine?: number;
-  cursorCharacter?: number;
-} | null;
+const FILE_SEARCH_LIMIT = 30;
 
 /**
  * WebviewViewProvider for the ACP chat sidebar.
@@ -120,6 +112,12 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
           break;
         case 'setConfigOption':
           await this.handleSetConfigOption(String(message.configId ?? ''), String(message.value ?? ''));
+          break;
+        case 'searchFiles':
+          await this.handleSearchFiles(String(message.query ?? ''), Number(message.requestId ?? 0));
+          break;
+        case 'openFile':
+          await this.handleOpenFile(String(message.path ?? ''));
           break;
         case 'executeCommand':
           if (typeof message.command === 'string' && message.command && ALLOWED_WEBVIEW_COMMANDS.has(message.command)) {
@@ -321,6 +319,74 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
   }
 
   /**
+   * Search workspace files for the `@file` mention popup.
+   */
+  private async handleSearchFiles(query: string, requestId: number): Promise<void> {
+    const normalizedQuery = query.trim().replace(/\\/g, '/');
+    const words = normalizedQuery.split('/').filter(Boolean);
+    const glob = words.length > 0
+      ? `**/${words.map(word => `*${this.escapeGlobSegment(word)}*`).join('/')}`
+      : '**/*';
+
+    try {
+      const uris = await vscode.workspace.findFiles(
+        glob,
+        '**/{node_modules,.git,dist,out}/**',
+        FILE_SEARCH_LIMIT,
+      );
+      const results = uris.map(uri => {
+        const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
+        const relativePath = workspaceFolder
+          ? vscode.workspace.asRelativePath(uri, false).replace(/\\/g, '/')
+          : uri.fsPath.replace(/\\/g, '/');
+        return {
+          path: relativePath,
+          name: uri.fsPath.split(/[\\/]/).pop() || relativePath,
+        };
+      });
+
+      this.postMessage({ type: 'fileSearchResults', requestId, results });
+    } catch (e: any) {
+      logError('File search failed', e);
+      this.postMessage({ type: 'fileSearchResults', requestId, results: [] });
+    }
+  }
+
+  private escapeGlobSegment(value: string): string {
+    return value.replace(/[{}[\]*?\\]/g, match => `[${match}]`);
+  }
+
+  private async handleOpenFile(filePath: string): Promise<void> {
+    if (!filePath) {
+      return;
+    }
+
+    try {
+      const uri = this.resolveWorkspaceFileUri(filePath);
+      if (!uri) {
+        return;
+      }
+      const document = await vscode.workspace.openTextDocument(uri);
+      await vscode.window.showTextDocument(document, { preview: true });
+    } catch (e) {
+      logError('Failed to open file mention', e);
+    }
+  }
+
+  private resolveWorkspaceFileUri(filePath: string): vscode.Uri | null {
+    if (filePath.startsWith('/') || /^[A-Za-z]:[\\/]/.test(filePath)) {
+      return vscode.Uri.file(filePath);
+    }
+
+    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+    if (!workspaceFolder) {
+      return null;
+    }
+
+    return vscode.Uri.joinPath(workspaceFolder.uri, ...filePath.split('/').filter(Boolean));
+  }
+
+  /**
    * Send current session state to the webview on load.
    */
   private sendCurrentState(): void {
@@ -456,24 +522,6 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     this._hasChatContent = true;
     this.postMessage({ type: 'externalUserMessage', text });
     await this.handleSendPrompt(text);
-  }
-
-  /**
-   * Attach a file URI to the next prompt.
-   */
-  attachFile(uri: vscode.Uri, selection?: FileSelection): void {
-    const payload: WebviewMessage = {
-      type: 'file-attached',
-      path: uri.fsPath,
-      name: uri.fsPath.split(/[\\/]/).pop() || uri.fsPath,
-    };
-
-    if (selection) {
-      payload.selection = selection;
-    }
-
-    this.postMessage(payload);
-    this.view?.show?.(true);
   }
 
   dispose(): void {

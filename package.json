@@ -123,11 +123,6 @@
         "title": "ACP: Set Agent Model"
       },
       {
-        "command": "acp.attachFile",
-        "title": "ACP: Attach File to Prompt",
-        "icon": "$(attach)"
-      },
-      {
         "command": "acp.enableEditorContextLink",
         "title": "ACP: Enable Editor Context Link",
         "icon": "$(pin)",
@@ -216,11 +211,6 @@
           "command": "acp.newConversation",
           "when": "view == acp-chat",
           "group": "navigation@1"
-        },
-        {
-          "command": "acp.attachFile",
-          "when": "view == acp-chat",
-          "group": "navigation@2"
         },
         {
           "command": "acp.enableEditorContextLink",

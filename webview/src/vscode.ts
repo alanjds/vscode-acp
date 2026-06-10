@@ -1,5 +1,5 @@
 import type {
-  FileSelection,
+  FileSearchResult,
   MarkdownRenderItem,
   MarkdownRenderedItem,
   ModelsState,
@@ -28,7 +28,7 @@ export type HostToWebviewMessage =
   | { type: 'loadSessionEnd'; ok?: boolean }
   | { type: 'sessionInfoUpdate'; title?: string | null }
   | { type: 'externalUserMessage'; text: string }
-  | { type: 'file-attached'; path?: string; name?: string; selection?: FileSelection }
+  | { type: 'fileSearchResults'; requestId: number; results: FileSearchResult[] }
   | { type: 'markdownRendered'; items: MarkdownRenderedItem[] }
   | { type: string; [key: string]: unknown };
 
@@ -40,6 +40,8 @@ export type WebviewToHostMessage =
   | { type: 'setModel'; modelId: string }
   | { type: 'setConfigOption'; configId: string; value: string }
   | { type: 'executeCommand'; command: string }
+  | { type: 'searchFiles'; query: string; requestId: number }
+  | { type: 'openFile'; path: string }
   | { type: 'renderMarkdown'; items: MarkdownRenderItem[] };
 
 type VsCodeApi<State> = {

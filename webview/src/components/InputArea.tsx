@@ -1,5 +1,6 @@
 import type {
   JSX,
+  FormEvent,
   KeyboardEvent as ReactKeyboardEvent,
   MouseEvent as ReactMouseEvent,
   RefObject,
@@ -10,8 +11,10 @@ import type { AppAction, AppState } from '../app/state';
 import type {
   ConfigOptionGroup,
   ConfigOptionValue,
+  FileSearchResult,
   ModelOption,
   ModeOption,
+  SelectedFileMention,
   SessionConfigOption,
   SessionSnapshot,
   SlashCommand,
@@ -36,11 +39,21 @@ interface InputAreaProps {
     value: ConfigOptionValue,
     e: ReactMouseEvent<HTMLDivElement>,
   ) => void;
-  promptInputRef: RefObject<HTMLTextAreaElement | null>;
-  handlePromptKeyDown: (e: ReactKeyboardEvent<HTMLTextAreaElement>) => void;
+  promptInputRef: RefObject<HTMLDivElement | null>;
+  handlePromptKeyDown: (e: ReactKeyboardEvent<HTMLDivElement>) => void;
   placeholder?: string | null;
   handleCancel: () => void;
   handleSend: (explicitText?: string) => void;
+  fileResults: FileSearchResult[];
+  fileSelectedIdx: number;
+  filePopupRef: RefObject<HTMLDivElement | null>;
+  isFilePopupOpen: boolean;
+  onFileSelect: (result?: FileSearchResult) => void;
+  onFileHover: (index: number) => void;
+  onPromptInput: (event: FormEvent<HTMLDivElement>) => void;
+  onPromptSelect: (input: HTMLDivElement) => void;
+  selectedFileMentions: SelectedFileMention[];
+  onOpenSelectedFile: (path: string) => void;
   sendLabel?: string;
 }
 
@@ -64,6 +77,16 @@ export default function InputArea({
   placeholder,
   handleCancel,
   handleSend,
+  fileResults,
+  fileSelectedIdx,
+  filePopupRef,
+  isFilePopupOpen,
+  onFileSelect,
+  onFileHover,
+  onPromptInput,
+  onPromptSelect,
+  selectedFileMentions,
+  onOpenSelectedFile,
   sendLabel = 'Send',
 }: InputAreaProps): JSX.Element {
   const configOptions = (sessionState?.configOptions ?? []).filter(hasSelectableValues);
@@ -92,6 +115,27 @@ export default function InputArea({
           >
             <span className="cmd-name">/{command.name}</span>
             <span className="cmd-desc">{command.description}</span>
+          </div>
+        ))}
+      </div>
+
+      <div
+        className={`file-popup${isFilePopupOpen ? ' open' : ''}`}
+        id="filePopup"
+        ref={filePopupRef}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="slash-popup-header">Files</div>
+        {fileResults.map((result, index) => (
+          <div
+            className={`file-popup-item${index === fileSelectedIdx ? ' active' : ''}`}
+            data-index={index}
+            key={result.path}
+            onClick={() => onFileSelect(result)}
+            onMouseEnter={() => onFileHover(index)}
+          >
+            <span className="file-name">{result.name}</span>
+            <span className="file-path">{result.path}</span>
           </div>
         ))}
       </div>
@@ -154,21 +198,24 @@ export default function InputArea({
       </div>
 
       <div className="input-editor-wrap">
-        <textarea
-          disabled={disabledBySession || state.isProcessing}
+        <div
+          aria-multiline="true"
+          className="prompt-input"
+          contentEditable={!disabledBySession && !state.isProcessing}
+          data-placeholder={placeholder ?? ''}
           id="promptInput"
-          onChange={(event) => {
-            dispatch({ type: 'setPromptText', text: event.target.value });
-            if (state.slashPopupSuppressedFor && state.slashPopupSuppressedFor !== event.target.value) {
-              dispatch({ type: 'suppressSlashPopup', promptText: null });
-            }
-          }}
+          onInput={onPromptInput}
+          onClick={(event) => onPromptSelect(event.currentTarget)}
           onKeyDown={handlePromptKeyDown}
-          placeholder={placeholder ?? undefined}
+          onKeyUp={(event) => onPromptSelect(event.currentTarget)}
+          onMouseUp={(event) => onPromptSelect(event.currentTarget)}
           ref={promptInputRef}
-          rows={2}
-          value={state.promptText}
-        />
+          role="textbox"
+          suppressContentEditableWarning
+          tabIndex={disabledBySession || state.isProcessing ? -1 : 0}
+        >
+          {renderPromptWithFileLinks(state.promptText, selectedFileMentions, onOpenSelectedFile)}
+        </div>
       </div>
 
       <div className="input-send-row">
@@ -190,6 +237,68 @@ export default function InputArea({
       </div>
     </div>
   );
+}
+
+function renderPromptWithFileLinks(
+  text: string,
+  mentions: SelectedFileMention[],
+  onOpenSelectedFile: (path: string) => void,
+): React.ReactNode {
+  if (mentions.length === 0) {
+    return text;
+  }
+
+  const orderedMentions = [...mentions].sort((a, b) => b.token.length - a.token.length);
+  const parts: React.ReactNode[] = [];
+  let index = 0;
+
+  while (index < text.length) {
+    const mention = orderedMentions.find((candidate) => text.startsWith(candidate.token, index));
+    if (!mention) {
+      const nextMentionIndex = orderedMentions.reduce((nextIndex, candidate) => {
+        const candidateIndex = text.indexOf(candidate.token, index + 1);
+        if (candidateIndex < 0) {
+          return nextIndex;
+        }
+        return nextIndex < 0 ? candidateIndex : Math.min(nextIndex, candidateIndex);
+      }, -1);
+      const end = nextMentionIndex < 0 ? text.length : nextMentionIndex;
+      if (end > index) {
+        parts.push(text.slice(index, end));
+      }
+      index = end;
+      continue;
+    }
+
+    parts.push(
+      <span
+        className="prompt-inline-file-link"
+        contentEditable={false}
+        key={`file-${index}-${mention.path}`}
+        onClick={(event) => {
+          event.stopPropagation();
+          onOpenSelectedFile(mention.path);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            event.stopPropagation();
+            onOpenSelectedFile(mention.path);
+          }
+        }}
+        onMouseDown={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          onOpenSelectedFile(mention.path);
+        }}
+      >
+        {mention.token}
+      </span>,
+    );
+    index += mention.token.length;
+  }
+
+  return parts;
 }
 
 function hasSelectableValues(option: SessionConfigOption): boolean {

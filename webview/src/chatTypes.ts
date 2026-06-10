@@ -131,14 +131,13 @@ export type PersistedWebviewState = {
   hasActiveSession: boolean;
 };
 
-export type FileSelection = {
-  startLine?: number;
-  startCharacter?: number;
-  endLine?: number;
-  endCharacter?: number;
-  text?: string;
-  cursorLine?: number;
-  cursorCharacter?: number;
+export type FileSearchResult = {
+  path: string;
+  name: string;
+};
+
+export type SelectedFileMention = FileSearchResult & {
+  token: string;
 };
 
 export type SessionContentChunk = {

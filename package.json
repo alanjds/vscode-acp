@@ -2,7 +2,7 @@
   "name": "acp-client",
   "displayName": "ACP Client: Universal AI Agent Protocol",
   "description": "Connect VS Code to any AI coding agent via the Agent Client Protocol (ACP). Seamlessly integrate with GitHub Copilot, Claude Code, Gemini, and other ACP-compatible agents.",
-  "version": "0.0.1",
+  "version": "0.2.1",
   "publisher": "damien-huyet",
   "license": "MIT",
   "icon": "resources/icon.png",

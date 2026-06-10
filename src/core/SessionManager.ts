@@ -126,6 +126,11 @@ export class SessionManager extends EventEmitter {
   }
 
   private getWorkspaceCwd(): string {
+    const config = vscode.workspace.getConfiguration('acp');
+    const defaultWorkingDirectory = config.get<string>('defaultWorkingDirectory');
+    if (defaultWorkingDirectory) {
+      return defaultWorkingDirectory;
+    }
     const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     return cwd || process.cwd();
   }
@@ -211,7 +216,7 @@ export class SessionManager extends EventEmitter {
 
       let connInfo: ConnectionInfo;
       try {
-        connInfo = await this.connectionManager.connect(agentId, agentProcess.process);
+        connInfo = await this.connectionManager.connect(agentId, agentProcess.process, this.getWorkspaceCwd());
       } catch (e) {
         this.agentManager.killAgent(agentId);
         throw e;
@@ -693,7 +698,7 @@ export class SessionManager extends EventEmitter {
 
     let connInfo: ConnectionInfo;
     try {
-      connInfo = await this.connectionManager.connect(agentId, agentProcess.process);
+      connInfo = await this.connectionManager.connect(agentId, agentProcess.process, this.getWorkspaceCwd());
     } catch (e) {
       this.agentManager.killAgent(agentId);
       throw e;

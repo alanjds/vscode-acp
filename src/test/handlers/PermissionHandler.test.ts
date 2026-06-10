@@ -36,11 +36,11 @@ suite('PermissionHandler', () => {
       } as any;
     };
 
-    // Mock getConfiguration to return no auto-approve
+    // Mock getConfiguration to return no auto-approve (default 'ask')
     vscode.workspace.getConfiguration = function(section) {
       return {
         get: (key: string) => {
-          if (key === 'autoApprovePermissions') return 'none';
+          if (key.startsWith('autoApprove.')) return 'ask';
           return undefined;
         }
       } as any;
@@ -49,7 +49,7 @@ suite('PermissionHandler', () => {
     const handler = new PermissionHandler();
     
     const params = {
-      toolCall: { title: 'Test Permission' },
+      toolCall: { title: 'Test Permission', kind: 'read' },
       options: [
         { optionId: 'allow_once', name: 'Allow once', kind: 'allow_once' },
         { optionId: 'deny', name: 'Deny', kind: 'deny' }
@@ -75,7 +75,7 @@ suite('PermissionHandler', () => {
     assert.deepStrictEqual(callOrder, [0, 1, 2]);
   });
 
-  test('autoApprove with allowAll skips prompt', async () => {
+  test('autoApprove with allow for read skips prompt', async () => {
     let promptCalled = false;
 
     vscode.window.showQuickPick = async function() {
@@ -86,7 +86,7 @@ suite('PermissionHandler', () => {
     vscode.workspace.getConfiguration = function(section) {
       return {
         get: (key: string) => {
-          if (key === 'autoApprovePermissions') return 'allowAll';
+          if (key === 'autoApprove.read') return 'allow';
           return undefined;
         }
       } as any;
@@ -95,7 +95,7 @@ suite('PermissionHandler', () => {
     const handler = new PermissionHandler();
     
     const params = {
-      toolCall: { title: 'Test Permission' },
+      toolCall: { title: 'Test Permission', kind: 'read' },
       options: [
         { optionId: 'allow_once', name: 'Allow once', kind: 'allow_once' },
         { optionId: 'deny', name: 'Deny', kind: 'deny' },
@@ -112,15 +112,18 @@ suite('PermissionHandler', () => {
     assert.strictEqual(result.outcome.optionId, 'allow_once');
   });
 
-  test('cancelled permission returns cancelled outcome', async () => {
+  test('autoApprove with allow for edit skips prompt', async () => {
+    let promptCalled = false;
+
     vscode.window.showQuickPick = async function() {
-      return undefined; // User cancelled
+      promptCalled = true;
+      return undefined;
     };
 
     vscode.workspace.getConfiguration = function(section) {
       return {
         get: (key: string) => {
-          if (key === 'autoApprovePermissions') return 'none';
+          if (key === 'autoApprove.edit') return 'allow';
           return undefined;
         }
       } as any;
@@ -129,7 +132,111 @@ suite('PermissionHandler', () => {
     const handler = new PermissionHandler();
     
     const params = {
-      toolCall: { title: 'Test Permission' },
+      toolCall: { title: 'Test Permission', kind: 'edit' },
+      options: [
+        { optionId: 'allow_once', name: 'Allow once', kind: 'allow_once' },
+        { optionId: 'deny', name: 'Deny', kind: 'deny' }
+      ]
+    };
+
+    const result = await handler.requestPermission(params);
+
+    assert.strictEqual(promptCalled, false);
+    assert.strictEqual(result.outcome.outcome, 'selected');
+    assert.strictEqual(result.outcome.optionId, 'allow_once');
+  });
+
+  test('autoApprove with allow for execute skips prompt', async () => {
+    let promptCalled = false;
+
+    vscode.window.showQuickPick = async function() {
+      promptCalled = true;
+      return undefined;
+    };
+
+    vscode.workspace.getConfiguration = function(section) {
+      return {
+        get: (key: string) => {
+          if (key === 'autoApprove.execute') return 'allow';
+          return undefined;
+        }
+      } as any;
+    };
+
+    const handler = new PermissionHandler();
+    
+    const params = {
+      toolCall: { title: 'Test Permission', kind: 'execute' },
+      options: [
+        { optionId: 'allow_once', name: 'Allow once', kind: 'allow_once' },
+        { optionId: 'deny', name: 'Deny', kind: 'deny' }
+      ]
+    };
+
+    const result = await handler.requestPermission(params);
+
+    assert.strictEqual(promptCalled, false);
+    assert.strictEqual(result.outcome.outcome, 'selected');
+    assert.strictEqual(result.outcome.optionId, 'allow_once');
+  });
+
+  test('autoApprove with ask shows prompt', async () => {
+    let promptCalled = false;
+
+    vscode.window.showQuickPick = async function() {
+      promptCalled = true;
+      return {
+        label: 'Allow',
+        optionId: 'allow_once',
+        description: 'allow_once'
+      } as any;
+    };
+
+    vscode.workspace.getConfiguration = function(section) {
+      return {
+        get: (key: string) => {
+          if (key.startsWith('autoApprove.')) return 'ask';
+          return undefined;
+        }
+      } as any;
+    };
+
+    const handler = new PermissionHandler();
+    
+    const params = {
+      toolCall: { title: 'Test Permission', kind: 'read' },
+      options: [
+        { optionId: 'allow_once', name: 'Allow once', kind: 'allow_once' },
+        { optionId: 'deny', name: 'Deny', kind: 'deny' }
+      ]
+    };
+
+    const result = await handler.requestPermission(params);
+
+    // Should have shown prompt
+    assert.strictEqual(promptCalled, true);
+    assert.strictEqual(result.outcome.outcome, 'selected');
+    assert.strictEqual(result.outcome.optionId, 'allow_once');
+  });
+
+  test('cancelled permission returns cancelled outcome', async () => {
+    vscode.window.showQuickPick = async function() {
+      return undefined; // User cancelled
+    };
+
+    vscode.workspace.getConfiguration = function(section) {
+      return {
+        get: (key: string) => {
+          if (key.startsWith('autoApprove.')) return 'ask';
+          return undefined;
+        }
+      } as any;
+    };
+
+    const handler = new PermissionHandler();
+    
+    const params = {
+      toolCall: { title: 'Test Permission', kind: 'read' },
       options: [
         { optionId: 'allow_once', name: 'Allow once', kind: 'allow_once' },
         { optionId: 'deny', name: 'Deny', kind: 'deny' }
@@ -153,7 +260,7 @@ suite('PermissionHandler', () => {
     vscode.workspace.getConfiguration = function(section) {
       return {
         get: (key: string) => {
-          if (key === 'autoApprovePermissions') return 'none';
+          if (key.startsWith('autoApprove.')) return 'ask';
           return undefined;
         }
       } as any;
@@ -162,7 +269,7 @@ suite('PermissionHandler', () => {
     const handler = new PermissionHandler();
     
     const params = {
-      toolCall: { title: 'Test Permission' },
+      toolCall: { title: 'Test Permission', kind: 'read' },
       options: [
         { optionId: 'allow_once', name: 'Allow once', kind: 'allow_once' },
         { optionId: 'deny', name: 'Deny', kind: 'deny' }
@@ -183,7 +290,7 @@ suite('PermissionHandler', () => {
     vscode.workspace.getConfiguration = function(section) {
       return {
         get: (key: string) => {
-          if (key === 'autoApprovePermissions') return 'allowAll';
+          if (key === 'autoApprove.edit') return 'allow';
           return undefined;
         }
       } as any;
@@ -192,7 +299,7 @@ suite('PermissionHandler', () => {
     const handler = new PermissionHandler();
     
     const params = {
-      toolCall: { title: 'Test Permission' },
+      toolCall: { title: 'Test Permission', kind: 'edit' },
       options: [
         { optionId: 'deny', name: 'Deny', kind: 'deny' },
         { optionId: 'allow_always', name: 'Always allow', kind: 'allow_always' },

@@ -36,7 +36,7 @@ export function logError(message: string, error?: unknown): void {
 
 export function logTraffic(direction: 'send' | 'recv', data: unknown): void {
   const config = vscode.workspace.getConfiguration('acp');
-  if (!config.get<boolean>('logTraffic', true)) {
+  if (!config.get<boolean>('logTraffic', false)) {
     return;
   }
   const arrow = direction === 'send' ? '>>> CLIENT → AGENT' : '<<< AGENT → CLIENT';

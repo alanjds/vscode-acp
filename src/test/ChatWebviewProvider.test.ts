@@ -48,6 +48,7 @@ suite('ChatWebviewProvider', () => {
         },
       },
     };
+    (provider as any).isViewReady = true;
 
     return { provider, sentPrompts, recordedPrompts, messages, touchedSessions };
   }

@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { marked } from 'marked';
 import type { SessionNotification } from '@agentclientprotocol/sdk';
 
@@ -422,16 +423,16 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
         '**/{node_modules,.git,dist,out}/**',
         FILE_SEARCH_LIMIT,
       );
-      const results = uris.map(uri => {
+      const results = disambiguateFileSearchResults(uris.map(uri => {
         const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
         const relativePath = workspaceFolder
-          ? vscode.workspace.asRelativePath(uri, false).replace(/\\/g, '/')
+          ? path.relative(workspaceFolder.uri.fsPath, uri.fsPath).replace(/\\/g, '/')
           : uri.fsPath.replace(/\\/g, '/');
         return {
           path: relativePath,
           name: uri.fsPath.split(/[\\/]/).pop() || relativePath,
         };
-      });
+      }));
 
       this.postMessage({ type: 'fileSearchResults', requestId, results });
     } catch (e: any) {
@@ -622,4 +623,41 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
   private async getHtmlContent(webview: vscode.Webview): Promise<string> {
     return getReactShellHtmlContent(this.extensionUri, webview, 'chat');
   }
+}
+
+function disambiguateFileSearchResults(
+  results: Array<{ path: string; name: string }>,
+): Array<{ path: string; name: string }> {
+  const byName = new Map<string, Array<{ path: string; name: string }>>();
+  for (const result of results) {
+    const bucket = byName.get(result.name) ?? [];
+    bucket.push(result);
+    byName.set(result.name, bucket);
+  }
+
+  return results.map(result => {
+    const duplicates = byName.get(result.name) ?? [];
+    if (duplicates.length <= 1) {
+      return result;
+    }
+    return {
+      ...result,
+      name: shortestUniqueSuffix(result.path, duplicates.map(candidate => candidate.path)),
+    };
+  });
+}
+
+function shortestUniqueSuffix(pathValue: string, allPaths: string[]): string {
+  const parts = pathValue.split('/').filter(Boolean);
+  for (let count = 1; count <= parts.length; count += 1) {
+    const suffix = parts.slice(parts.length - count).join('/');
+    const matches = allPaths.filter(candidate => {
+      const candidateParts = candidate.split('/').filter(Boolean);
+      return candidateParts.slice(candidateParts.length - count).join('/') === suffix;
+    });
+    if (matches.length === 1) {
+      return suffix;
+    }
+  }
+  return pathValue;
 }

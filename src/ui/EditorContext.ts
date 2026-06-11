@@ -138,6 +138,9 @@ export function captureEditorContext(
   }
 
   const { document, selection } = editor;
+  if (document.uri.scheme && document.uri.scheme !== 'file') {
+    return null;
+  }
 
   return {
     filePath: document.uri.fsPath,

@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 
 import { getAgentNames } from '../config/AgentConfig';
 import { fetchRegistry } from '../config/RegistryClient';
+import { classifyAgentError } from '../core/AgentError';
 import { SessionHistoryStore } from '../core/SessionHistoryStore';
 import { SessionManager } from '../core/SessionManager';
 import { ChatWebviewProvider } from '../ui/ChatWebviewProvider';
@@ -75,7 +76,7 @@ export function registerCommands({
       );
     } catch (e: any) {
       logError('Failed to connect to agent', e);
-      vscode.window.showErrorMessage(`Failed to connect: ${e.message}`);
+      await showClassifiedAgentError('Failed to connect', e);
     }
   });
 
@@ -160,7 +161,7 @@ export function registerCommands({
       );
       vscode.window.showInformationMessage(`Restarted ${agentName}`);
     } catch (e: any) {
-      vscode.window.showErrorMessage(`Failed to restart: ${e.message}`);
+      await showClassifiedAgentError('Failed to restart', e);
     }
   });
 
@@ -267,7 +268,7 @@ export function registerCommands({
       }
     } catch (e: any) {
       logError('Failed to open session', e);
-      vscode.window.showErrorMessage(`Failed to open session: ${e.message}`);
+      await showClassifiedAgentError('Failed to open session', e);
     }
   });
 
@@ -416,4 +417,18 @@ export function registerCommands({
     disableEditorContextLinkCmd,
     browseRegistryCmd,
   ];
+}
+
+async function showClassifiedAgentError(title: string, error: unknown): Promise<void> {
+  const classified = classifyAgentError(error);
+  const choice = await vscode.window.showErrorMessage(
+    `${title}: ${classified.message}`,
+    'Show Log',
+    'Open Settings',
+  );
+  if (choice === 'Show Log') {
+    getOutputChannel().show();
+  } else if (choice === 'Open Settings') {
+    await vscode.commands.executeCommand('workbench.action.openSettings', 'acp');
+  }
 }

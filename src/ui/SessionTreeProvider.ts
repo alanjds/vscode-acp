@@ -2,6 +2,12 @@ import * as vscode from 'vscode';
 import type { SessionInfo as ProtocolSessionInfo } from '@agentclientprotocol/sdk';
 import { SessionManager, AgentCapabilitySummary } from '../core/SessionManager';
 import { SessionHistoryStore, PersistedSessionEntry } from '../core/SessionHistoryStore';
+import { classifyAgentError } from '../core/AgentError';
+import {
+  resolveWorkspaceIdentity,
+  type WorkspaceIdentity,
+  workspaceIdentityFromCwd,
+} from '../core/WorkspaceIdentity';
 import { getAgentNames } from '../config/AgentConfig';
 import { isPipelineVirtualAgentName } from '../config/PipelineConfig';
 import { log, logError } from '../utils/Logger';
@@ -124,6 +130,7 @@ export class InfoTreeItem extends vscode.TreeItem {
 
 type AgentNode = AgentTreeItem;
 type ChildNode = SessionTreeItem | InfoTreeItem;
+type WorkspaceIdentityProvider = () => WorkspaceIdentity | string | undefined;
 
 interface AgentListState {
   state: 'idle' | 'loading' | 'ready' | 'error' | 'unsupported' | 'auth-required';
@@ -153,7 +160,7 @@ export class SessionTreeProvider implements vscode.TreeDataProvider<AgentNode | 
   constructor(
     private readonly sessionManager: SessionManager,
     private readonly historyStore: SessionHistoryStore | null,
-    private readonly workspaceCwd: () => string | undefined,
+    private readonly workspaceIdentityProvider: WorkspaceIdentityProvider,
   ) {
     this.sessionManager.on('agent-connected', () => this.refresh());
     this.sessionManager.on('agent-disconnected', () => this.refresh());
@@ -208,7 +215,7 @@ export class SessionTreeProvider implements vscode.TreeDataProvider<AgentNode | 
       }
 
       const caps = this.sessionManager.getCachedCapabilities(name);
-      const localCount = this.historyStore?.list(name, this.workspaceCwd()).length ?? 0;
+      const localCount = this.historyStore?.list(name, this.getWorkspaceIdentity()).length ?? 0;
       const collapsibleState = this.computeCollapsibleState(name, caps, localCount);
       return new AgentTreeItem(
         name,
@@ -341,7 +348,7 @@ export class SessionTreeProvider implements vscode.TreeDataProvider<AgentNode | 
     this.refresh();
     try {
       const result = await this.sessionManager.listSessions(agentName, {
-        cwd: this.workspaceCwd(),
+        cwd: this.getWorkspaceIdentity().cwd,
       });
       this.listStates.set(agentName, {
         state: 'ready',
@@ -350,11 +357,12 @@ export class SessionTreeProvider implements vscode.TreeDataProvider<AgentNode | 
       });
     } catch (e: any) {
       const message = String(e?.message || 'Unknown error');
+      const classified = classifyAgentError(e);
       logError(`Failed to list sessions for ${agentName}`, e);
-      if (/auth|authentication/i.test(message) || /cancelled/i.test(message)) {
+      if (classified.kind === 'auth-cancelled' || /auth|authentication/i.test(message) || /cancelled/i.test(message)) {
         this.listStates.set(agentName, { state: 'auth-required' });
       } else {
-        this.listStates.set(agentName, { state: 'error', error: message });
+        this.listStates.set(agentName, { state: 'error', error: `${message}\n${classified.actionHint}` });
       }
     } finally {
       this.refresh();
@@ -370,7 +378,7 @@ export class SessionTreeProvider implements vscode.TreeDataProvider<AgentNode | 
     this.refresh();
     try {
       const result = await this.sessionManager.listSessions(agentName, {
-        cwd: this.workspaceCwd(),
+        cwd: this.getWorkspaceIdentity().cwd,
         cursor,
       });
       const prev = state.agentSessions ?? [];
@@ -406,8 +414,8 @@ export class SessionTreeProvider implements vscode.TreeDataProvider<AgentNode | 
         ),
       ];
     }
-    const cwd = this.workspaceCwd();
-    const entries = this.historyStore.list(agentName, cwd);
+    const workspace = this.getWorkspaceIdentity();
+    const entries = this.historyStore.list(agentName, workspace);
     if (entries.length === 0) {
       return [
         new InfoTreeItem(
@@ -462,12 +470,21 @@ export class SessionTreeProvider implements vscode.TreeDataProvider<AgentNode | 
       return { kind: 'ok', caps };
     } catch (e: any) {
       const msg = String(e?.message || e);
+      const classified = classifyAgentError(e);
       logError(`Capability probe failed for ${agentName}`, e);
-      if (/cancelled/i.test(msg)) {
+      if (classified.kind === 'auth-cancelled' || /cancelled/i.test(msg)) {
         return { kind: 'auth-cancelled' };
       }
-      return { kind: 'error', message: msg };
+      return { kind: 'error', message: `${msg}\n${classified.actionHint}` };
     }
+  }
+
+  private getWorkspaceIdentity(): WorkspaceIdentity {
+    const value = this.workspaceIdentityProvider();
+    if (!value) {
+      return resolveWorkspaceIdentity();
+    }
+    return typeof value === 'string' ? workspaceIdentityFromCwd(value) : value;
   }
 
   // --- Info-leaf factories ---

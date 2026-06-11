@@ -14,8 +14,10 @@ A [Visual Studio Code extension](https://marketplace.visualstudio.com/items?item
 - **Per-Agent Session List**: Each agent in the Agents view is expandable into its previous sessions. Click a session to restore its history in the chat. Backed by `session/list` when the agent supports it, or by a local per-workspace cache otherwise.
 - **Session Config Options**: Dynamic per-session selectors (mode, model, reasoning level, …) advertised by the agent are rendered automatically in the composer toolbar.
 - **Interactive Chat**: Built-in chat panel with Markdown rendering, inline tool call display, and collapsible tool sections
+- **A2A Planning Pipeline**: Optional virtual agents can ask one ACP agent to produce a plan and another ACP agent to implement the approved plan.
 - **Thinking Display**: See agent reasoning in a collapsible block with streaming animation and elapsed time
 - **Slash Commands**: Autocomplete popup for agent-provided commands with keyboard navigation
+- **File Mentions**: Type `@` in the composer to search workspace files and send precise relative-path references to agents.
 - **Mode & Model Picker**: Switch agent modes and models directly from the chat toolbar (kept for agents that haven't migrated to Session Config Options yet)
 - **File System Integration**: Agents can read and write files in your workspace
 - **Terminal Execution**: Agents can run commands with terminal output display
@@ -67,6 +69,26 @@ You can add custom agent configurations in settings.
 | `acp.autoApprovePermissions` | `ask` | How agent permission requests are handled: `ask` or `allowAll`. |
 | `acp.defaultWorkingDirectory` | `""` | Default working directory for agent sessions. Empty uses current workspace. |
 | `acp.logTraffic` | `true` | Log all ACP protocol traffic to the ACP Traffic output channel. |
+| `acp.pipeline.enabled` | `true` | Enable synthetic pipeline agents in the Agents view. |
+| `acp.pipeline.virtualAgentName` | `Codex Plan -> Vibe Implement` | Display name for the Codex-backed pipeline virtual agent. |
+| `acp.pipeline.plannerAgentName` | `Codex CLI` | Configured ACP agent used to generate the implementation plan. |
+| `acp.pipeline.implementerAgentName` | `Vibe` | Configured ACP agent used to implement the approved plan. |
+| `acp.pipeline.geminiVirtualAgentName` | `Gemini Plan -> Vibe Implement` | Display name for the Gemini-backed pipeline virtual agent. |
+| `acp.pipeline.geminiPlannerAgentName` | `Gemini CLI` | Configured ACP agent used to generate the Gemini pipeline plan. |
+| `acp.pipeline.geminiImplementerAgentName` | `Vibe` | Configured ACP agent used to implement the approved Gemini pipeline plan. |
+
+## Pipeline A2A Workflow
+
+When `acp.pipeline.enabled` is true, the Agents view includes virtual pipeline agents such as `Codex Plan -> Vibe Implement` and `Gemini Plan -> Vibe Implement`.
+
+1. Connect to a pipeline virtual agent.
+2. Send a normal prompt.
+3. The planner agent creates exactly one proposed plan.
+4. Review or edit the plan in the chat.
+5. Approve the plan to send it to the implementer agent.
+6. The implementer agent performs the workspace changes through ACP.
+
+The pipeline runs local A2A JSON-RPC servers on `127.0.0.1` and bridges them to the configured ACP agents. See [docs/pipeline-a2a.md](docs/pipeline-a2a.md) for setup details, failure modes, and troubleshooting.
 
 ## Commands
 
@@ -151,7 +173,7 @@ Communication with agents uses the ACP protocol (JSON-RPC 2.0 over stdio).
 
 - Agents must be available via the system PATH or `npx`
 - Some agents may require additional authentication setup
-- File attachment feature is not yet functional
+- Pipeline virtual agents require both planner and implementer agents to be configured in `acp.agents`
 
 ## Links
 

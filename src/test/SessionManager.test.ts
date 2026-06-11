@@ -1,6 +1,7 @@
 import * as assert from 'assert';
 
 import { SessionManager } from '../core/SessionManager';
+import { workspaceIdentityFromCwd } from '../core/WorkspaceIdentity';
 
 function createManager() {
   const agentManager = {
@@ -49,6 +50,7 @@ function createManager() {
     agentManager as any,
     connectionManager as any,
     sessionUpdateHandler as any,
+    () => workspaceIdentityFromCwd('/test'),
   );
 
   manager.setTestConfigs({
@@ -60,6 +62,8 @@ function createManager() {
   });
 
   const historyCalls: Array<{ agentName: string; sessionId: string; title: string | null | undefined }> = [];
+  const historyStatusCalls: Array<{ agentName: string; sessionId: string; status: string }> = [];
+  const agentStatusCalls: Array<{ agentName: string; status: string }> = [];
   (manager as any).historyStore = {
     setTitle: (agentName: string, sessionId: string, title: string | null | undefined) => {
       historyCalls.push({ agentName, sessionId, title });
@@ -68,10 +72,18 @@ function createManager() {
     touch: () => undefined,
     upsertNew: () => undefined,
     reconcileFromAgent: () => undefined,
+    markStatus: (agentName: string, sessionId: string, status: string) => {
+      historyStatusCalls.push({ agentName, sessionId, status });
+      return true;
+    },
+    markAgentStatus: (agentName: string, status: string) => {
+      agentStatusCalls.push({ agentName, status });
+      return 1;
+    },
     forget: () => undefined,
   };
 
-  return { manager, historyCalls };
+  return { manager, historyCalls, historyStatusCalls, agentStatusCalls };
 }
 
 function registerSession(manager: SessionManager, partial: Partial<any> & { sessionId: string; agentName: string }) {
@@ -695,6 +707,67 @@ suite('SessionManager', () => {
     assert.strictEqual(manager.getActiveSessionId(), 's1');
     assert.strictEqual((manager as any).agentSessions.get('test-agent'), 's1');
     // historyCalls for resume is touch, which we don't track currently in the mock
+  });
+
+  test('loadSession marks not-found sessions as missing without forgetting them', async () => {
+    const { manager, historyStatusCalls } = createManager();
+
+    (manager as any).capabilities.set('test-agent', { list: false, load: true, resume: false });
+    (manager as any).connectionManager.connect = async () => ({
+      connection: {
+        loadSession: async () => {
+          throw new Error('unknown session');
+        },
+      },
+      initResponse: {
+        agentInfo: { name: 'test-agent', title: 'Test Agent' },
+        agentCapabilities: {
+          sessionCapabilities: { load: true },
+          loadSession: true,
+        },
+        protocolVersion: '0.2.0',
+      },
+    });
+    (manager as any).findAgentIdForConnection = () => 'agent-1';
+
+    await assert.rejects(
+      () => manager.loadSession('test-agent', 'missing-session'),
+      /unknown session/,
+    );
+
+    assert.deepStrictEqual(historyStatusCalls, [
+      { agentName: 'test-agent', sessionId: 'missing-session', status: 'missing' },
+    ]);
+  });
+
+  test('resumeSession marks not-found sessions as missing without forgetting them', async () => {
+    const { manager, historyStatusCalls } = createManager();
+
+    (manager as any).capabilities.set('test-agent', { list: false, load: false, resume: true });
+    (manager as any).connectionManager.connect = async () => ({
+      connection: {
+        resumeSession: async () => {
+          throw new Error('session not found');
+        },
+      },
+      initResponse: {
+        agentInfo: { name: 'test-agent', title: 'Test Agent' },
+        agentCapabilities: {
+          sessionCapabilities: { resume: true },
+        },
+        protocolVersion: '0.2.0',
+      },
+    });
+    (manager as any).findAgentIdForConnection = () => 'agent-1';
+
+    await assert.rejects(
+      () => manager.resumeSession('test-agent', 'missing-session'),
+      /session not found/,
+    );
+
+    assert.deepStrictEqual(historyStatusCalls, [
+      { agentName: 'test-agent', sessionId: 'missing-session', status: 'missing' },
+    ]);
   });
 
   // ============ Pipeline agent tests ============

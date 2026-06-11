@@ -1,19 +1,32 @@
 import * as vscode from 'vscode';
+import {
+  type WorkspaceIdentity,
+  normalizeWorkspaceKey,
+  workspaceIdentityFromCwd,
+} from './WorkspaceIdentity';
 
 /**
- * Persistent client-side cache of past sessions per agent. Used to render the
- * tree-tier-2 (sessions under an agent) for agents that support
- * `session/load` or `session/resume` but do NOT advertise the experimental
- * `session/list` capability.
- *
- * When the agent supports `session/list`, that is the source of truth and
- * this store is NOT consulted (to avoid divergence).
+ * Lifecycle status for locally-known sessions. The tree view hides stale
+ * statuses by default, but keeping them prevents silent data loss.
+ */
+export type PersistedSessionStatus =
+  | 'available'
+  | 'missing'
+  | 'agentUnavailable'
+  | 'agentRemoved';
+
+/**
+ * Persistent client-side cache of past sessions per workspace + agent.
  */
 export interface PersistedSessionEntry {
-  /** Agent name (as configured by the user). */
-  agentName: string;
+  /** Stable normalized workspace key. */
+  workspaceKey: string;
   /** Working directory the session was created in. */
   cwd: string;
+  /** Agent name (as configured by the user). */
+  agentName: string;
+  /** Lightweight fingerprint of the agent configuration at observation time. */
+  agentFingerprint?: string;
   /** Session ID issued by the agent. */
   sessionId: string;
   /** Title supplied via `session_info_update`, if any. */
@@ -24,25 +37,46 @@ export interface PersistedSessionEntry {
   createdAt: string;
   /** ISO timestamp of the most recent activity (prompt end / update). */
   lastActiveAt: string;
+  /** Availability status of the local record. */
+  status: PersistedSessionStatus;
 }
 
-/**
- * Versioned shape of the persisted state, so we can migrate later if needed.
- */
-interface PersistedShape {
+interface PersistedSessionEntryV1 {
+  agentName: string;
+  cwd: string;
+  sessionId: string;
+  title?: string;
+  firstPrompt?: string;
+  createdAt: string;
+  lastActiveAt: string;
+}
+
+interface PersistedShapeV1 {
   version: 1;
+  entries: PersistedSessionEntryV1[];
+}
+
+interface PersistedShapeV2 {
+  version: 2;
   entries: PersistedSessionEntry[];
 }
 
-const STATE_KEY = 'acp.sessionHistory.v1';
+const STATE_KEY_V1 = 'acp.sessionHistory.v1';
+const STATE_KEY_V2 = 'acp.sessionHistory.v2';
 const MAX_PROMPT_LEN = 120;
-const DEFAULT_CAP_PER_AGENT = 50;
+const DEFAULT_CAP_PER_AGENT_WORKSPACE = 50;
+const DEFAULT_VISIBLE_STATUSES = new Set<PersistedSessionStatus>(['available']);
+
+export interface SessionHistoryListOptions {
+  includeStatuses?: readonly PersistedSessionStatus[];
+}
+
+type WorkspaceFilter = string | WorkspaceIdentity | undefined;
 
 /**
  * Wraps `workspaceState` storage of {@link PersistedSessionEntry}. Entries are
- * scoped to the current workspace because we filter `session/list` (and our
- * own cache) by the workspace `cwd` — sessions from other workspaces aren't
- * relevant in this view.
+ * scoped by a normalized workspace key so multi-root/default-directory flows
+ * use the same identity everywhere.
  */
 export class SessionHistoryStore {
   private entries: PersistedSessionEntry[] = [];
@@ -52,51 +86,87 @@ export class SessionHistoryStore {
 
   constructor(
     private readonly workspaceState: vscode.Memento,
-    private readonly capPerAgent: number = DEFAULT_CAP_PER_AGENT,
+    private readonly capPerAgentWorkspace: number = DEFAULT_CAP_PER_AGENT_WORKSPACE,
   ) {
-    const raw = this.workspaceState.get<PersistedShape>(STATE_KEY);
-    if (raw && raw.version === 1 && Array.isArray(raw.entries)) {
-      this.entries = raw.entries;
+    const rawV2 = this.workspaceState.get<PersistedShapeV2>(STATE_KEY_V2);
+    if (rawV2 && rawV2.version === 2 && Array.isArray(rawV2.entries)) {
+      this.entries = rawV2.entries.map(normalizeV2Entry).filter(isPersistedEntry);
+      return;
+    }
+
+    const rawV1 = this.workspaceState.get<PersistedShapeV1>(STATE_KEY_V1);
+    if (rawV1 && rawV1.version === 1 && Array.isArray(rawV1.entries)) {
+      this.entries = rawV1.entries.map(migrateV1Entry);
+      this.persist(false);
     }
   }
 
   /**
-   * Get entries for a given agent + (optional) workspace cwd, sorted by
-   * `lastActiveAt` descending. When `cwd` is omitted all workspace entries
-   * for the agent are returned.
+   * Get entries for a given agent + optional workspace, sorted by
+   * `lastActiveAt` descending. By default only available sessions are shown.
    */
-  list(agentName: string, cwd?: string): PersistedSessionEntry[] {
+  list(
+    agentName: string,
+    workspace?: WorkspaceFilter,
+    options: SessionHistoryListOptions = {},
+  ): PersistedSessionEntry[] {
+    const workspaceKey = workspaceKeyFromFilter(workspace);
+    const statuses = new Set(options.includeStatuses ?? DEFAULT_VISIBLE_STATUSES);
     return this.entries
-      .filter(e => e.agentName === agentName && (!cwd || e.cwd === cwd))
+      .filter(e => e.agentName === agentName)
+      .filter(e => !workspaceKey || e.workspaceKey === workspaceKey || normalizeWorkspaceKey(e.cwd) === workspaceKey)
+      .filter(e => statuses.has(e.status))
       .sort((a, b) => (b.lastActiveAt || '').localeCompare(a.lastActiveAt || ''));
   }
 
-  /** Look up a specific entry by agent + session id. */
-  get(agentName: string, sessionId: string): PersistedSessionEntry | undefined {
-    return this.entries.find(e => e.agentName === agentName && e.sessionId === sessionId);
+  /** Look up a specific entry by agent + session id, optionally scoped to a workspace. */
+  get(
+    agentName: string,
+    sessionId: string,
+    workspace?: WorkspaceFilter,
+  ): PersistedSessionEntry | undefined {
+    const workspaceKey = workspaceKeyFromFilter(workspace);
+    return this.entries.find(e =>
+      e.agentName === agentName
+      && e.sessionId === sessionId
+      && (!workspaceKey || e.workspaceKey === workspaceKey || normalizeWorkspaceKey(e.cwd) === workspaceKey),
+    );
   }
 
   /**
-   * Insert (or no-op if present) a new session entry. Called when the client
-   * successfully creates a session via `session/new`.
+   * Insert a new session entry or refresh an existing one. Called when the
+   * client successfully creates a session via `session/new`.
    */
-  upsertNew(agentName: string, cwd: string, sessionId: string): void {
-    const existing = this.get(agentName, sessionId);
+  upsertNew(
+    agentName: string,
+    workspace: string | WorkspaceIdentity,
+    sessionId: string,
+    agentFingerprint?: string,
+  ): void {
+    const identity = identityFromWorkspace(workspace);
+    const existing = this.get(agentName, sessionId, identity);
     if (existing) {
-      // Refresh lastActiveAt so it floats to the top on re-render.
+      existing.workspaceKey = identity.key;
+      existing.cwd = identity.cwd;
+      existing.agentFingerprint = agentFingerprint ?? existing.agentFingerprint;
+      existing.status = 'available';
       existing.lastActiveAt = new Date().toISOString();
       this.persist();
       return;
     }
+
     const now = new Date().toISOString();
     this.entries.push({
+      workspaceKey: identity.key,
+      cwd: identity.cwd,
       agentName,
-      cwd,
+      agentFingerprint,
       sessionId,
       createdAt: now,
       lastActiveAt: now,
+      status: 'available',
     });
-    this.enforceCap(agentName);
+    this.enforceCap(agentName, identity.key);
     this.persist();
   }
 
@@ -120,15 +190,40 @@ export class SessionHistoryStore {
     this.persist();
   }
 
-  /** Bump `lastActiveAt` to now. Called on prompt end / session update. */
+  /** Bump `lastActiveAt` to now and mark the local record available again. */
   touch(agentName: string, sessionId: string): void {
     const entry = this.get(agentName, sessionId);
     if (!entry) { return; }
+    entry.status = 'available';
     entry.lastActiveAt = new Date().toISOString();
     this.persist();
   }
 
-  /** Remove a single entry (e.g. after a failed `session/load`). */
+  markStatus(agentName: string, sessionId: string, status: PersistedSessionStatus): boolean {
+    const entry = this.get(agentName, sessionId);
+    if (!entry) { return false; }
+    if (entry.status === status) { return true; }
+    entry.status = status;
+    entry.lastActiveAt = new Date().toISOString();
+    this.persist();
+    return true;
+  }
+
+  markAgentStatus(agentName: string, status: PersistedSessionStatus): number {
+    let changed = 0;
+    for (const entry of this.entries) {
+      if (entry.agentName !== agentName || entry.status === status) {
+        continue;
+      }
+      entry.status = status;
+      entry.lastActiveAt = new Date().toISOString();
+      changed += 1;
+    }
+    if (changed > 0) { this.persist(); }
+    return changed;
+  }
+
+  /** Remove a single entry only after explicit user intent. */
   forget(agentName: string, sessionId: string): boolean {
     const before = this.entries.length;
     this.entries = this.entries.filter(
@@ -141,7 +236,7 @@ export class SessionHistoryStore {
     return false;
   }
 
-  /** Remove every entry for an agent. */
+  /** Remove every entry for an agent only after explicit user intent. */
   forgetAgent(agentName: string): number {
     const before = this.entries.length;
     this.entries = this.entries.filter(e => e.agentName !== agentName);
@@ -151,38 +246,100 @@ export class SessionHistoryStore {
   }
 
   /**
-   * Reconcile against an agent-provided list (called only when the agent
-   * supports `session/list`). Keeps the local store consistent with the
-   * agent for future use, but the tree itself uses the agent's list directly.
+   * Reconcile against an agent-provided list. Unknown sessions are marked
+   * missing instead of deleted so local history is not lost silently.
    */
-  reconcileFromAgent(agentName: string, knownSessionIds: Set<string>): void {
+  reconcileFromAgent(
+    agentName: string,
+    knownSessionIds: Set<string>,
+    workspace?: WorkspaceFilter,
+  ): void {
+    const workspaceKey = workspaceKeyFromFilter(workspace);
     let changed = false;
-    this.entries = this.entries.filter(e => {
-      if (e.agentName !== agentName) { return true; }
-      if (knownSessionIds.has(e.sessionId)) { return true; }
-      changed = true;
-      return false;
-    });
+    for (const entry of this.entries) {
+      if (entry.agentName !== agentName) { continue; }
+      if (workspaceKey && entry.workspaceKey !== workspaceKey && normalizeWorkspaceKey(entry.cwd) !== workspaceKey) {
+        continue;
+      }
+      const nextStatus: PersistedSessionStatus = knownSessionIds.has(entry.sessionId)
+        ? 'available'
+        : 'missing';
+      if (entry.status !== nextStatus) {
+        entry.status = nextStatus;
+        changed = true;
+      }
+    }
     if (changed) { this.persist(); }
   }
 
-  private enforceCap(agentName: string): void {
-    const forAgent = this.list(agentName);
-    if (forAgent.length <= this.capPerAgent) { return; }
-    const surplus = forAgent.slice(this.capPerAgent);
+  private enforceCap(agentName: string, workspaceKey: string): void {
+    const forAgentWorkspace = this.list(agentName, workspaceKey, {
+      includeStatuses: ['available', 'missing', 'agentUnavailable', 'agentRemoved'],
+    });
+    if (forAgentWorkspace.length <= this.capPerAgentWorkspace) { return; }
+    const surplus = forAgentWorkspace.slice(this.capPerAgentWorkspace);
     const stale = new Set(surplus.map(e => e.sessionId));
     this.entries = this.entries.filter(
-      e => !(e.agentName === agentName && stale.has(e.sessionId)),
+      e => !(e.agentName === agentName && e.workspaceKey === workspaceKey && stale.has(e.sessionId)),
     );
   }
 
-  private persist(): void {
-    const payload: PersistedShape = { version: 1, entries: this.entries };
-    void this.workspaceState.update(STATE_KEY, payload);
-    this._onDidChange.fire();
+  private persist(fireEvent = true): void {
+    const payload: PersistedShapeV2 = { version: 2, entries: this.entries };
+    void this.workspaceState.update(STATE_KEY_V2, payload);
+    if (fireEvent) {
+      this._onDidChange.fire();
+    }
   }
 
   dispose(): void {
     this._onDidChange.dispose();
   }
+}
+
+function migrateV1Entry(entry: PersistedSessionEntryV1): PersistedSessionEntry {
+  const identity = workspaceIdentityFromCwd(entry.cwd || process.cwd());
+  return {
+    workspaceKey: identity.key,
+    cwd: identity.cwd,
+    agentName: entry.agentName,
+    sessionId: entry.sessionId,
+    title: entry.title,
+    firstPrompt: entry.firstPrompt,
+    createdAt: entry.createdAt,
+    lastActiveAt: entry.lastActiveAt,
+    status: 'available',
+  };
+}
+
+function normalizeV2Entry(entry: PersistedSessionEntry): PersistedSessionEntry {
+  const identity = workspaceIdentityFromCwd(entry.cwd || process.cwd());
+  return {
+    ...entry,
+    workspaceKey: entry.workspaceKey || identity.key,
+    cwd: entry.cwd || identity.cwd,
+    status: isPersistedStatus(entry.status) ? entry.status : 'available',
+  };
+}
+
+function isPersistedEntry(entry: PersistedSessionEntry): boolean {
+  return Boolean(entry.agentName && entry.cwd && entry.sessionId && entry.workspaceKey);
+}
+
+function isPersistedStatus(value: unknown): value is PersistedSessionStatus {
+  return value === 'available'
+    || value === 'missing'
+    || value === 'agentUnavailable'
+    || value === 'agentRemoved';
+}
+
+function identityFromWorkspace(workspace: string | WorkspaceIdentity): WorkspaceIdentity {
+  return typeof workspace === 'string' ? workspaceIdentityFromCwd(workspace) : workspace;
+}
+
+function workspaceKeyFromFilter(workspace: WorkspaceFilter): string | undefined {
+  if (!workspace) { return undefined; }
+  return typeof workspace === 'string'
+    ? normalizeWorkspaceKey(workspace)
+    : workspace.key;
 }

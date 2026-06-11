@@ -469,6 +469,25 @@ suite('EditorContext', () => {
     assert.strictEqual(result, null);
   });
 
+  test('captureEditorContext with non-file document returns null', () => {
+    const editor = {
+      document: {
+        uri: vscode.Uri.parse('untitled:Untitled-1'),
+        languageId: 'typescript',
+        lineAt: (_line: number) => ({ text: 'const test = 1;' }),
+      },
+      selection: {
+        active: { line: 0, character: 0 },
+        isEmpty: true,
+        start: { line: 0, character: 0 },
+        end: { line: 0, character: 0 },
+      },
+    } as any;
+
+    const result = captureEditorContext(editor);
+    assert.strictEqual(result, null);
+  });
+
   test('multi-line selection extracts exact characters and preserves newlines', () => {
     const editor = {
       document: {

@@ -62,8 +62,9 @@ suite('SessionTreeProvider', () => {
     sm.cachedCaps.set('agent-a', { list: false, load: true, resume: false });
 
     const historyStore = {
-      list: (agentName: string, cwd?: string) => {
-        if (agentName === 'agent-a' && cwd === '/repo') {
+      list: (agentName: string, cwd?: string | { cwd: string }) => {
+        const cwdValue = typeof cwd === 'string' ? cwd : cwd?.cwd;
+        if (agentName === 'agent-a' && cwdValue === '/repo') {
           return [
             {
               agentName: 'agent-a',
@@ -293,8 +294,9 @@ suite('SessionTreeProvider', () => {
     sm.cachedCaps.set('agent-a', { list: true, load: true, resume: false });
 
     const historyStore = {
-      list: (agentName: string, cwd?: string) => {
-        if (agentName === 'agent-a' && cwd === '/repo') {
+      list: (agentName: string, cwd?: string | { cwd: string }) => {
+        const cwdValue = typeof cwd === 'string' ? cwd : cwd?.cwd;
+        if (agentName === 'agent-a' && cwdValue === '/repo') {
           return [
             {
               agentName: 'agent-a',

@@ -19,6 +19,8 @@ import { AgentManager } from './AgentManager';
 import { ConnectionManager, ConnectionInfo } from './ConnectionManager';
 import { SessionUpdateHandler } from '../handlers/SessionUpdateHandler';
 import { SessionHistoryStore } from './SessionHistoryStore';
+import { classifyAgentError } from './AgentError';
+import { resolveWorkspaceIdentity, type WorkspaceIdentity } from './WorkspaceIdentity';
 import { getAgentConfigs } from '../config/AgentConfig';
 import { getPipelineConfig, isPipelineVirtualAgentName } from '../config/PipelineConfig';
 import { PipelineService } from '../pipeline/PipelineService';
@@ -105,6 +107,7 @@ export class SessionManager extends EventEmitter {
     private readonly agentManager: AgentManager,
     private readonly connectionManager: ConnectionManager,
     private readonly sessionUpdateHandler: SessionUpdateHandler,
+    private readonly workspaceIdentityProvider: () => WorkspaceIdentity = resolveWorkspaceIdentity,
   ) {
     super();
   }
@@ -132,14 +135,12 @@ export class SessionManager extends EventEmitter {
     return this.capabilities.get(agentName);
   }
 
+  private getWorkspaceIdentity(): WorkspaceIdentity {
+    return this.workspaceIdentityProvider();
+  }
+
   private getWorkspaceCwd(): string {
-    const config = vscode.workspace.getConfiguration('acp');
-    const defaultWorkingDirectory = config.get<string>('defaultWorkingDirectory');
-    if (defaultWorkingDirectory) {
-      return defaultWorkingDirectory;
-    }
-    const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-    return cwd || process.cwd();
+    return this.getWorkspaceIdentity().cwd;
   }
 
   private summarizeCapabilities(caps: AgentCapabilities | undefined | null): AgentCapabilitySummary {
@@ -198,7 +199,8 @@ export class SessionManager extends EventEmitter {
     const connectStartTime = Date.now();
 
     try {
-      const workspaceCwd = this.getWorkspaceCwd();
+      const workspace = this.getWorkspaceIdentity();
+      const workspaceCwd = workspace.cwd;
 
       // Spawn the agent process in workspace cwd
       const agentInstance = this.agentManager.spawnAgent(agentName, config, workspaceCwd);
@@ -238,7 +240,7 @@ export class SessionManager extends EventEmitter {
 
       let connInfo: ConnectionInfo;
       try {
-        connInfo = await this.connectionManager.connect(agentId, agentProcess.process, this.getWorkspaceCwd());
+        connInfo = await this.connectionManager.connect(agentId, agentProcess.process, workspaceCwd);
       } catch (e) {
         this.agentManager.killAgent(agentId);
         throw e;
@@ -247,7 +249,13 @@ export class SessionManager extends EventEmitter {
       // Create ACP session (with auth handling). The session is already
       // registered in `this.sessions` by createAcpSession so that any
       // notifications arriving during/after newSession can be persisted.
-      const sessionInfo = await this.createAcpSession(agentName, agentId, connInfo, workspaceCwd);
+      const sessionInfo = await this.createAcpSession(
+        agentName,
+        agentId,
+        connInfo,
+        workspace,
+        fingerprintAgentConfig(config),
+      );
 
       this.agentSessions.set(agentName, sessionInfo.sessionId);
       this.activeSessionId = sessionInfo.sessionId;
@@ -259,6 +267,7 @@ export class SessionManager extends EventEmitter {
       sendEvent('agent/connect.end', { agentName, result: 'success' }, { duration: Date.now() - connectStartTime });
       return sessionInfo;
     } catch (e: any) {
+      this.recordAgentConnectionFailure(agentName, e);
       sendError('agent/connect.end', { agentName, result: 'error', errorMessage: e.message || String(e) }, { duration: Date.now() - connectStartTime });
       throw e;
     }
@@ -364,8 +373,10 @@ export class SessionManager extends EventEmitter {
     agentName: string,
     agentId: string,
     connInfo: ConnectionInfo,
-    cwd: string,
+    workspace: WorkspaceIdentity,
+    agentFingerprint?: string,
   ): Promise<SessionInfo> {
+    const cwd = workspace.cwd;
     let sessionResponse: NewSessionResponse;
     try {
       sessionResponse = await connInfo.connection.newSession({
@@ -417,7 +428,7 @@ export class SessionManager extends EventEmitter {
     this.drainPending(sessionInfo);
 
     // Capture in the local history store so it appears in the tree.
-    this.historyStore?.upsertNew(agentName, cwd, sessionInfo.sessionId);
+    this.historyStore?.upsertNew(agentName, workspace, sessionInfo.sessionId, agentFingerprint);
 
     return sessionInfo;
   }
@@ -770,6 +781,7 @@ export class SessionManager extends EventEmitter {
     const configs = this.getConfigs();
     const config = configs[agentName];
     if (!config) {
+      this.historyStore?.markAgentStatus(agentName, 'agentRemoved');
       throw new Error(`Unknown agent: ${agentName}.`);
     }
 
@@ -784,9 +796,10 @@ export class SessionManager extends EventEmitter {
 
     let connInfo: ConnectionInfo;
     try {
-      connInfo = await this.connectionManager.connect(agentId, agentProcess.process, this.getWorkspaceCwd());
+      connInfo = await this.connectionManager.connect(agentId, agentProcess.process, workspaceCwd);
     } catch (e) {
       this.agentManager.killAgent(agentId);
+      this.recordAgentConnectionFailure(agentName, e);
       throw e;
     }
 
@@ -828,12 +841,12 @@ export class SessionManager extends EventEmitter {
     }
 
     const sessions: ProtocolSessionInfo[] = response?.sessions ?? [];
-    // Reconcile the history store — drop any locally-cached entries that
-    // the agent no longer knows about.
+    // Reconcile the history store without deleting missing sessions silently.
     if (this.historyStore && !opts.cursor) {
       this.historyStore.reconcileFromAgent(
         agentName,
         new Set(sessions.map(s => s.sessionId)),
+        opts.cwd,
       );
     }
     return { sessions, nextCursor: response?.nextCursor ?? undefined };
@@ -927,11 +940,11 @@ export class SessionManager extends EventEmitter {
       this.emit('session-load-end', sessionId, agentName, /*ok=*/false);
       this.emit('active-session-changed', null);
 
-      // If the agent says the session is gone, prune from local history so
-      // it doesn't reappear on next refresh.
+      // If the agent says the session is gone, mark it stale but keep the
+      // record for explicit user cleanup.
       const msg = String(e?.message || '');
       if (/not found|no such|unknown session/i.test(msg)) {
-        this.historyStore?.forget(agentName, sessionId);
+        this.historyStore?.markStatus(agentName, sessionId, 'missing');
       }
       throw e;
     }
@@ -986,7 +999,7 @@ export class SessionManager extends EventEmitter {
     } catch (e: any) {
       const msg = String(e?.message || '');
       if (/not found|no such|unknown session/i.test(msg)) {
-        this.historyStore?.forget(agentName, sessionId);
+        this.historyStore?.markStatus(agentName, sessionId, 'missing');
       }
       throw e;
     }
@@ -1084,6 +1097,16 @@ export class SessionManager extends EventEmitter {
     );
   }
 
+  private recordAgentConnectionFailure(agentName: string, error: unknown): void {
+    const classified = classifyAgentError(error);
+    if (classified.kind === 'missing-pipeline-agent') {
+      this.historyStore?.markAgentStatus(agentName, 'agentRemoved');
+    } else if (classified.kind !== 'auth-cancelled') {
+      this.historyStore?.markAgentStatus(agentName, 'agentUnavailable');
+    }
+    this.emit('agent-error', agentName, error);
+  }
+
   // --- Cleanup ---
 
   dispose(): void {
@@ -1091,5 +1114,13 @@ export class SessionManager extends EventEmitter {
     this.connectionManager.dispose();
     this.sessions.clear();
     this.agentSessions.clear();
+  }
+}
+
+function fingerprintAgentConfig(config: unknown): string | undefined {
+  try {
+    return JSON.stringify(config);
+  } catch {
+    return undefined;
   }
 }

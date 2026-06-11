@@ -552,6 +552,52 @@ suite('ChatWebviewProvider', () => {
     }
   });
 
+  test('searchFiles disambiguates duplicate file names with relative suffixes', async () => {
+    const { provider, messages } = await createProvider();
+    messages.length = 0;
+
+    const originalFindFiles = vscode.workspace.findFiles;
+    const originalWorkspaceFolders = vscode.workspace.workspaceFolders;
+    const originalGetWorkspaceFolder = vscode.workspace.getWorkspaceFolder;
+    const workspaceFolder = {
+      uri: vscode.Uri.file(workspaceRoot),
+      name: 'workspace',
+      index: 0,
+    };
+
+    Object.defineProperty(vscode.workspace, 'workspaceFolders', {
+      value: [workspaceFolder],
+      configurable: true,
+    });
+    vscode.workspace.findFiles = async () => [
+      vscode.Uri.file(`${workspaceRoot}/src/a/index.ts`),
+      vscode.Uri.file(`${workspaceRoot}/src/b/index.ts`),
+    ];
+    (vscode.workspace as any).getWorkspaceFolder = () => workspaceFolder;
+
+    try {
+      await (provider as any).handleSearchFiles('index', 7);
+
+      const resultMessage = messages.find(m => m.type === 'fileSearchResults' && m.requestId === 7);
+      assert.ok(resultMessage);
+      assert.deepStrictEqual(
+        resultMessage.results.map((result: any) => result.name),
+        ['a/index.ts', 'b/index.ts'],
+      );
+      assert.deepStrictEqual(
+        resultMessage.results.map((result: any) => result.path),
+        ['src/a/index.ts', 'src/b/index.ts'],
+      );
+    } finally {
+      vscode.workspace.findFiles = originalFindFiles;
+      (vscode.workspace as any).getWorkspaceFolder = originalGetWorkspaceFolder;
+      Object.defineProperty(vscode.workspace, 'workspaceFolders', {
+        value: originalWorkspaceFolders,
+        configurable: true,
+      });
+    }
+  });
+
   test('openFile ignores empty path', async () => {
     const provider = (await createProvider()).provider;
 

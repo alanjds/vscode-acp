@@ -4,6 +4,7 @@ import { AgentManager } from './core/AgentManager';
 import { ConnectionManager } from './core/ConnectionManager';
 import { SessionManager } from './core/SessionManager';
 import { SessionHistoryStore } from './core/SessionHistoryStore';
+import { resolveWorkspaceIdentity } from './core/WorkspaceIdentity';
 import { SessionUpdateHandler } from './handlers/SessionUpdateHandler';
 import { SessionTreeProvider } from './ui/SessionTreeProvider';
 import { StatusBarManager } from './ui/StatusBarManager';
@@ -31,8 +32,8 @@ export function activate(context: vscode.ExtensionContext): void {
     connectionManager,
     sessionUpdateHandler,
   );
-  const workspaceCwd = () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  const pipelineService = new PipelineService(() => workspaceCwd() || process.cwd());
+  const workspaceIdentity = () => resolveWorkspaceIdentity();
+  const pipelineService = new PipelineService(() => workspaceIdentity().cwd);
   sessionManager.setPipelineService(pipelineService);
 
   // Persistent client-side session-history cache (used as the tier-2 tree
@@ -43,7 +44,7 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push({ dispose: () => historyStore.dispose() });
 
   // --- UI ---
-  const sessionTreeProvider = new SessionTreeProvider(sessionManager, historyStore, workspaceCwd);
+  const sessionTreeProvider = new SessionTreeProvider(sessionManager, historyStore, workspaceIdentity);
   const treeView = vscode.window.createTreeView('acp-sessions', {
     treeDataProvider: sessionTreeProvider,
   });

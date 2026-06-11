@@ -5,23 +5,46 @@ import {
   type PersistedSessionEntry,
 } from '../core/SessionHistoryStore';
 
-const STATE_KEY = 'acp.sessionHistory.v1';
+const STATE_KEY_V1 = 'acp.sessionHistory.v1';
+const STATE_KEY_V2 = 'acp.sessionHistory.v2';
 
-type PersistedShape = {
+type PersistedSessionEntryV1 = {
+  agentName: string;
+  cwd: string;
+  sessionId: string;
+  title?: string;
+  firstPrompt?: string;
+  createdAt: string;
+  lastActiveAt: string;
+};
+
+type PersistedShapeV1 = {
   version: 1;
+  entries: PersistedSessionEntryV1[];
+};
+
+type PersistedShapeV2 = {
+  version: 2;
   entries: PersistedSessionEntry[];
 };
 
 class FakeMemento {
   private data = new Map<string, unknown>();
 
-  constructor(initial?: PersistedShape) {
+  constructor(initial?: PersistedShapeV1, initialV2?: PersistedShapeV2) {
     if (initial) {
-      this.data.set(STATE_KEY, initial);
+      this.data.set(STATE_KEY_V1, initial);
+    }
+    if (initialV2) {
+      this.data.set(STATE_KEY_V2, initialV2);
     }
   }
 
   get<T>(key: string): T | undefined {
+    return this.data.get(key) as T | undefined;
+  }
+
+  getStored<T>(key: string): T | undefined {
     return this.data.get(key) as T | undefined;
   }
 
@@ -84,6 +107,8 @@ suite('SessionHistoryStore', () => {
     assert.ok(entry);
     assert.strictEqual(entry?.agentName, 'A');
     assert.strictEqual(entry?.cwd, '/repo');
+    assert.strictEqual(entry?.workspaceKey.endsWith('/repo'), true);
+    assert.strictEqual(entry?.status, 'available');
     assert.strictEqual(events, 1);
   });
 
@@ -246,7 +271,7 @@ suite('SessionHistoryStore', () => {
     assert.strictEqual(store.list('B').length, 1);
   });
 
-  test('reconcileFromAgent prunes unknown sessions for one agent only', () => {
+  test('reconcileFromAgent marks unknown sessions missing for one agent only', () => {
     const memento = new FakeMemento({
       version: 1,
       entries: [
@@ -278,7 +303,103 @@ suite('SessionHistoryStore', () => {
     store.reconcileFromAgent('A', new Set(['keep']));
 
     assert.strictEqual(store.get('A', 'keep')?.sessionId, 'keep');
-    assert.strictEqual(store.get('A', 'drop'), undefined);
+    assert.strictEqual(store.get('A', 'drop')?.status, 'missing');
+    assert.strictEqual(store.list('A').some(e => e.sessionId === 'drop'), false);
     assert.strictEqual(store.get('B', 'other-agent')?.sessionId, 'other-agent');
+  });
+
+  test('loads v2 entries and hides non-available statuses by default', () => {
+    const memento = new FakeMemento(undefined, {
+      version: 2,
+      entries: [
+        {
+          workspaceKey: '/repo',
+          agentName: 'A',
+          cwd: '/repo',
+          sessionId: 'available',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          lastActiveAt: '2026-01-01T00:00:00.000Z',
+          status: 'available',
+        },
+        {
+          workspaceKey: '/repo',
+          agentName: 'A',
+          cwd: '/repo',
+          sessionId: 'missing',
+          createdAt: '2026-01-02T00:00:00.000Z',
+          lastActiveAt: '2026-01-02T00:00:00.000Z',
+          status: 'missing',
+        },
+      ],
+    });
+    const store = new SessionHistoryStore(memento as any);
+
+    assert.deepStrictEqual(store.list('A', '/repo').map(e => e.sessionId), ['available']);
+    assert.deepStrictEqual(
+      store.list('A', '/repo', { includeStatuses: ['available', 'missing'] }).map(e => e.sessionId),
+      ['missing', 'available'],
+    );
+  });
+
+  test('migrates v1 entries into v2 storage', () => {
+    const memento = new FakeMemento({
+      version: 1,
+      entries: [
+        {
+          agentName: 'A',
+          cwd: '/repo',
+          sessionId: 's1',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          lastActiveAt: '2026-01-01T00:00:00.000Z',
+        },
+      ],
+    });
+
+    const store = new SessionHistoryStore(memento as any);
+    const migrated = memento.getStored<PersistedShapeV2>(STATE_KEY_V2);
+
+    assert.ok(migrated);
+    assert.strictEqual(migrated?.version, 2);
+    assert.strictEqual(store.get('A', 's1')?.status, 'available');
+    assert.ok(store.get('A', 's1')?.workspaceKey);
+  });
+
+  test('enforces cap per agent and workspace', () => {
+    const memento = new FakeMemento(undefined, {
+      version: 2,
+      entries: [
+        {
+          workspaceKey: '/repo-one',
+          agentName: 'A',
+          cwd: '/repo-one',
+          sessionId: 'one-old',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          lastActiveAt: '2026-01-01T00:00:00.000Z',
+          status: 'available',
+        },
+      ],
+    });
+    const store = new SessionHistoryStore(memento as any, 1);
+
+    store.upsertNew('A', '/repo-one', 'one-new');
+    store.upsertNew('A', '/repo-two', 'two-only');
+
+    assert.deepStrictEqual(store.list('A', '/repo-one').map(e => e.sessionId), ['one-new']);
+    assert.deepStrictEqual(store.list('A', '/repo-two').map(e => e.sessionId), ['two-only']);
+  });
+
+  test('markStatus hides missing sessions without deleting them', () => {
+    const memento = new FakeMemento();
+    const store = new SessionHistoryStore(memento as any);
+
+    store.upsertNew('A', '/repo', 's1');
+    assert.strictEqual(store.markStatus('A', 's1', 'missing'), true);
+
+    assert.strictEqual(store.get('A', 's1')?.status, 'missing');
+    assert.strictEqual(store.list('A', '/repo').length, 0);
+    assert.strictEqual(
+      store.list('A', '/repo', { includeStatuses: ['missing'] })[0]?.sessionId,
+      's1',
+    );
   });
 });

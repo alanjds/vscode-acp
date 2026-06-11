@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { getPipelineConfig, getGeminiPipelineConfig } from './PipelineConfig';
 
 /**
  * Configuration for a single ACP agent.
@@ -12,6 +13,10 @@ export interface AgentConfigEntry {
   env?: Record<string, string>;
   /** Display name */
   displayName?: string;
+  /** Enable IDEA MCP server */
+  use_idea_mcp?: boolean;
+  /** Enable custom MCP server */
+  use_custom_mcp?: boolean;
 }
 
 /**
@@ -28,7 +33,21 @@ export function getAgentConfigs(): Record<string, AgentConfigEntry> {
  * Get the list of agent names available.
  */
 export function getAgentNames(): string[] {
-  return Object.keys(getAgentConfigs());
+  const agentNames = Object.keys(getAgentConfigs());
+  const pipeline = getPipelineConfig();
+  const geminiPipeline = getGeminiPipelineConfig();
+
+  const namesToAdd: string[] = [];
+  
+  if (pipeline.enabled && !agentNames.includes(pipeline.virtualAgentName)) {
+    namesToAdd.push(pipeline.virtualAgentName);
+  }
+  
+  if (pipeline.enabled && !agentNames.includes(geminiPipeline.virtualAgentName)) {
+    namesToAdd.push(geminiPipeline.virtualAgentName);
+  }
+
+  return [...agentNames, ...namesToAdd];
 }
 
 /**

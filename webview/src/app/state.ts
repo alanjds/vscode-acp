@@ -4,6 +4,7 @@ import type {
   ModelsState,
   ModesState,
   PersistedWebviewState,
+  PipelinePlanStatus,
   PlanUpdate,
   SessionConfigOption,
   SessionSnapshot,
@@ -73,6 +74,8 @@ export type AppAction =
   | { type: 'appendToolCall'; toolCallId: string; title: string; status: ToolCallStatus }
   | { type: 'updateToolCall'; toolCallId: string; title?: string; status: ToolCallStatus }
   | { type: 'appendPlan'; plan: PlanUpdate }
+  | { type: 'appendPipelinePlan'; plan: string }
+  | { type: 'updatePipelinePlanStatus'; status: PipelinePlanStatus; message?: string }
   | { type: 'loadSessionStart' }
   | { type: 'loadSessionEnd'; ok: boolean }
   | { type: 'setRenderedMarkdown'; items: Array<{ index: number; html: string }> };
@@ -636,6 +639,45 @@ export function appReducer(state: AppState, action: AppAction): AppState {
           ],
         },
       };
+
+    case 'appendPipelinePlan':
+      return {
+        ...state,
+        persisted: {
+          ...state.persisted,
+          chatHistory: [
+            ...state.persisted.chatHistory,
+            {
+              kind: 'pipelinePlan',
+              plan: action.plan,
+              status: 'pending',
+            },
+          ],
+        },
+      };
+
+    case 'updatePipelinePlanStatus': {
+      const nextHistory = [...state.persisted.chatHistory];
+      for (let index = nextHistory.length - 1; index >= 0; index -= 1) {
+        const item = nextHistory[index];
+        if (item.kind === 'pipelinePlan') {
+          nextHistory[index] = {
+            ...item,
+            status: action.status,
+            message: action.message,
+          };
+          break;
+        }
+      }
+
+      return {
+        ...state,
+        persisted: {
+          ...state.persisted,
+          chatHistory: nextHistory,
+        },
+      };
+    }
 
     case 'setRenderedMarkdown': {
       const renderedMarkdown = { ...state.renderedMarkdown };

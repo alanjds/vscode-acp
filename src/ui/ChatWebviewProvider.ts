@@ -9,6 +9,12 @@ import { log, logError } from '../utils/Logger';
 import { sendEvent } from '../utils/TelemetryManager';
 import { buildPromptWithEditorContext, type EditorContext } from './EditorContext';
 import { getReactShellHtmlContent } from './WebviewHtml';
+import {
+  PipelinePlanReadyEvent,
+  PipelineService,
+  PipelineSessionUpdateEvent,
+  PipelineStatusEvent,
+} from '../pipeline/PipelineService';
 
 type GetEditorContext = () => EditorContext | null;
 
@@ -32,13 +38,24 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
   private editorContextLinked = false;
   private isViewReady = false;
   private pendingMessages: WebviewMessage[] = [];
+  private readonly pipelineService: PipelineService | null;
+  private readonly getEditorContext: GetEditorContext;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly sessionManager: SessionManager,
     private readonly sessionUpdateHandler: SessionUpdateHandler,
-    private readonly getEditorContext: GetEditorContext = () => null,
+    pipelineServiceOrGetEditorContext: PipelineService | GetEditorContext | null = null,
+    getEditorContext: GetEditorContext = () => null,
   ) {
+    if (typeof pipelineServiceOrGetEditorContext === 'function') {
+      this.pipelineService = null;
+      this.getEditorContext = pipelineServiceOrGetEditorContext;
+    } else {
+      this.pipelineService = pipelineServiceOrGetEditorContext;
+      this.getEditorContext = getEditorContext;
+    }
+
     marked.setOptions({
       breaks: true,
       gfm: true,
@@ -48,8 +65,43 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       this.handleSessionUpdate(update);
     };
     this.sessionUpdateHandler.addListener(this.updateListener);
+    this.pipelineService?.on('status', this.handlePipelineStatus);
+    this.pipelineService?.on('plan-ready', this.handlePipelinePlanReady);
+    this.pipelineService?.on('session-update', this.handlePipelineSessionUpdate);
     log('ChatWebviewProvider: session update listener registered');
   }
+
+  private readonly handlePipelineStatus = (event: PipelineStatusEvent) => {
+    if (event.sessionId !== this.sessionManager.getActiveSessionId()) {
+      return;
+    }
+    this.postMessage({
+      type: 'pipelineStatus',
+      status: event.status,
+      message: event.message,
+    });
+  };
+
+  private readonly handlePipelinePlanReady = (event: PipelinePlanReadyEvent) => {
+    if (event.sessionId !== this.sessionManager.getActiveSessionId()) {
+      return;
+    }
+    this.postMessage({
+      type: 'pipelinePlanReady',
+      plan: event.plan,
+    });
+  };
+
+  private readonly handlePipelineSessionUpdate = (event: PipelineSessionUpdateEvent) => {
+    if (event.sessionId !== this.sessionManager.getActiveSessionId()) {
+      return;
+    }
+    this.postMessage({
+      type: 'sessionUpdate',
+      update: event.update.update,
+      sessionId: event.sessionId,
+    });
+  };
 
   private renderMarkdown(text: string): string {
     try {
@@ -103,6 +155,12 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
           break;
         case 'cancelTurn':
           await this.handleCancelTurn();
+          break;
+        case 'approvePipelinePlan':
+          await this.handleApprovePipelinePlan(String(message.plan ?? ''));
+          break;
+        case 'rejectPipelinePlan':
+          await this.handleRejectPipelinePlan();
           break;
         case 'setMode':
           await this.handleSetMode(String(message.modeId ?? ''));
@@ -243,6 +301,36 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       });
       this.postMessage({ type: 'promptEnd', stopReason: 'error' });
     }
+  }
+
+  private async handleApprovePipelinePlan(plan: string): Promise<void> {
+    const activeId = this.sessionManager.getActiveSessionId();
+    if (!activeId || !this.sessionManager.isPipelineSession(activeId) || !this.pipelineService) {
+      return;
+    }
+
+    this.postMessage({ type: 'promptStart' });
+
+    try {
+      await this.pipelineService.approvePlan(activeId, plan);
+      this.postMessage({ type: 'promptEnd', stopReason: 'end_turn' });
+      this.sessionManager.touchHistory(activeId);
+    } catch (e: any) {
+      logError('Pipeline implementation failed', e);
+      this.postMessage({
+        type: 'error',
+        message: e.message || 'Pipeline implementation failed',
+      });
+      this.postMessage({ type: 'promptEnd', stopReason: 'error' });
+    }
+  }
+
+  private async handleRejectPipelinePlan(): Promise<void> {
+    const activeId = this.sessionManager.getActiveSessionId();
+    if (!activeId || !this.sessionManager.isPipelineSession(activeId) || !this.pipelineService) {
+      return;
+    }
+    this.pipelineService.rejectPlan(activeId);
   }
 
   /**
@@ -526,6 +614,9 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 
   dispose(): void {
     this.sessionUpdateHandler.removeListener(this.updateListener);
+    this.pipelineService?.off('status', this.handlePipelineStatus);
+    this.pipelineService?.off('plan-ready', this.handlePipelinePlanReady);
+    this.pipelineService?.off('session-update', this.handlePipelineSessionUpdate);
   }
 
   private async getHtmlContent(webview: vscode.Webview): Promise<string> {

@@ -29,6 +29,8 @@ export type HostToWebviewMessage =
   | { type: 'sessionInfoUpdate'; title?: string | null }
   | { type: 'externalUserMessage'; text: string }
   | { type: 'fileSearchResults'; requestId: number; results: FileSearchResult[] }
+  | { type: 'pipelinePlanReady'; plan: string }
+  | { type: 'pipelineStatus'; status?: string; message?: string }
   | { type: 'markdownRendered'; items: MarkdownRenderedItem[] }
   | { type: string; [key: string]: unknown };
 
@@ -39,6 +41,8 @@ export type WebviewToHostMessage =
   | { type: 'setMode'; modeId: string }
   | { type: 'setModel'; modelId: string }
   | { type: 'setConfigOption'; configId: string; value: string }
+  | { type: 'approvePipelinePlan'; plan: string }
+  | { type: 'rejectPipelinePlan' }
   | { type: 'executeCommand'; command: string }
   | { type: 'searchFiles'; query: string; requestId: number }
   | { type: 'openFile'; path: string }

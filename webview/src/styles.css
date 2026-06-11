@@ -422,6 +422,93 @@ body {
   opacity: 0.6;
 }
 
+.pipeline-plan {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-self: stretch;
+  padding: 10px 12px;
+  border-radius: var(--message-radius);
+  background: var(--vscode-editorWidget-background);
+  border: 1px solid var(--vscode-panel-border);
+}
+
+.pipeline-plan-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.pipeline-plan-title {
+  font-weight: 600;
+}
+
+.pipeline-plan-status {
+  margin-top: 2px;
+  font-size: 0.86em;
+  opacity: 0.75;
+}
+
+.pipeline-plan-editor {
+  width: 100%;
+  min-height: 220px;
+  max-height: 420px;
+  resize: vertical;
+  box-sizing: border-box;
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  border: 1px solid var(--vscode-input-border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-family: var(--vscode-editor-font-family);
+  font-size: var(--vscode-font-size);
+  line-height: 1.45;
+  white-space: pre;
+}
+
+.pipeline-plan-editor:disabled {
+  opacity: 0.75;
+}
+
+.pipeline-plan-editor:focus {
+  outline: none;
+  border-color: var(--vscode-focusBorder);
+}
+
+.pipeline-plan-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.pipeline-plan-btn {
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+  padding: 5px 12px;
+}
+
+.pipeline-plan-btn.primary {
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+}
+
+.pipeline-plan-btn.primary:hover {
+  background: var(--vscode-button-hoverBackground);
+}
+
+.pipeline-plan-btn.secondary {
+  background: var(--vscode-button-secondaryBackground);
+  color: var(--vscode-button-secondaryForeground);
+}
+
+.pipeline-plan-btn.secondary:hover {
+  background: var(--vscode-button-secondaryHoverBackground);
+}
+
 .empty-state {
   display: flex;
   flex: 1;

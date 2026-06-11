@@ -13,13 +13,15 @@ import type {
   SessionInfo as ProtocolSessionInfo,
   AgentCapabilities,
 } from '@agentclientprotocol/sdk';
-import { RequestError } from '@agentclientprotocol/sdk';
+import { PROTOCOL_VERSION, RequestError } from '@agentclientprotocol/sdk';
 
 import { AgentManager } from './AgentManager';
 import { ConnectionManager, ConnectionInfo } from './ConnectionManager';
 import { SessionUpdateHandler } from '../handlers/SessionUpdateHandler';
 import { SessionHistoryStore } from './SessionHistoryStore';
 import { getAgentConfigs } from '../config/AgentConfig';
+import { getPipelineConfig, isPipelineVirtualAgentName, getPipelineConfigForAgent } from '../config/PipelineConfig';
+import { PipelineService } from '../pipeline/PipelineService';
 import { log, logError } from '../utils/Logger';
 import { sendEvent, sendError } from '../utils/TelemetryManager';
 
@@ -72,6 +74,7 @@ export type AgentConnectionError =
 export class SessionManager extends EventEmitter {
   private sessions: Map<string, SessionInfo> = new Map();
   private activeSessionId: string | null = null;
+  private pipelineService: PipelineService | null = null;
 
   /** Maps agentName → activeSessionId for the one-session-per-agent model. */
   private agentSessions: Map<string, string> = new Map();
@@ -109,6 +112,10 @@ export class SessionManager extends EventEmitter {
   /** Wire in the persistent session-history store (called once at startup). */
   setHistoryStore(store: SessionHistoryStore): void {
     this.historyStore = store;
+  }
+
+  setPipelineService(service: PipelineService): void {
+    this.pipelineService = service;
   }
 
   /** Public accessor for downstream UI. */
@@ -151,6 +158,10 @@ export class SessionManager extends EventEmitter {
    * Internally creates a session via ACP protocol.
    */
   async connectToAgent(agentName: string): Promise<SessionInfo> {
+    if (isPipelineVirtualAgentName(agentName)) {
+      return this.connectToPipelineAgent(agentName);
+    }
+
     // If we already have a live session with this agent, reuse it
     const existingSessionId = this.agentSessions.get(agentName);
     if (existingSessionId && this.sessions.has(existingSessionId)) {
@@ -242,6 +253,53 @@ export class SessionManager extends EventEmitter {
     }
   }
 
+  private async connectToPipelineAgent(agentName: string): Promise<SessionInfo> {
+    const existingSessionId = this.agentSessions.get(agentName);
+    if (existingSessionId && this.sessions.has(existingSessionId)) {
+      this.activeSessionId = existingSessionId;
+      this.emit('active-session-changed', existingSessionId);
+      return this.sessions.get(existingSessionId)!;
+    }
+
+    const currentAgent = this.getActiveAgentName();
+    if (currentAgent) {
+      await this.disconnectAgent(currentAgent);
+    }
+
+    const cwd = this.getWorkspaceCwd();
+    const sessionId = `pipeline_${Date.now()}`;
+    const pipeline = getPipelineConfig();
+    const sessionInfo: SessionInfo = {
+      sessionId,
+      agentId: `pipeline_agent_${Date.now()}`,
+      agentName,
+      agentDisplayName: pipeline.virtualAgentName,
+      cwd,
+      createdAt: new Date().toISOString(),
+      initResponse: {
+        protocolVersion: PROTOCOL_VERSION,
+        agentInfo: {
+          name: 'acp-pipeline',
+          title: pipeline.virtualAgentName,
+          version: '0.1.0',
+        },
+        agentCapabilities: {},
+      } as InitializeResponse,
+      modes: null,
+      models: null,
+      configOptions: null,
+      availableCommands: [],
+      title: pipeline.virtualAgentName,
+    };
+
+    this.sessions.set(sessionId, sessionInfo);
+    this.agentSessions.set(agentName, sessionId);
+    this.activeSessionId = sessionId;
+    this.emit('agent-connected', agentName);
+    this.emit('active-session-changed', sessionId);
+    return sessionInfo;
+  }
+
   /**
    * Start a new conversation with the currently connected agent.
    * Disconnects current session, reconnects, and signals chat to clear.
@@ -271,8 +329,12 @@ export class SessionManager extends EventEmitter {
     log(`Disconnecting agent ${agentName}`);
     sendEvent('agent/disconnect', { agentName });
 
-    this.agentManager.killAgent(session.agentId);
-    this.connectionManager.removeConnection(session.agentId);
+    if (this.isPipelineSession(session.sessionId)) {
+      this.pipelineService?.cancel(session.sessionId);
+    } else {
+      this.agentManager.killAgent(session.agentId);
+      this.connectionManager.removeConnection(session.agentId);
+    }
     this.sessions.delete(sessionId);
     this.agentSessions.delete(agentName);
 
@@ -444,6 +506,14 @@ export class SessionManager extends EventEmitter {
    * Send a prompt to the active session.
    */
   async sendPrompt(sessionId: string, text: string): Promise<PromptResponse> {
+    if (this.isPipelineSession(sessionId)) {
+      if (!this.pipelineService) {
+        throw new Error('Pipeline service is not available.');
+      }
+      await this.pipelineService.createPlan(sessionId, text);
+      return { stopReason: 'end_turn' } as PromptResponse;
+    }
+
     const session = this.sessions.get(sessionId);
     if (!session) {
       throw new Error(`Session not found: ${sessionId}`);
@@ -473,6 +543,11 @@ export class SessionManager extends EventEmitter {
    * Cancel an active prompt turn.
    */
   async cancelTurn(sessionId: string): Promise<void> {
+    if (this.isPipelineSession(sessionId)) {
+      this.pipelineService?.cancel(sessionId);
+      return;
+    }
+
     const session = this.sessions.get(sessionId);
     if (!session) { return; }
 
@@ -987,6 +1062,15 @@ export class SessionManager extends EventEmitter {
     const session = this.sessions.get(sessionId);
     if (!session) { return undefined; }
     return this.connectionManager.getConnection(session.agentId);
+  }
+
+  isPipelineSession(sessionId: string | null | undefined): boolean {
+    if (!sessionId) { return false; }
+    const session = this.sessions.get(sessionId);
+    return !!session && (
+      session.agentId.startsWith('pipeline_agent_')
+      || isPipelineVirtualAgentName(session.agentName)
+    );
   }
 
   // --- Cleanup ---

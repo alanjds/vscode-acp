@@ -7,6 +7,8 @@ import type {
   ModeOption,
   ModesState,
   PersistedWebviewState,
+  PipelinePlanHistoryItem,
+  PipelinePlanStatus,
   PlanEntry,
   PlanHistoryItem,
   PlanUpdate,
@@ -196,6 +198,16 @@ export function normalizePlanUpdate(value: unknown): PlanUpdate {
   };
 }
 
+function normalizePipelinePlanStatus(value: unknown): PipelinePlanStatus {
+  return value === 'implementing'
+    || value === 'completed'
+    || value === 'rejected'
+    || value === 'error'
+    || value === 'cancelled'
+    ? value
+    : 'pending';
+}
+
 export function normalizeMarkdownRenderedItems(value: unknown): MarkdownRenderedItem[] {
   if (!Array.isArray(value)) {
     return [];
@@ -299,6 +311,24 @@ export function normalizeMessageHistoryItem(value: unknown): MessageHistoryItem 
   };
 }
 
+export function normalizePipelinePlanHistoryItem(value: unknown): PipelinePlanHistoryItem | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const candidate = value as Partial<PipelinePlanHistoryItem>;
+  if (candidate.kind !== 'pipelinePlan' || typeof candidate.plan !== 'string') {
+    return null;
+  }
+
+  return {
+    kind: 'pipelinePlan',
+    plan: candidate.plan,
+    status: normalizePipelinePlanStatus(candidate.status),
+    message: typeof candidate.message === 'string' ? candidate.message : undefined,
+  };
+}
+
 export function normalizeThoughtHistoryItem(value: unknown): ThoughtHistoryItem | null {
   if (!value || typeof value !== 'object') {
     return null;
@@ -357,7 +387,8 @@ export function normalizeChatHistoryItem(value: unknown): ChatHistoryItem | null
     normalizeMessageHistoryItem(value) ??
     normalizeThoughtHistoryItem(value) ??
     normalizeToolCallHistoryItem(value) ??
-    normalizePlanHistoryItem(value)
+    normalizePlanHistoryItem(value) ??
+    normalizePipelinePlanHistoryItem(value)
   );
 }
 

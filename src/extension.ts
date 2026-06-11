@@ -11,6 +11,7 @@ import { ChatWebviewProvider } from './ui/ChatWebviewProvider';
 import { captureEditorContext, captureOpenEditorPaths, initializeOpenEditorsTracker } from './ui/EditorContext';
 import { getAgentNames } from './config/AgentConfig';
 import { fetchRegistry } from './config/RegistryClient';
+import { PipelineService } from './pipeline/PipelineService';
 import { log, logError, disposeChannels, getOutputChannel, getTrafficChannel } from './utils/Logger';
 import { initTelemetry, sendEvent } from './utils/TelemetryManager';
 
@@ -33,6 +34,9 @@ export function activate(context: vscode.ExtensionContext): void {
     connectionManager,
     sessionUpdateHandler,
   );
+  const workspaceCwd = () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  const pipelineService = new PipelineService(() => workspaceCwd() || process.cwd());
+  sessionManager.setPipelineService(pipelineService);
 
   // Persistent client-side session-history cache (used as the tier-2 tree
   // source for agents that support session/load or session/resume but not
@@ -42,7 +46,6 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push({ dispose: () => historyStore.dispose() });
 
   // --- UI ---
-  const workspaceCwd = () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   const sessionTreeProvider = new SessionTreeProvider(sessionManager, historyStore, workspaceCwd);
   const treeView = vscode.window.createTreeView('acp-sessions', {
     treeDataProvider: sessionTreeProvider,
@@ -52,6 +55,7 @@ export function activate(context: vscode.ExtensionContext): void {
     context.extensionUri,
     sessionManager,
     sessionUpdateHandler,
+    pipelineService,
     () => captureEditorContext(
       vscode.window.activeTextEditor,
       captureOpenEditorPaths(vscode.window.tabGroups.all),
@@ -543,6 +547,7 @@ export function activate(context: vscode.ExtensionContext): void {
     {
       dispose: () => {
         sessionManager.dispose();
+        void pipelineService.dispose();
         sessionUpdateHandler.dispose();
         chatWebviewProvider.dispose();
         sessionTreeProvider.dispose();

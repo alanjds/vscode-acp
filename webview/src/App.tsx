@@ -14,6 +14,7 @@ import type {
   FileSearchResult,
   ModelOption,
   ModeOption,
+  PipelinePlanStatus,
   PersistedWebviewState,
   SelectedFileMention,
   SessionConfigOption,
@@ -41,6 +42,7 @@ import { appReducer, createInitialState } from './app/state';
 import { MessageBubble } from './components/MessageBubble';
 import InputArea from './components/InputArea';
 import { PlanBlock } from './components/PlanBlock';
+import { PipelinePlanBlock } from './components/PipelinePlanBlock';
 import { TurnBlock } from './components/TurnBlock';
 import { getState, onMessage, postMessage, setState } from './vscode';
 
@@ -189,6 +191,24 @@ export function App(): JSX.Element {
             text: typeof message.message === 'string' ? message.message : 'Information',
           });
           break;
+
+        case 'pipelinePlanReady':
+          if (typeof message.plan === 'string') {
+            dispatch({ type: 'appendPipelinePlan', plan: message.plan });
+          }
+          break;
+
+        case 'pipelineStatus': {
+          const status = normalizePipelineStatus(message.status);
+          if (status) {
+            dispatch({
+              type: 'updatePipelinePlanStatus',
+              status,
+              message: typeof message.message === 'string' ? message.message : undefined,
+            });
+          }
+          break;
+        }
 
         case 'sessionUpdate':
           for (const action of mapSessionUpdateToActions(normalizeSessionUpdate(message.update))) {
@@ -413,6 +433,24 @@ export function App(): JSX.Element {
 
   function handleWelcomeCommand(command: string): void {
     postMessage({ type: 'executeCommand', command });
+  }
+
+  function handleApprovePipelinePlan(plan: string): void {
+    dispatch({
+      type: 'updatePipelinePlanStatus',
+      status: 'implementing',
+      message: 'Implementation starting...',
+    });
+    postMessage({ type: 'approvePipelinePlan', plan });
+  }
+
+  function handleRejectPipelinePlan(): void {
+    dispatch({
+      type: 'updatePipelinePlanStatus',
+      status: 'rejected',
+      message: 'Plan rejected.',
+    });
+    postMessage({ type: 'rejectPipelinePlan' });
   }
 
   function handleResizeStart(event: ReactMouseEvent<HTMLDivElement>): void {
@@ -644,6 +682,17 @@ export function App(): JSX.Element {
             return <PlanBlock item={block.item} key={`plan-${block.historyIndex}`} />;
           }
 
+          if (block.kind === 'pipelinePlan') {
+            return (
+              <PipelinePlanBlock
+                item={block.item}
+                key={`pipeline-plan-${block.historyIndex}`}
+                onApprove={handleApprovePipelinePlan}
+                onReject={handleRejectPipelinePlan}
+              />
+            );
+          }
+
           const assistantHtml = block.assistant
             ? state.renderedMarkdown[block.assistant.historyIndex]
             : undefined;
@@ -748,6 +797,21 @@ export function App(): JSX.Element {
 
 function getEditableText(input: HTMLDivElement): string {
   return input.textContent ?? '';
+}
+
+function normalizePipelineStatus(status: unknown): PipelinePlanStatus | null {
+  switch (status) {
+    case 'awaiting_approval':
+      return 'pending';
+    case 'implementing':
+    case 'completed':
+    case 'rejected':
+    case 'error':
+    case 'cancelled':
+      return status;
+    default:
+      return null;
+  }
 }
 
 function getEditableCursorPosition(input: HTMLDivElement): number {

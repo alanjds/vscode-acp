@@ -3,6 +3,7 @@ import type { SessionInfo as ProtocolSessionInfo } from '@agentclientprotocol/sd
 import { SessionManager, AgentCapabilitySummary } from '../core/SessionManager';
 import { SessionHistoryStore, PersistedSessionEntry } from '../core/SessionHistoryStore';
 import { getAgentNames } from '../config/AgentConfig';
+import { isPipelineVirtualAgentName } from '../config/PipelineConfig';
 import { log, logError } from '../utils/Logger';
 
 /**
@@ -198,6 +199,14 @@ export class SessionTreeProvider implements vscode.TreeDataProvider<AgentNode | 
 
   private getAgentNodes(): AgentTreeItem[] {
     return getAgentNames().map(name => {
+      if (isPipelineVirtualAgentName(name)) {
+        return new AgentTreeItem(
+          name,
+          this.sessionManager.isAgentConnected(name),
+          vscode.TreeItemCollapsibleState.None,
+        );
+      }
+
       const caps = this.sessionManager.getCachedCapabilities(name);
       const localCount = this.historyStore?.list(name, this.workspaceCwd()).length ?? 0;
       const collapsibleState = this.computeCollapsibleState(name, caps, localCount);

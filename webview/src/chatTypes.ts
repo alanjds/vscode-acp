@@ -119,11 +119,27 @@ export type PlanHistoryItem = {
   plan: PlanUpdate;
 };
 
+export type PipelinePlanStatus =
+  | 'pending'
+  | 'implementing'
+  | 'completed'
+  | 'rejected'
+  | 'error'
+  | 'cancelled';
+
+export type PipelinePlanHistoryItem = {
+  kind: 'pipelinePlan';
+  plan: string;
+  status: PipelinePlanStatus;
+  message?: string;
+};
+
 export type ChatHistoryItem =
   | MessageHistoryItem
   | ThoughtHistoryItem
   | ToolCallHistoryItem
-  | PlanHistoryItem;
+  | PlanHistoryItem
+  | PipelinePlanHistoryItem;
 
 export type PersistedWebviewState = {
   chatHistory: ChatHistoryItem[];

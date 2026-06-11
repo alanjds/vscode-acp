@@ -2,6 +2,7 @@ import type {
   ChatHistoryItem,
   MarkdownRenderItem,
   MessageHistoryItem,
+  PipelinePlanHistoryItem,
   PlanHistoryItem,
   ThoughtHistoryItem,
   ToolCallHistoryItem,
@@ -20,10 +21,11 @@ export type HistoryTurnBlock = {
 export type HistoryBlock =
   | { kind: 'message'; item: MessageHistoryItem; historyIndex: number }
   | { kind: 'plan'; item: PlanHistoryItem; historyIndex: number }
+  | { kind: 'pipelinePlan'; item: PipelinePlanHistoryItem; historyIndex: number }
   | HistoryTurnBlock;
 
 function hasTurnAssociation(item: ChatHistoryItem): item is ThoughtHistoryItem | ToolCallHistoryItem | MessageHistoryItem {
-  if (item.kind === 'plan') {
+  if (item.kind === 'plan' || item.kind === 'pipelinePlan') {
     return false;
   }
 
@@ -148,6 +150,11 @@ export function buildHistoryBlocks(chatHistory: ChatHistoryItem[], excludedIndex
       case 'plan':
         flushFallbackTurn();
         blocks.push({ kind: 'plan', item, historyIndex: index });
+        break;
+
+      case 'pipelinePlan':
+        flushFallbackTurn();
+        blocks.push({ kind: 'pipelinePlan', item, historyIndex: index });
         break;
     }
   }

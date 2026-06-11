@@ -187,4 +187,160 @@ suite('SessionTreeProvider', () => {
     assert.strictEqual(sessions[0].sessionId, 's1');
     assert.strictEqual(sessions[1].sessionId, 's2');
   });
+  // ============ New tests ============
+
+  test('getChildren with unknown capabilities triggers ensureConnected and renders from cache', async () => {
+    const sm = new FakeSessionManager();
+    // No capabilities cached yet
+
+    const provider = new SessionTreeProvider(
+      sm as any,
+      null,
+      () => '/repo',
+    );
+
+    // Mock ensureConnected to populate cache
+    let ensureConnectedCalled = false;
+    sm.ensureConnected = async () => {
+      ensureConnectedCalled = true;
+      sm.cachedCaps.set('agent-a', { list: true, load: true, resume: true });
+      return { connection: {} } as any;
+    };
+
+    const agentNode = new AgentTreeItem('agent-a', false, 1);
+
+    const children = await provider.getChildren(agentNode);
+
+    assert.strictEqual(ensureConnectedCalled, true);
+    // After cache is populated, should render loading state
+    assert.strictEqual(children.length, 1);
+    assert.ok(children[0] instanceof InfoTreeItem);
+    assert.strictEqual((children[0] as InfoTreeItem).kind, 'loading');
+
+    // After async processing, should have the capability
+    await waitNextTick();
+
+    const cached = sm.getCachedCapabilities('agent-a');
+    assert.ok(cached);
+    assert.strictEqual(cached?.list, true);
+  });
+
+  test('getChildren with ensureConnected failure renders auth-required info leaf', async () => {
+    const sm = new FakeSessionManager();
+    sm.cachedCaps.set('agent-a', { list: true, load: false, resume: false });
+
+    const provider = new SessionTreeProvider(sm as any, null, () => '/repo');
+    const agentNode = new AgentTreeItem('agent-a', false, 1);
+
+    // Mock ensureConnected to fail with auth error
+    sm.ensureConnected = async () => {
+      throw new Error('authentication required');
+    };
+
+    sm.listSessionsImpl = async () => {
+      throw new Error('authentication required');
+    };
+
+    await provider.getChildren(agentNode);
+    await waitNextTick();
+
+    const afterError = await provider.getChildren(agentNode);
+    assert.strictEqual(afterError.length, 1);
+    assert.ok(afterError[0] instanceof InfoTreeItem);
+    assert.strictEqual((afterError[0] as InfoTreeItem).kind, 'auth-required');
+  });
+
+  test('loadMore without nextCursor does not call listSessions', async () => {
+    const sm = new FakeSessionManager();
+    sm.cachedCaps.set('agent-a', { list: true, load: false, resume: false });
+    sm.listSessionsImpl = async (_agentName, _opts) => {
+      // This should not be called when there's no nextCursor
+      throw new Error('listSessions should not be called');
+    };
+
+    const provider = new SessionTreeProvider(sm as any, null, () => '/repo');
+    const agentNode = new AgentTreeItem('agent-a', false, 1);
+
+    // First getChildren to set up the provider state
+    await provider.getChildren(agentNode);
+    await waitNextTick();
+
+    // Load more without cursor should not call listSessions
+    await provider.loadMore('agent-a');
+
+    // Should not throw, meaning listSessions was not called
+  });
+
+  test('active-session-changed event refreshes tree', async () => {
+    const sm = new FakeSessionManager();
+    sm.cachedCaps.set('agent-a', { list: true, load: false, resume: false });
+
+    const provider = new SessionTreeProvider(sm as any, null, () => '/repo');
+
+    let refreshCount = 0;
+    provider.onDidChangeTreeData(() => { refreshCount++; });
+
+    // Emit active-session-changed event
+    sm.emit('active-session-changed', 'new-session-id');
+
+    await waitNextTick();
+
+    assert.strictEqual(refreshCount, 1);
+  });
+
+  test('agent-sourced and local sessions are deduplicated when same sessionId', async () => {
+    const sm = new FakeSessionManager();
+    sm.cachedCaps.set('agent-a', { list: true, load: true, resume: false });
+
+    const historyStore = {
+      list: (agentName: string, cwd?: string) => {
+        if (agentName === 'agent-a' && cwd === '/repo') {
+          return [
+            {
+              agentName: 'agent-a',
+              sessionId: 's-duplicate',
+              cwd: '/repo',
+              firstPrompt: 'Local session',
+              createdAt: '2026-01-01T00:00:00.000Z',
+              lastActiveAt: '2026-01-01T00:00:00.000Z',
+            },
+          ];
+        }
+        return [];
+      },
+      onDidChange: () => ({ dispose: () => undefined }),
+    };
+
+    const provider = new SessionTreeProvider(
+      sm as any,
+      historyStore as any,
+      () => '/repo',
+    );
+
+    // Mock listSessions to return the same session ID
+    sm.listSessionsImpl = async () => ({
+      sessions: [
+        {
+          sessionId: 's-duplicate',
+          title: 'Agent session',
+          cwd: '/repo',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        },
+      ],
+    });
+
+    const agentNode = new AgentTreeItem('agent-a', false, 1);
+
+    await provider.getChildren(agentNode);
+    await waitNextTick();
+
+    const children = await provider.getChildren(agentNode);
+
+    // Should have sessions from both sources, but deduplicated
+    const sessionItems = children.filter(c => c instanceof SessionTreeItem) as SessionTreeItem[];
+    const sessionIds = sessionItems.map(s => s.sessionId);
+
+    // Should only have one entry for s-duplicate
+    assert.strictEqual(sessionIds.filter(id => id === 's-duplicate').length, 1);
+  });
 });

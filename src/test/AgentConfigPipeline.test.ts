@@ -32,7 +32,7 @@ suite('AgentConfig pipeline', () => {
       } as any;
     };
 
-    assert.deepStrictEqual(getAgentNames(), ['Codex', 'Vibe', 'Pipeline']);
+    assert.deepStrictEqual(getAgentNames(), ['Codex', 'Vibe', 'Pipeline', 'Gemini Plan -> Vibe Implement']);
   });
 
   test('does not add virtual pipeline agent when disabled', () => {

@@ -27,6 +27,7 @@ export class PermissionHandler {
   private async handlePermission(params: RequestPermissionRequest): Promise<RequestPermissionResponse> {
     const title = params.toolCall?.title || 'Permission Request';
     const kind = params.toolCall?.kind;
+    const detail = formatToolCallDetail(params.toolCall?.rawInput);
 
     // Granular auto-approve by tool kind
     const config = vscode.workspace.getConfiguration('acp');
@@ -69,7 +70,7 @@ export class PermissionHandler {
       const icon = option.kind.startsWith('allow') ? '$(check)' : '$(x)';
       return {
         label: `${icon} ${option.name}`,
-        description: option.kind,
+        description: formatPermissionDescription(option.kind, detail),
         optionId: option.optionId,
       };
     });
@@ -77,7 +78,7 @@ export class PermissionHandler {
     sendEvent('permission/requested', { permissionType: title, autoApproved: 'false' });
 
     const selection = await vscode.window.showQuickPick(items, {
-      placeHolder: title,
+      placeHolder: detail ? `${title} - ${detail}` : title,
       title: 'ACP Agent Permission Request',
       ignoreFocusOut: true,
     });
@@ -98,4 +99,36 @@ export class PermissionHandler {
       outcome: { outcome: 'selected', optionId: selection.optionId },
     };
   }
+}
+
+function formatToolCallDetail(rawInput: unknown): string | undefined {
+  if (rawInput === null || rawInput === undefined || rawInput === '') {
+    return undefined;
+  }
+
+  const normalized = typeof rawInput === 'string'
+    ? rawInput
+    : (() => {
+        try {
+          return JSON.stringify(rawInput);
+        } catch {
+          return String(rawInput);
+        }
+      })();
+
+  const trimmed = normalized.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  const maxLength = 180;
+  return trimmed.length > maxLength ? `${trimmed.slice(0, maxLength - 3)}...` : trimmed;
+}
+
+function formatPermissionDescription(kind: string | undefined, detail: string | undefined): string {
+  if (kind && detail) {
+    return `${kind} - ${detail}`;
+  }
+
+  return detail || kind || '';
 }

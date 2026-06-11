@@ -20,7 +20,7 @@ import { ConnectionManager, ConnectionInfo } from './ConnectionManager';
 import { SessionUpdateHandler } from '../handlers/SessionUpdateHandler';
 import { SessionHistoryStore } from './SessionHistoryStore';
 import { getAgentConfigs } from '../config/AgentConfig';
-import { getPipelineConfig, isPipelineVirtualAgentName, getPipelineConfigForAgent } from '../config/PipelineConfig';
+import { getPipelineConfig, isPipelineVirtualAgentName } from '../config/PipelineConfig';
 import { PipelineService } from '../pipeline/PipelineService';
 import { log, logError } from '../utils/Logger';
 import { sendEvent, sendError } from '../utils/TelemetryManager';
@@ -151,6 +151,17 @@ export class SessionManager extends EventEmitter {
     };
   }
 
+  private testConfigs: Record<string, any> | null = null;
+
+  /** @internal Used for testing to inject agent configurations. */
+  setTestConfigs(configs: Record<string, any>): void {
+    this.testConfigs = configs;
+  }
+
+  private getConfigs(): Record<string, any> {
+    return this.testConfigs || getAgentConfigs();
+  }
+
   /**
    * Connect to an agent and start chatting.
    * Only one agent can be connected at a time — automatically disconnects
@@ -176,7 +187,7 @@ export class SessionManager extends EventEmitter {
       await this.disconnectAgent(currentAgent);
     }
 
-    const configs = getAgentConfigs();
+    const configs = this.getConfigs();
     const config = configs[agentName];
     if (!config) {
       throw new Error(`Unknown agent: ${agentName}. Available: ${Object.keys(configs).join(', ')}`);
@@ -756,7 +767,7 @@ export class SessionManager extends EventEmitter {
       }
     }
 
-    const configs = getAgentConfigs();
+    const configs = this.getConfigs();
     const config = configs[agentName];
     if (!config) {
       throw new Error(`Unknown agent: ${agentName}.`);

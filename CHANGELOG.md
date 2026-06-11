@@ -4,6 +4,15 @@ All notable changes to the "vscode-acp" extension will be documented in this fil
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.2.1] - 2026-06-11
+
+### Added
+- **A2A-powered pipeline support**: added a local pipeline service based on `@a2a-js/sdk`, with local A2A servers for planner and implementer roles.
+- **Virtual planning-to-implementation agents**: added configurable pipeline agents that generate a proposed plan first, then run the implementation agent after plan approval.
+- **Pipeline configuration**: added `acp.pipeline.*` settings to configure the virtual agent names, planner agents, implementer agents, and whether the pipeline feature is enabled.
+- **VS Code editor context link**: added opt-in commands to enable or disable automatic editor context injection from the chat view.
+- **Prompt enrichment with editor state**: when enabled, prompts can include the current file, cursor location, selected text, language, and open editor list.
+
 ## [0.2.0] - 2026-05-16
 
 ### Added

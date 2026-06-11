@@ -84,10 +84,17 @@ class AcpBackedA2AExecutor implements AgentExecutor {
   ) {}
 
   async execute(requestContext: RequestContext, eventBus: ExecutionEventBus): Promise<void> {
-    const promptText = getMessageText(requestContext.userMessage);
-    const result = await this.runAgent(promptText, requestContext);
-    eventBus.publish(createAgentMessage(result, requestContext));
-    eventBus.finished();
+    try {
+      const promptText = getMessageText(requestContext.userMessage);
+      const result = await this.runAgent(promptText, requestContext);
+      eventBus.publish(createAgentMessage(result, requestContext));
+      eventBus.finished();
+    } catch (e: any) {
+      // In A2A, we should probably publish an error or just let it reject.
+      // If we let it reject, we need to make sure the server handles it.
+      // For now, let's rethrow and see if we can catch it on the client side.
+      throw e;
+    }
   }
 
   async cancelTask(_taskId: string, eventBus: ExecutionEventBus): Promise<void> {
@@ -183,8 +190,6 @@ export class PipelineService extends EventEmitter {
 
     // Récupérer ou créer le state (NE PAS écraser)
     let state = this.runs.get(sessionId);
-    const isFirstPrompt = !state;
-
     if (!state) {
       state = { originalPrompt: userPrompt, cancelled: false };
       this.runs.set(sessionId, state);
@@ -441,6 +446,10 @@ function getPipelineSessionId(requestContext: RequestContext): string {
 }
 
 function getTaskText(task: Task): string {
+  if (task.status.state === 'failed' || task.status.state === 'canceled') {
+    const errorMsg = task.status.message ? getTextFromParts(task.status.message.parts) : `Task ${task.status.state}`;
+    throw new Error(errorMsg);
+  }
   const statusText = task.status.message ? getTextFromParts(task.status.message.parts) : '';
   const historyText = (task.history ?? [])
     .filter(message => message.role === 'agent')

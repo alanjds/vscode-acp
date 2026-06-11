@@ -453,4 +453,144 @@ suite('EditorContext', () => {
     // Verify content is preserved
     assert.ok(result.includes('Some ``` code'));
   });
+  // ============ New edge case tests ============
+
+  test('captureEditorContext with undefined editor returns null', () => {
+    const result = captureEditorContext(undefined);
+    assert.strictEqual(result, null);
+  });
+
+  test('captureEditorContext with editor without document returns null', () => {
+    const editor = {
+      document: null,
+      selection: { active: { line: 0, character: 0 } },
+    } as any;
+    const result = captureEditorContext(editor);
+    assert.strictEqual(result, null);
+  });
+
+  test('multi-line selection extracts exact characters and preserves newlines', () => {
+    const editor = {
+      document: {
+        uri: { fsPath: workspacePath('src', 'multiline.ts') },
+        languageId: 'typescript',
+        lineAt: (line: number) => {
+          const lines = ['const x = 1;', 'const y = 2;', 'const z = 3;'];
+          return { text: lines[line] || '' };
+        },
+        getText: () => '',
+      },
+      selection: {
+        active: { line: 1, character: 0 },
+        isEmpty: false,
+        start: { line: 0, character: 6 },
+        end: { line: 2, character: 9 },
+      },
+    } as any;
+
+    const context = captureEditorContext(editor);
+
+    assert.ok(context?.selection);
+    assert.strictEqual(context.selection.startLine, 1);
+    assert.strictEqual(context.selection.startCharacter, 7);
+    assert.strictEqual(context.selection.endLine, 3);
+    assert.strictEqual(context.selection.endCharacter, 10);
+    assert.ok(context.selection.text.includes('x = 1;'));
+    assert.ok(context.selection.text.includes('const y = 2;'));
+    assert.ok(context.selection.text.includes('const z'));
+  });
+
+  test('selection.isEmpty true sets currentLine and selection to null', () => {
+    const editor = {
+      document: {
+        uri: { fsPath: workspacePath('src', 'test.ts') },
+        languageId: 'typescript',
+        lineAt: (_line: number) => ({ text: 'const test = 1;' }),
+        getText: () => '',
+      },
+      selection: {
+        active: { line: 5, character: 10 },
+        isEmpty: true,
+        start: { line: 5, character: 10 },
+        end: { line: 5, character: 10 },
+      },
+    } as any;
+
+    const context = captureEditorContext(editor);
+
+    assert.ok(context);
+    assert.strictEqual(context.selection, null);
+    assert.ok(context.currentLine);
+    assert.strictEqual(context.currentLine.line, 6);
+    assert.strictEqual(context.currentLine.text, 'const test = 1;');
+  });
+
+  test('selection exists sets currentLine to null', () => {
+    const editor = {
+      document: {
+        uri: { fsPath: workspacePath('src', 'test.ts') },
+        languageId: 'typescript',
+        lineAt: (_line: number) => ({ text: 'const test = 1;' }),
+        getText: () => '',
+      },
+      selection: {
+        active: { line: 5, character: 10 },
+        isEmpty: false,
+        start: { line: 5, character: 6 },
+        end: { line: 5, character: 10 },
+      },
+    } as any;
+
+    const context = captureEditorContext(editor);
+
+    assert.ok(context);
+    assert.ok(context.selection);
+    assert.strictEqual(context.currentLine, null);
+  });
+
+  test('captureOpenEditorPaths ignores non-file tabs', () => {
+    const nonFileUri = vscode.Uri.parse('output://test');
+    const fileUri = vscode.Uri.file(workspacePath('src', 'test.ts'));
+
+    const tabGroups = [
+      {
+        tabs: [
+          { input: new vscode.TabInputText(fileUri) },
+          { input: new vscode.TabInputText(nonFileUri) },
+        ],
+      },
+    ] as any;
+
+    const result = captureOpenEditorPaths(tabGroups, () => 1000);
+
+    assert.strictEqual(result.length, 1);
+    assert.strictEqual(result[0].path, fileUri.fsPath);
+  });
+
+  test('captureOpenEditorPaths ignores unknown tab input types', () => {
+    const fileUri = vscode.Uri.file(workspacePath('src', 'test.ts'));
+    const unknownInput = { someOtherType: true };
+
+    const tabGroups = [
+      {
+        tabs: [
+          { input: new vscode.TabInputText(fileUri) },
+          { input: unknownInput },
+        ],
+      },
+    ] as any;
+
+    const result = captureOpenEditorPaths(tabGroups, () => 1000);
+
+    assert.strictEqual(result.length, 1);
+    assert.strictEqual(result[0].path, fileUri.fsPath);
+  });
+
+  test('formatEditorContextPath truncates very long paths to MAX_CONTEXT_PATH_LENGTH', () => {
+    const longPath = 'a'.repeat(MAX_CONTEXT_PATH_LENGTH + 100) + '.ts';
+    const result = formatEditorContextPath(workspacePath(longPath), []);
+
+    assert.strictEqual(result.length, MAX_CONTEXT_PATH_LENGTH);
+    assert.ok(result.endsWith('… [truncated]'));
+  });
 });

@@ -323,17 +323,6 @@
               ],
               "env": {}
             },
-            "Gemini CLI Plan": {
-              "command": "npx",
-              "args": [
-                "@google/gemini-cli@latest",
-                "--experimental-acp",
-                "--approval-mode=plan"
-              ],
-              "env": {},
-              "use_idea_mcp": true,
-              "use_custom_mcp": true
-            },
             "Qwen Code": {
               "command": "npx",
               "args": [
@@ -401,6 +390,11 @@
               "args": [
                 "acp"
               ],
+              "env": {}
+            },
+            "Vibe": {
+              "command": "vibe-acp",
+              "args": [],
               "env": {}
             }
           }

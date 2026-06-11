@@ -5,11 +5,42 @@ import { SessionManager } from '../core/SessionManager';
 function createManager() {
   const agentManager = {
     killAll: () => undefined,
+    spawnAgent: (_name: string, _config: any, _cwd: string) => ({ id: 'agent-1' }),
+    getAgent: (_id: string) => ({ process: {} }),
+    getRunningAgents: () => [],
+    on: () => undefined,
+    killAgent: (_id: string) => undefined,
   };
 
   const connectionManager = {
     dispose: () => undefined,
-    getConnection: () => undefined,
+    connect: async (_agentId: string, _process: any, _cwd: string) => ({
+      connection: {
+        newSession: async () => ({ sessionId: 's1', modes: null, models: null, configOptions: null }),
+        prompt: async () => ({ stopReason: 'end_turn' }),
+        cancel: async () => ({}),
+        listSessions: async () => ({ sessions: [], nextCursor: undefined }),
+        loadSession: async () => ({ modes: null, models: null, configOptions: null }),
+        resumeSession: async () => ({ modes: null, models: null, configOptions: null }),
+        setSessionMode: async () => ({}),
+        unstable_setSessionModel: async () => ({}),
+        setSessionConfigOption: async () => ({ configOptions: null }),
+        authenticate: async () => ({}),
+      },
+      initResponse: {
+        agentInfo: { name: 'test-agent', title: 'Test Agent' },
+        agentCapabilities: {
+          sessionCapabilities: {
+            list: true,
+            resume: true,
+          },
+          loadSession: true,
+        },
+        protocolVersion: '0.2.0',
+      },
+    }),
+    removeConnection: (_agentId: string) => undefined,
+    getConnection: (_agentId: string) => null,
   };
 
   const sessionUpdateHandler = {};
@@ -20,6 +51,14 @@ function createManager() {
     sessionUpdateHandler as any,
   );
 
+  manager.setTestConfigs({
+    'test-agent': { command: 'test' },
+    'Agent A': { command: 'test' },
+    'Agent B': { command: 'test' },
+    'Old Agent': { command: 'test' },
+    'New Agent': { command: 'test' },
+  });
+
   const historyCalls: Array<{ agentName: string; sessionId: string; title: string | null | undefined }> = [];
   (manager as any).historyStore = {
     setTitle: (agentName: string, sessionId: string, title: string | null | undefined) => {
@@ -27,9 +66,49 @@ function createManager() {
     },
     setFirstPromptIfMissing: () => undefined,
     touch: () => undefined,
+    upsertNew: () => undefined,
+    reconcileFromAgent: () => undefined,
+    forget: () => undefined,
   };
 
   return { manager, historyCalls };
+}
+
+function registerSession(manager: SessionManager, partial: Partial<any> & { sessionId: string; agentName: string }) {
+  const session = {
+    sessionId: partial.sessionId,
+    agentId: partial.agentId || 'agent-1',
+    agentName: partial.agentName,
+    agentDisplayName: partial.agentDisplayName || partial.agentName,
+    cwd: partial.cwd || '/test',
+    createdAt: partial.createdAt || new Date().toISOString(),
+    initResponse: partial.initResponse || {
+      protocolVersion: '0.2.0',
+      agentInfo: { name: partial.agentName, title: partial.agentName },
+      agentCapabilities: {},
+    },
+    modes: partial.modes || null,
+    models: partial.models || null,
+    configOptions: partial.configOptions || null,
+    availableCommands: partial.availableCommands || [],
+    title: partial.title,
+  };
+  (manager as any).sessions.set(partial.sessionId, session);
+  if (partial.agentName) {
+    (manager as any).agentSessions.set(partial.agentName, partial.sessionId);
+  }
+  if (partial.active) {
+    (manager as any).activeSessionId = partial.sessionId;
+  }
+  return session;
+}
+
+function createPipelineManager(pipelineService?: any) {
+  const manager = createManager().manager;
+  if (pipelineService) {
+    manager.setPipelineService(pipelineService);
+  }
+  return manager;
 }
 
 suite('SessionManager', () => {
@@ -168,5 +247,556 @@ suite('SessionManager', () => {
 
     (manager as any).activeSessionId = null;
     assert.strictEqual(manager.getActiveAgentName(), null);
+  });
+
+  // ============ Session connection tests ============
+
+  test('connectToAgent reuses existing active session for same agent', async () => {
+    const { manager } = createManager();
+    registerSession(manager, {
+      sessionId: 's1',
+      agentName: 'Agent A',
+      agentId: 'agent-1',
+      active: true,
+    });
+
+    const events: Array<{ event: string; arg: any }> = [];
+    manager.on('active-session-changed', (id) => events.push({ event: 'active-session-changed', arg: id }));
+    manager.on('agent-connected', (name) => events.push({ event: 'agent-connected', arg: name }));
+
+    const result = await manager.connectToAgent('Agent A');
+
+    assert.strictEqual(result.sessionId, 's1');
+    assert.strictEqual(manager.getActiveSessionId(), 's1');
+    assert.strictEqual(events.filter(e => e.event === 'active-session-changed').length, 1);
+    assert.strictEqual(events[0].arg, 's1');
+  });
+
+  test('connectToAgent disconnects current agent before connecting to new one', async () => {
+    const { manager } = createManager();
+    registerSession(manager, {
+      sessionId: 's1',
+      agentName: 'Old Agent',
+      agentId: 'old-agent-1',
+      active: true,
+    });
+
+    // Do NOT register session for 'New Agent' yet, so connectToAgent triggers a new connection
+
+    // Override disconnectAgent to verify it's called
+    let disconnectCalled = false;
+    (manager as any).disconnectAgent = async (agentName: string) => {
+      disconnectCalled = true;
+      assert.strictEqual(agentName, 'Old Agent');
+      (manager as any).sessions.delete('s1');
+      (manager as any).agentSessions.delete('Old Agent');
+      (manager as any).activeSessionId = null;
+    };
+
+    await manager.connectToAgent('New Agent');
+
+    assert.strictEqual(disconnectCalled, true);
+    assert.strictEqual(manager.getActiveAgentName(), 'New Agent');
+  });
+
+  test('disconnectAgent removes session, agentSessions, clears activeSessionId, calls killAgent and removeConnection for ACP session', async () => {
+    const { manager } = createManager();
+    registerSession(manager, {
+      sessionId: 's1',
+      agentName: 'Agent A',
+      agentId: 'agent-1',
+      active: true,
+    });
+
+    let killAgentCalled = false;
+    let removeConnectionCalled = false;
+    (manager as any).agentManager.killAgent = (id: string) => {
+      killAgentCalled = true;
+      assert.strictEqual(id, 'agent-1');
+    };
+    (manager as any).connectionManager.removeConnection = (id: string) => {
+      removeConnectionCalled = true;
+      assert.strictEqual(id, 'agent-1');
+    };
+
+    const events: Array<{ event: string; arg: any }> = [];
+    manager.on('agent-disconnected', (name) => events.push({ event: 'agent-disconnected', arg: name }));
+    manager.on('active-session-changed', (id) => events.push({ event: 'active-session-changed', arg: id }));
+
+    await manager.disconnectAgent('Agent A');
+
+    assert.strictEqual(killAgentCalled, true);
+    assert.strictEqual(removeConnectionCalled, true);
+    assert.strictEqual((manager as any).sessions.has('s1'), false);
+    assert.strictEqual((manager as any).agentSessions.has('Agent A'), false);
+    assert.strictEqual(manager.getActiveSessionId(), null);
+    assert.strictEqual(events.filter(e => e.event === 'agent-disconnected').length, 1);
+    assert.strictEqual(events.filter(e => e.event === 'active-session-changed').length, 1);
+  });
+
+  test('disconnectAgent for pipeline session calls pipelineService.cancel', async () => {
+    const pipelineService = {
+      cancel: (sessionId: string) => {
+        pipelineService.cancelCalled = sessionId;
+      },
+      cancelCalled: null as string | null,
+    };
+
+    const manager = createPipelineManager(pipelineService);
+    registerSession(manager, {
+      sessionId: 'pipeline_s1',
+      agentName: 'Pipeline',
+      agentId: 'pipeline_agent_1',
+      active: true,
+    });
+
+    let killAgentCalled = false;
+    let removeConnectionCalled = false;
+    (manager as any).agentManager.killAgent = () => { killAgentCalled = true; };
+    (manager as any).connectionManager.removeConnection = () => { removeConnectionCalled = true; };
+
+    await manager.disconnectAgent('Pipeline');
+
+    assert.strictEqual(pipelineService.cancelCalled, 'pipeline_s1');
+    assert.strictEqual(killAgentCalled, false);
+    assert.strictEqual(removeConnectionCalled, false);
+    assert.strictEqual((manager as any).sessions.has('pipeline_s1'), false);
+    assert.strictEqual((manager as any).agentSessions.has('Pipeline'), false);
+    assert.strictEqual(manager.getActiveSessionId(), null);
+  });
+
+  test('newConversation disconnects active agent, emits clear-chat, and reconnects same agent', async () => {
+    const { manager } = createManager();
+    registerSession(manager, {
+      sessionId: 's1',
+      agentName: 'Agent A',
+      agentId: 'agent-1',
+      active: true,
+    });
+
+    let disconnectCalled = false;
+    let connectCalled = false;
+    (manager as any).disconnectAgent = async (agentName: string) => {
+      disconnectCalled = true;
+      assert.strictEqual(agentName, 'Agent A');
+      (manager as any).sessions.delete('s1');
+      (manager as any).agentSessions.delete('Agent A');
+      (manager as any).activeSessionId = null;
+    };
+
+    (manager as any).connectToAgent = async (agentName: string) => {
+      connectCalled = true;
+      assert.strictEqual(agentName, 'Agent A');
+      const newSession = registerSession(manager, {
+        sessionId: 's2',
+        agentName: 'Agent A',
+        agentId: 'agent-2',
+        active: true,
+      });
+      return newSession;
+    };
+
+    const events: Array<{ event: string; arg: any }> = [];
+    manager.on('clear-chat', () => events.push({ event: 'clear-chat', arg: null }));
+
+    const result = await manager.newConversation();
+
+    assert.strictEqual(disconnectCalled, true);
+    assert.strictEqual(connectCalled, true);
+    assert.strictEqual(events.filter(e => e.event === 'clear-chat').length, 1);
+    assert.strictEqual(result?.agentName, 'Agent A');
+  });
+
+  test('sendPrompt on pipeline session calls pipelineService.createPlan and returns stopReason end_turn', async () => {
+    const pipelineService = {
+      createPlan: async (sessionId: string, text: string) => {
+        pipelineService.createPlanCalled = { sessionId, text };
+        return 'test plan';
+      },
+      createPlanCalled: null as { sessionId: string; text: string } | null,
+    };
+
+    const manager = createPipelineManager(pipelineService);
+    registerSession(manager, {
+      sessionId: 'pipeline_s1',
+      agentName: 'Pipeline',
+      agentId: 'pipeline_agent_1',
+      active: true,
+    });
+
+    const result = await manager.sendPrompt('pipeline_s1', 'test prompt');
+
+    assert.deepStrictEqual(pipelineService.createPlanCalled, { sessionId: 'pipeline_s1', text: 'test prompt' });
+    assert.strictEqual(result.stopReason, 'end_turn');
+  });
+
+  test('sendPrompt on unknown session rejects with Session not found', async () => {
+    const { manager } = createManager();
+
+    await assert.rejects(
+      () => manager.sendPrompt('unknown_session', 'test prompt'),
+      /Session not found/,
+    );
+  });
+
+  test('cancelTurn on pipeline session calls pipelineService.cancel', async () => {
+    const pipelineService = {
+      cancel: (sessionId: string) => {
+        pipelineService.cancelCalled = sessionId;
+      },
+      cancelCalled: null as string | null,
+    };
+
+    const manager = createPipelineManager(pipelineService);
+    registerSession(manager, {
+      sessionId: 'pipeline_s1',
+      agentName: 'Pipeline',
+      agentId: 'pipeline_agent_1',
+    });
+
+    await manager.cancelTurn('pipeline_s1');
+
+    assert.strictEqual(pipelineService.cancelCalled, 'pipeline_s1');
+  });
+
+  test('cancelTurn on ACP session calls connection.cancel', async () => {
+    const { manager } = createManager();
+    registerSession(manager, {
+      sessionId: 's1',
+      agentName: 'Agent A',
+      agentId: 'agent-1',
+    });
+
+    let cancelCalled = false;
+    (manager as any).connectionManager.getConnection = (_agentId: string) => ({
+      connection: {
+        cancel: async (params: any) => {
+          cancelCalled = true;
+          assert.strictEqual(params.sessionId, 's1');
+          return {};
+        },
+      },
+    });
+
+    await manager.cancelTurn('s1');
+
+    assert.strictEqual(cancelCalled, true);
+  });
+
+  test('cancelTurn on unknown session is no-op', async () => {
+    const { manager } = createManager();
+    // Should not throw
+    await manager.cancelTurn('unknown_session');
+  });
+
+  // ============ EnsureConnected tests ============
+
+  test('ensureConnected caches capabilities from initialize.agentCapabilities', async () => {
+    const { manager } = createManager();
+
+    (manager as any).connectionManager.connect = async (_agentId: string, _process: any, _cwd: string) => ({
+      connection: {},
+      initResponse: {
+        agentInfo: { name: 'test-agent', title: 'Test Agent' },
+        agentCapabilities: {
+          sessionCapabilities: { list: true, resume: true },
+          loadSession: true,
+        },
+        protocolVersion: '0.2.0',
+      },
+    });
+
+    // Override getAgentConfigs to return a valid config
+    await manager.ensureConnected('test-agent');
+
+    const cached = manager.getCachedCapabilities('test-agent');
+    assert.ok(cached);
+    assert.strictEqual(cached?.list, true);
+    assert.strictEqual(cached?.load, true);
+    assert.strictEqual(cached?.resume, true);
+  });
+
+  test('ensureConnected with connection failure cleans up agent process', async () => {
+    const { manager } = createManager();
+
+    let killAgentCalled = false;
+    (manager as any).agentManager.spawnAgent = (_name: string, _config: any, _cwd: string) => ({ id: 'failed-agent' });
+    (manager as any).agentManager.getAgent = (_id: string) => ({ process: {} });
+    (manager as any).agentManager.killAgent = (id: string) => {
+      killAgentCalled = true;
+      assert.strictEqual(id, 'failed-agent');
+    };
+    (manager as any).connectionManager.connect = async () => {
+      throw new Error('Connection failed');
+    };
+
+    await assert.rejects(
+      () => manager.ensureConnected('test-agent'),
+      /Connection failed/,
+    );
+
+    assert.strictEqual(killAgentCalled, true);
+  });
+
+  // ============ List/Load/Resume sessions tests ============
+
+  test('listSessions delegates to client ACP with parameters', async () => {
+    const { manager } = createManager();
+
+    (manager as any).capabilities.set('test-agent', { list: true, load: false, resume: false });
+    (manager as any).connectionManager.connect = async () => ({
+      connection: {
+        listSessions: async (_params: any) => ({
+          sessions: [{ sessionId: 's1', title: 'Test Session' }],
+          nextCursor: 'cursor-2',
+        }),
+      },
+      initResponse: {
+        agentInfo: { name: 'test-agent', title: 'Test Agent' },
+        agentCapabilities: { sessionCapabilities: { list: true } },
+        protocolVersion: '0.2.0',
+      },
+    });
+
+    const result = await manager.listSessions('test-agent', { cwd: '/test', cursor: 'cursor-1' });
+
+    assert.strictEqual(result.sessions.length, 1);
+    assert.strictEqual(result.sessions[0].sessionId, 's1');
+    assert.strictEqual(result.nextCursor, 'cursor-2');
+  });
+
+  test('listSessions with auth error retries after authentication', async () => {
+    const { manager } = createManager();
+
+    (manager as any).capabilities.set('test-agent', { list: true, load: false, resume: false });
+
+    let authCalled = false;
+    (manager as any).connectionManager.connect = async () => ({
+      connection: {
+        listSessions: async (_params: any) => {
+          if (!authCalled) {
+            throw new Error('auth required');
+          }
+          return { sessions: [], nextCursor: undefined };
+        },
+        authenticate: async () => {
+          authCalled = true;
+          return {};
+        },
+      },
+      initResponse: {
+        agentInfo: { name: 'test-agent', title: 'Test Agent' },
+        agentCapabilities: { sessionCapabilities: { list: true } },
+        protocolVersion: '0.2.0',
+      },
+    });
+
+    // Override findAgentIdForConnection to return a valid agent ID
+    (manager as any).findAgentIdForConnection = () => 'agent-1';
+
+    // Override runAuthFlow to avoid VS Code dialog
+    (manager as any).runAuthFlow = async (agentName: string, agentId: string, conn: any) => {
+      await conn.connection.authenticate();
+    };
+
+    const result = await manager.listSessions('test-agent', {});
+
+    assert.strictEqual(authCalled, true);
+    assert.ok(result);
+  });
+
+  test('listSessions without list capability throws error', async () => {
+    const { manager } = createManager();
+
+    (manager as any).capabilities.set('test-agent', { list: false, load: false, resume: false });
+    (manager as any).connectionManager.connect = async () => ({
+      connection: {},
+      initResponse: {
+        agentInfo: { name: 'test-agent', title: 'Test Agent' },
+        agentCapabilities: {},
+        protocolVersion: '0.2.0',
+      },
+    });
+
+    await assert.rejects(
+      () => manager.listSessions('test-agent', {}),
+      /does not support session\/list/,
+    );
+  });
+
+  test('loadSession registers session, drains pending, sets active, updates agentSessions, and touches history', async () => {
+    const { manager } = createManager();
+
+    (manager as any).capabilities.set('test-agent', { list: false, load: true, resume: false });
+    (manager as any).connectionManager.connect = async () => ({
+      connection: {
+        loadSession: async () => ({
+          modes: { currentModeId: 'code' },
+          models: null,
+          configOptions: [{ id: 'mode1', category: 'mode', value: 'code' }],
+        }),
+      },
+      initResponse: {
+        agentInfo: { name: 'test-agent', title: 'Test Agent' },
+        agentCapabilities: {
+          sessionCapabilities: { load: true },
+          loadSession: true,
+        },
+        protocolVersion: '0.2.0',
+      },
+    });
+
+    // Override findAgentIdForConnection
+    (manager as any).findAgentIdForConnection = () => 'agent-1';
+
+    // Pre-buffer some state
+    (manager as any).pendingAvailableCommands.set('s1', [{ id: 'cmd1', title: 'Cmd1' }]);
+    (manager as any).pendingConfigOptions.set('s1', [{ id: 'mode1', category: 'mode', value: 'code' }]);
+    (manager as any).pendingTitles.set('s1', 'Buffered Title');
+
+    const result = await manager.loadSession('test-agent', 's1');
+
+    assert.strictEqual(result.sessionId, 's1');
+    assert.strictEqual(manager.getActiveSessionId(), 's1');
+    assert.strictEqual((manager as any).agentSessions.get('test-agent'), 's1');
+    assert.strictEqual(result.modes?.currentModeId, 'code');
+    assert.deepStrictEqual(result.availableCommands, [{ id: 'cmd1', title: 'Cmd1' }]);
+    assert.deepStrictEqual(result.configOptions, [{ id: 'mode1', category: 'mode', value: 'code' }]);
+    assert.strictEqual(result.title, 'Buffered Title');
+  });
+
+  test('resumeSession registers session, drains pending, sets active, and touches history', async () => {
+    const { manager } = createManager();
+
+    (manager as any).capabilities.set('test-agent', { list: false, load: false, resume: true });
+    (manager as any).connectionManager.connect = async () => ({
+      connection: {
+        resumeSession: async () => ({
+          modes: null,
+          models: null,
+          configOptions: null,
+        }),
+      },
+      initResponse: {
+        agentInfo: { name: 'test-agent', title: 'Test Agent' },
+        agentCapabilities: {
+          sessionCapabilities: { resume: true },
+        },
+        protocolVersion: '0.2.0',
+      },
+    });
+
+    // Override findAgentIdForConnection
+    (manager as any).findAgentIdForConnection = () => 'agent-1';
+
+    const result = await manager.resumeSession('test-agent', 's1');
+
+    assert.strictEqual(result.sessionId, 's1');
+    assert.strictEqual(manager.getActiveSessionId(), 's1');
+    assert.strictEqual((manager as any).agentSessions.get('test-agent'), 's1');
+    // historyCalls for resume is touch, which we don't track currently in the mock
+  });
+
+  // ============ Pipeline agent tests ============
+
+  test('connectToAgent creates pipeline session for pipeline virtual agent', async () => {
+    const pipelineService = {};
+    const manager = createPipelineManager(pipelineService);
+
+    const result = await manager.connectToAgent('Codex Plan -> Vibe Implement');
+
+    assert.ok(result.sessionId.startsWith('pipeline_'));
+    assert.strictEqual(result.agentName, 'Codex Plan -> Vibe Implement');
+    assert.strictEqual(manager.getActiveSessionId(), result.sessionId);
+    assert.strictEqual((manager as any).agentSessions.get('Codex Plan -> Vibe Implement'), result.sessionId);
+    assert.strictEqual(manager.isPipelineSession(result.sessionId), true);
+  });
+
+  test('connectToAgent reuses existing pipeline session', async () => {
+    const pipelineService = {};
+    const manager = createPipelineManager(pipelineService);
+
+    registerSession(manager, {
+      sessionId: 'pipeline_existing',
+      agentName: 'Codex Plan -> Vibe Implement',
+      agentId: 'pipeline_agent_existing',
+      active: false,
+    });
+
+    const result = await manager.connectToAgent('Codex Plan -> Vibe Implement');
+
+    assert.strictEqual(result.sessionId, 'pipeline_existing');
+    assert.strictEqual(manager.getActiveSessionId(), 'pipeline_existing');
+    assert.strictEqual((manager as any).agentSessions.get('Codex Plan -> Vibe Implement'), 'pipeline_existing');
+  });
+
+  test('isPipelineSession returns false for non-pipeline sessions', () => {
+    const { manager } = createManager();
+    registerSession(manager, {
+      sessionId: 's1',
+      agentName: 'Agent A',
+      agentId: 'agent-1',
+    });
+
+    assert.strictEqual(manager.isPipelineSession('s1'), false);
+    assert.strictEqual(manager.isPipelineSession('unknown'), false);
+    assert.strictEqual(manager.isPipelineSession(null), false);
+    assert.strictEqual(manager.isPipelineSession(undefined), false);
+  });
+
+  test('isPipelineSession returns true for pipeline agent sessions', () => {
+    const { manager } = createManager();
+    registerSession(manager, {
+      sessionId: 'pipeline_s1',
+      agentName: 'Codex Plan -> Vibe Implement',
+      agentId: 'pipeline_agent_1',
+    });
+
+    assert.strictEqual(manager.isPipelineSession('pipeline_s1'), true);
+  });
+
+  test('getConnectionForSession returns connection for ACP session', () => {
+    const { manager } = createManager();
+    registerSession(manager, {
+      sessionId: 's1',
+      agentName: 'Agent A',
+      agentId: 'agent-1',
+    });
+
+    const mockConnection = { connection: {} };
+    (manager as any).connectionManager.getConnection = (agentId: string) => {
+      if (agentId === 'agent-1') {
+        return mockConnection;
+      }
+      return null;
+    };
+
+    const result = manager.getConnectionForSession('s1');
+    assert.strictEqual(result, mockConnection);
+  });
+
+  test('getConnectionForSession returns undefined for unknown session', () => {
+    const { manager } = createManager();
+    const result = manager.getConnectionForSession('unknown');
+    assert.strictEqual(result, undefined);
+  });
+
+  test('dispose clears all sessions and agentSessions', () => {
+    const { manager } = createManager();
+    registerSession(manager, {
+      sessionId: 's1',
+      agentName: 'Agent A',
+      agentId: 'agent-1',
+    });
+    registerSession(manager, {
+      sessionId: 's2',
+      agentName: 'Agent B',
+      agentId: 'agent-2',
+    });
+
+    manager.dispose();
+
+    assert.strictEqual((manager as any).sessions.size, 0);
+    assert.strictEqual((manager as any).agentSessions.size, 0);
   });
 });

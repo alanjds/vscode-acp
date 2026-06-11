@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import type { JSX, MouseEvent as ReactMouseEvent } from 'react';
 
 export type PickerProps<T> = {
@@ -14,7 +15,7 @@ export type PickerProps<T> = {
   onSelect: (item: T, event: ReactMouseEvent<HTMLDivElement>) => void;
 };
 
-export function Picker<T>({
+function PickerComponent<T>({
   label,
   title,
   icon,
@@ -54,3 +55,5 @@ export function Picker<T>({
     </div>
   );
 }
+
+export const Picker = memo(PickerComponent) as typeof PickerComponent;

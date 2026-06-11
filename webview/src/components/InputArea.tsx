@@ -5,6 +5,7 @@ import type {
   MouseEvent as ReactMouseEvent,
   RefObject,
 } from 'react';
+import { memo, useMemo } from 'react';
 
 import { Picker } from './Picker';
 import type { AppAction, AppState } from '../app/state';
@@ -57,7 +58,7 @@ interface InputAreaProps {
   sendLabel?: string;
 }
 
-export default function InputArea({
+function InputArea({
   state,
   disabledBySession,
   slashFilteredCommands,
@@ -89,7 +90,10 @@ export default function InputArea({
   onOpenSelectedFile,
   sendLabel = 'Send',
 }: InputAreaProps): JSX.Element {
-  const configOptions = (sessionState?.configOptions ?? []).filter(hasSelectableValues);
+  const configOptions = useMemo(
+    () => (sessionState?.configOptions ?? []).filter(hasSelectableValues),
+    [sessionState?.configOptions],
+  );
   const useConfigOptions = configOptions.length > 0;
 
   return (
@@ -239,6 +243,8 @@ export default function InputArea({
   );
 }
 
+export default memo(InputArea);
+
 function renderPromptWithFileLinks(
   text: string,
   mentions: SelectedFileMention[],
@@ -335,7 +341,7 @@ function getSelectedConfigValue(option: SessionConfigOption): ConfigOptionValue 
   return flattenConfigValues(option).find((value) => value.value === option.currentValue);
 }
 
-function ConfigOptionPicker({
+const ConfigOptionPicker = memo(function ConfigOptionPicker({
   dispatch,
   isOpen,
   onSelect,
@@ -350,7 +356,7 @@ function ConfigOptionPicker({
   ) => void;
   option: SessionConfigOption;
 }): JSX.Element {
-  const selectedValue = getSelectedConfigValue(option);
+  const selectedValue = useMemo(() => getSelectedConfigValue(option), [option]);
   const label = selectedValue?.name ?? option.name ?? 'Option';
   const title = selectedValue?.description ?? option.description ?? option.name ?? '';
 
@@ -399,7 +405,7 @@ function ConfigOptionPicker({
       </div>
     </div>
   );
-}
+});
 
 function ConfigOptionItem({
   onSelect,

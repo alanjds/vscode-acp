@@ -1,3 +1,4 @@
+import { memo, useMemo } from 'react';
 import type { JSX } from 'react';
 
 import type { MessageHistoryItem } from '../chatTypes';
@@ -8,8 +9,11 @@ export type MessageBubbleProps = {
   renderedHtml?: string;
 };
 
-export function MessageBubble({ item, renderedHtml }: MessageBubbleProps): JSX.Element {
-  const parsedUserMessage = item.role === 'user' ? parseUserMessage(item.text) : null;
+function MessageBubbleComponent({ item, renderedHtml }: MessageBubbleProps): JSX.Element {
+  const parsedUserMessage = useMemo(
+    () => (item.role === 'user' ? parseUserMessage(item.text) : null),
+    [item],
+  );
 
   if (item.role === 'assistant') {
     return (
@@ -41,3 +45,5 @@ export function MessageBubble({ item, renderedHtml }: MessageBubbleProps): JSX.E
     </div>
   );
 }
+
+export const MessageBubble = memo(MessageBubbleComponent);

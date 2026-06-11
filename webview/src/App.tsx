@@ -1,5 +1,7 @@
 import {
   useEffect,
+  useCallback,
+  useMemo,
   useReducer,
   useRef,
   useState,
@@ -68,9 +70,15 @@ export function App(): JSX.Element {
 
   const sessionState = state.persisted.sessionState;
   const availableCommands = sessionState?.availableCommands ?? [];
-  const basePlaceholder = getBasePlaceholder(availableCommands);
-  const slashFilteredCommands = getSlashFilteredCommands(state.promptText, availableCommands);
-  const activeFileMention = getActiveFileMention(state.promptText, cursorPosition);
+  const basePlaceholder = useMemo(() => getBasePlaceholder(availableCommands), [availableCommands]);
+  const slashFilteredCommands = useMemo(
+    () => getSlashFilteredCommands(state.promptText, availableCommands),
+    [availableCommands, state.promptText],
+  );
+  const activeFileMention = useMemo(
+    () => getActiveFileMention(state.promptText, cursorPosition),
+    [cursorPosition, state.promptText],
+  );
   const fileMentionKey = activeFileMention
     ? `${activeFileMention.start}:${activeFileMention.end}:${activeFileMention.query}:${cursorPosition}`
     : null;
@@ -90,13 +98,21 @@ export function App(): JSX.Element {
       : basePlaceholder;
   const disabledBySession =
     state.isLoadingSession || (!state.persisted.hasActiveSession && !state.composerUnlocked);
-  const excludedToolIndexes = new Set(state.currentTurn?.historyToolCallIndexes ?? []);
-  const historyBlocks = buildHistoryBlocks(state.persisted.chatHistory, excludedToolIndexes);
-  const currentMode = sessionState?.modes?.availableModes.find(
-    (mode) => mode.id === sessionState.modes?.currentModeId,
+  const excludedToolIndexes = useMemo(
+    () => new Set(state.currentTurn?.historyToolCallIndexes ?? []),
+    [state.currentTurn?.historyToolCallIndexes],
   );
-  const currentModel = sessionState?.models?.availableModels.find(
-    (model) => model.modelId === sessionState.models?.currentModelId,
+  const historyBlocks = useMemo(
+    () => buildHistoryBlocks(state.persisted.chatHistory, excludedToolIndexes),
+    [excludedToolIndexes, state.persisted.chatHistory],
+  );
+  const currentMode = useMemo(
+    () => sessionState?.modes?.availableModes.find((mode) => mode.id === sessionState.modes?.currentModeId),
+    [sessionState?.modes?.availableModes, sessionState?.modes?.currentModeId],
+  );
+  const currentModel = useMemo(
+    () => sessionState?.models?.availableModels.find((model) => model.modelId === sessionState.models?.currentModelId),
+    [sessionState?.models?.availableModels, sessionState?.models?.currentModelId],
   );
 
   useEffect(() => {
@@ -359,19 +375,19 @@ export function App(): JSX.Element {
     };
   }, []);
 
-  function focusPromptInput(): void {
+  const focusPromptInput = useCallback((): void => {
     requestAnimationFrame(() => {
       promptInputRef.current?.focus();
     });
-  }
+  }, []);
 
-  function updateCursorFromInput(input: HTMLDivElement): void {
+  const updateCursorFromInput = useCallback((input: HTMLDivElement): void => {
     const newPos = getEditableCursorPosition(input);
     pendingCursorPositionRef.current = newPos;
     setCursorPosition(newPos);
-  }
+  }, []);
 
-  function handlePromptInput(event: FormEvent<HTMLDivElement>): void {
+  const handlePromptInput = useCallback((event: FormEvent<HTMLDivElement>): void => {
     const input = event.currentTarget;
     const nextPromptText = getEditableText(input);
     const nextCursorPosition = getEditableCursorPosition(input);
@@ -387,9 +403,9 @@ export function App(): JSX.Element {
       const nextMentions = prevMentions.filter((mention) => nextPromptText.includes(mention.token));
       return nextMentions.length === prevMentions.length ? prevMentions : nextMentions;
     });
-  }
+  }, [state.slashPopupSuppressedFor]);
 
-  function selectFileResult(result: FileSearchResult | undefined, mention: ActiveFileMention | null = activeFileMention): void {
+  const selectFileResult = useCallback((result: FileSearchResult | undefined, mention: ActiveFileMention | null = activeFileMention): void => {
     if (!result || !mention) {
       return;
     }
@@ -407,9 +423,9 @@ export function App(): JSX.Element {
       { ...result, token },
     ]);
     dispatch({ type: 'setPromptText', text: next.text });
-  }
+  }, [activeFileMention]);
 
-  function handleSend(explicitText?: string): void {
+  const handleSend = useCallback((explicitText?: string): void => {
     const text = (explicitText ?? state.promptText).trim();
     if (!text || state.isProcessing) {
       return;
@@ -421,39 +437,39 @@ export function App(): JSX.Element {
     dispatch({ type: 'suppressSlashPopup', promptText: null });
     setSelectedFileMentions([]);
     postMessage({ type: 'sendPrompt', text: expandFileMentionsForPrompt(text, selectedFileMentions) });
-  }
+  }, [selectedFileMentions, state.isProcessing, state.promptText]);
 
-  function handleOpenSelectedFile(path: string): void {
+  const handleOpenSelectedFile = useCallback((path: string): void => {
     postMessage({ type: 'openFile', path });
-  }
+  }, []);
 
-  function handleCancel(): void {
+  const handleCancel = useCallback((): void => {
     postMessage({ type: 'cancelTurn' });
-  }
+  }, []);
 
-  function handleWelcomeCommand(command: string): void {
+  const handleWelcomeCommand = useCallback((command: string): void => {
     postMessage({ type: 'executeCommand', command });
-  }
+  }, []);
 
-  function handleApprovePipelinePlan(plan: string): void {
+  const handleApprovePipelinePlan = useCallback((plan: string): void => {
     dispatch({
       type: 'updatePipelinePlanStatus',
       status: 'implementing',
       message: 'Implementation starting...',
     });
     postMessage({ type: 'approvePipelinePlan', plan });
-  }
+  }, []);
 
-  function handleRejectPipelinePlan(): void {
+  const handleRejectPipelinePlan = useCallback((): void => {
     dispatch({
       type: 'updatePipelinePlanStatus',
       status: 'rejected',
       message: 'Plan rejected.',
     });
     postMessage({ type: 'rejectPipelinePlan' });
-  }
+  }, []);
 
-  function handleResizeStart(event: ReactMouseEvent<HTMLDivElement>): void {
+  const handleResizeStart = useCallback((event: ReactMouseEvent<HTMLDivElement>): void => {
     event.preventDefault();
     const startY = event.clientY;
     const startHeight = stateRef.current.inputAreaHeight;
@@ -470,9 +486,9 @@ export function App(): JSX.Element {
 
     document.addEventListener('mousemove', onMouseMove);
     document.addEventListener('mouseup', onMouseUp);
-  }
+  }, []);
 
-  function selectSlashCommand(command: SlashCommand | undefined): void {
+  const selectSlashCommand = useCallback((command: SlashCommand | undefined): void => {
     if (!command) {
       return;
     }
@@ -493,9 +509,9 @@ export function App(): JSX.Element {
     dispatch({ type: 'setPromptText', text: `/${command.name}` });
     dispatch({ type: 'setPlaceholderOverride', placeholder: null });
     handleSend(`/${command.name}`);
-  }
+  }, [focusPromptInput, handleSend, state.promptText]);
 
-  function handlePromptKeyDown(event: ReactKeyboardEvent<HTMLDivElement>): void {
+  const handlePromptKeyDown = useCallback((event: ReactKeyboardEvent<HTMLDivElement>): void => {
     if (isFilePopupOpen) {
       if (event.key === 'ArrowDown') {
         event.preventDefault();
@@ -575,9 +591,23 @@ export function App(): JSX.Element {
         handleSend();
       }
     }
-  }
+  }, [
+    fileMentionKey,
+    fileResults,
+    fileSelectedIdx,
+    handleCancel,
+    handleSend,
+    isFilePopupOpen,
+    isSlashPopupOpen,
+    selectFileResult,
+    selectSlashCommand,
+    slashFilteredCommands,
+    state.isProcessing,
+    state.promptText,
+    state.slashSelectedIdx,
+  ]);
 
-  function handleModeSelect(mode: ModeOption, event: ReactMouseEvent<HTMLDivElement>): void {
+  const handleModeSelect = useCallback((mode: ModeOption, event: ReactMouseEvent<HTMLDivElement>): void => {
     event.stopPropagation();
     dispatch({ type: 'closePickers' });
     if (sessionState?.modes?.currentModeId === mode.id) {
@@ -585,9 +615,9 @@ export function App(): JSX.Element {
     }
     dispatch({ type: 'updateCurrentMode', modeId: mode.id });
     postMessage({ type: 'setMode', modeId: mode.id });
-  }
+  }, [sessionState?.modes?.currentModeId]);
 
-  function handleModelSelect(model: ModelOption, event: ReactMouseEvent<HTMLDivElement>): void {
+  const handleModelSelect = useCallback((model: ModelOption, event: ReactMouseEvent<HTMLDivElement>): void => {
     event.stopPropagation();
     dispatch({ type: 'closePickers' });
     if (sessionState?.models?.currentModelId === model.modelId) {
@@ -595,13 +625,13 @@ export function App(): JSX.Element {
     }
     dispatch({ type: 'updateCurrentModel', modelId: model.modelId });
     postMessage({ type: 'setModel', modelId: model.modelId });
-  }
+  }, [sessionState?.models?.currentModelId]);
 
-  function handleConfigOptionSelect(
+  const handleConfigOptionSelect = useCallback((
     option: SessionConfigOption,
     value: ConfigOptionValue,
     event: ReactMouseEvent<HTMLDivElement>,
-  ): void {
+  ): void => {
     event.stopPropagation();
     dispatch({ type: 'closePickers' });
     if (option.currentValue === value.value) {
@@ -618,7 +648,7 @@ export function App(): JSX.Element {
     );
     dispatch({ type: 'updateConfigOptions', configOptions });
     postMessage({ type: 'setConfigOption', configId: option.id, value: value.value });
-  }
+  }, [sessionState?.configOptions]);
 
   const emptyStateVisible =
     !state.persisted.hasActiveSession &&

@@ -1,0 +1,4 @@
+interface:
+  display_name: "VS Code Extension API"
+  short_description: "Build and maintain VS Code extensions"
+  default_prompt: "Use $vscode-extension-api to help build, test, debug, or publish a VS Code extension."

@@ -295,6 +295,7 @@ export class SessionManager extends EventEmitter {
       if (sharedDiscussionContext) {
         this.pendingSharedDiscussionContext.set(sessionInfo.sessionId, sharedDiscussionContext.text);
         this.linkContextFamily(sharedDiscussionContext, agentName, sessionInfo.sessionId, workspace);
+        this.emit('pending-shared-context-changed', sessionInfo.sessionId);
       }
 
       this.agentSessions.set(agentName, sessionInfo.sessionId);
@@ -359,6 +360,7 @@ export class SessionManager extends EventEmitter {
     if (sharedDiscussionContext) {
       this.pendingSharedDiscussionContext.set(sessionId, sharedDiscussionContext.text);
       this.linkContextFamily(sharedDiscussionContext, agentName, sessionId, cwd);
+      this.emit('pending-shared-context-changed', sessionId);
     }
     this.agentSessions.set(agentName, sessionId);
     this.activeSessionId = sessionId;
@@ -531,6 +533,7 @@ export class SessionManager extends EventEmitter {
     const sharedContext = this.pendingSharedDiscussionContext.get(sessionId);
     if (sharedContext) {
       this.pendingSharedDiscussionContext.delete(sessionId);
+      this.emit('pending-shared-context-changed', sessionId);
     }
     return sharedContext
       ? `${sharedContext}\n\nCurrent user prompt:\n${text}`
@@ -1081,6 +1084,7 @@ export class SessionManager extends EventEmitter {
     if (sharedDiscussionContext) {
       this.pendingSharedDiscussionContext.set(sessionId, sharedDiscussionContext.text);
       this.linkContextFamily(sharedDiscussionContext, agentName, sessionId, cwd);
+      this.emit('pending-shared-context-changed', sessionId);
     }
     this.emit('session-load-end', sessionId, agentName, /*ok=*/true);
 
@@ -1161,6 +1165,7 @@ export class SessionManager extends EventEmitter {
     if (sharedDiscussionContext) {
       this.pendingSharedDiscussionContext.set(sessionId, sharedDiscussionContext.text);
       this.linkContextFamily(sharedDiscussionContext, agentName, sessionId, cwd);
+      this.emit('pending-shared-context-changed', sessionId);
     }
     this.drainPending(sessionInfo);
     this.agentSessions.set(agentName, sessionId);

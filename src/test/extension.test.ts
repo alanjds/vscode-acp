@@ -103,6 +103,7 @@ suite('Extension Test Suite', () => {
       'acp.removeAgent',
       'acp.showLog',
       'acp.showTraffic',
+      'acp.openDebugSnapshot',
       'acp.browseRegistry',
     ];
 

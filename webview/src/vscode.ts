@@ -5,6 +5,7 @@ import type {
   ModelsState,
   ModesState,
   SessionConfigOption,
+  DebugSnapshot,
   SessionSnapshot,
   SessionUpdate,
 } from './chatTypes';
@@ -32,6 +33,7 @@ export type HostToWebviewMessage =
   | { type: 'pipelinePlanReady'; plan: string }
   | { type: 'pipelineStatus'; status?: string; message?: string }
   | { type: 'markdownRendered'; items: MarkdownRenderedItem[] }
+  | { type: 'debugSnapshot'; snapshot: DebugSnapshot }
   | { type: string; [key: string]: unknown };
 
 export type WebviewToHostMessage =
@@ -46,7 +48,11 @@ export type WebviewToHostMessage =
   | { type: 'executeCommand'; command: string }
   | { type: 'searchFiles'; query: string; requestId: number }
   | { type: 'openFile'; path: string }
-  | { type: 'renderMarkdown'; items: MarkdownRenderItem[] };
+  | { type: 'renderMarkdown'; items: MarkdownRenderItem[] }
+  | { type: 'openDebugSnapshot'; chatState: unknown }
+  | { type: 'refreshDebugSnapshot' }
+  | { type: 'copyDebugSnapshot' }
+  | { type: 'exportDebugSnapshot' };
 
 type VsCodeApi<State> = {
   postMessage(message: WebviewToHostMessage): void;

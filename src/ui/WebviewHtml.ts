@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 
 import { logError } from '../utils/Logger';
 
-export type ReactShellViewKind = 'chat';
+export type ReactShellViewKind = 'chat' | 'debug';
 
 export async function getReactShellHtmlContent(
   extensionUri: vscode.Uri,

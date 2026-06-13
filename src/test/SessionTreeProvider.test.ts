@@ -27,6 +27,10 @@ class FakeSessionManager extends EventEmitter {
     return this.activeSessionId;
   }
 
+  getActiveContextFamilyId(): string | null {
+    return null;
+  }
+
   async ensureConnected(): Promise<void> {
     return;
   }
@@ -78,6 +82,8 @@ suite('SessionTreeProvider', () => {
         }
         return [];
       },
+      getContextFamily: () => null,
+      agentHasContextFamily: () => false,
       onDidChange: () => ({ dispose: () => undefined }),
     };
 
@@ -310,6 +316,8 @@ suite('SessionTreeProvider', () => {
         }
         return [];
       },
+      getContextFamily: () => null,
+      agentHasContextFamily: () => false,
       onDidChange: () => ({ dispose: () => undefined }),
     };
 

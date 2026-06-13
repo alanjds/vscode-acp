@@ -116,6 +116,11 @@
         "title": "ACP: Show Protocol Traffic"
       },
       {
+        "command": "acp.openDebugSnapshot",
+        "title": "ACP: Open Debug Snapshot",
+        "icon": "$(bug)"
+      },
+      {
         "command": "acp.browseRegistry",
         "title": "ACP: Browse Agent Registry"
       },
@@ -257,6 +262,11 @@
         {
           "command": "acp.showTraffic",
           "when": "view == acp-chat"
+        },
+        {
+          "command": "acp.openDebugSnapshot",
+          "when": "view == acp-chat",
+          "group": "navigation@6"
         },
         {
           "command": "acp.restartAgent",

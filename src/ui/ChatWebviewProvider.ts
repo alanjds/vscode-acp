@@ -4,6 +4,7 @@ import { marked } from 'marked';
 import type { SessionNotification } from '@agentclientprotocol/sdk';
 
 import { SessionManager } from '../core/SessionManager';
+import { DebugTraceStore } from '../core/DebugTraceStore';
 import { SessionUpdateHandler, SessionUpdateListener } from '../handlers/SessionUpdateHandler';
 import { ALLOWED_WEBVIEW_COMMANDS } from '../security/SecurityPolicy';
 import { log, logError } from '../utils/Logger';
@@ -18,6 +19,7 @@ import {
 } from '../pipeline/PipelineService';
 
 type GetEditorContext = () => EditorContext | null;
+type OpenDebugSnapshot = (chatState: unknown) => void | Promise<void>;
 
 type WebviewMessage = {
   type: string;
@@ -55,6 +57,8 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     private readonly sessionUpdateHandler: SessionUpdateHandler,
     pipelineServiceOrGetEditorContext: PipelineService | GetEditorContext | null = null,
     getEditorContext: GetEditorContext = () => null,
+    private readonly debugTraceStore?: DebugTraceStore,
+    private readonly openDebugSnapshot?: OpenDebugSnapshot,
   ) {
     if (typeof pipelineServiceOrGetEditorContext === 'function') {
       this.pipelineService = null;
@@ -185,6 +189,9 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
         case 'openFile':
           await this.handleOpenFile(String(message.path ?? ''));
           break;
+        case 'openDebugSnapshot':
+          await this.openDebugSnapshot?.(message.chatState ?? null);
+          break;
         case 'executeCommand':
           if (typeof message.command === 'string' && message.command && ALLOWED_WEBVIEW_COMMANDS.has(message.command)) {
             await vscode.commands.executeCommand(message.command);
@@ -287,6 +294,21 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     const agentText = this.editorContextLinked && editorContext
       ? buildPromptWithEditorContext(text, editorContext)
       : text;
+    const promptStartedAt = Date.now();
+
+    this.debugTraceStore?.record({
+      category: 'prompt',
+      sessionId: activeId,
+      method: 'sendPrompt',
+      status: 'started',
+      payload: {
+        rawText: text,
+        agentText,
+        editorContextLinked: this.editorContextLinked,
+        editorContext,
+        agentName: this.sessionManager.getActiveAgentName(),
+      },
+    });
 
     if (this.editorContextLinked && !editorContext) {
       this.postMessage({
@@ -308,6 +330,14 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 
     try {
       const response = await this.sessionManager.sendPrompt(activeId, agentText);
+      this.debugTraceStore?.record({
+        category: 'prompt',
+        sessionId: activeId,
+        method: 'sendPrompt',
+        status: 'completed',
+        durationMs: Date.now() - promptStartedAt,
+        payload: response,
+      });
       this.postMessage({
         type: 'promptEnd',
         stopReason: response.stopReason,
@@ -316,6 +346,14 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       this.sessionManager.touchHistory(activeId);
     } catch (e: any) {
       logError('Prompt failed', e);
+      this.debugTraceStore?.record({
+        category: 'prompt',
+        sessionId: activeId,
+        method: 'sendPrompt',
+        status: 'failed',
+        durationMs: Date.now() - promptStartedAt,
+        payload: e,
+      });
       this.postMessage({
         type: 'error',
         message: e.message || 'Prompt failed',
@@ -518,6 +556,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
         configOptions: session.configOptions,
         availableCommands: session.availableCommands,
         contextFamily: this.sessionManager.getSessionContextFamily(session.sessionId),
+        pendingSharedContext: this.sessionManager.hasPendingSharedDiscussionContext(session.sessionId),
       } : null,
     });
   }
@@ -600,6 +639,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
   }
 
   showInfoMessage(message: string): void {
+    this._hasChatContent = true;
     this.postMessage({ type: 'info', message });
   }
 

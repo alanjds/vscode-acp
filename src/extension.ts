@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 
 import { AgentManager } from './core/AgentManager';
 import { ConnectionManager } from './core/ConnectionManager';
+import { DebugTraceStore } from './core/DebugTraceStore';
 import { SessionManager } from './core/SessionManager';
 import { SessionHistoryStore } from './core/SessionHistoryStore';
 import { resolveWorkspaceIdentity } from './core/WorkspaceIdentity';
@@ -9,11 +10,13 @@ import { SessionUpdateHandler } from './handlers/SessionUpdateHandler';
 import { SessionTreeProvider } from './ui/SessionTreeProvider';
 import { StatusBarManager } from './ui/StatusBarManager';
 import { ChatWebviewProvider } from './ui/ChatWebviewProvider';
+import { DebugWebviewPanel } from './ui/DebugWebviewPanel';
 import { captureEditorContext, captureOpenEditorPaths, initializeOpenEditorsTracker } from './ui/EditorContext';
 import { PipelineService } from './pipeline/PipelineService';
 import { EDITOR_CONTEXT_LINK_STATE_KEY, registerCommands } from './commands/RegisterCommands';
 import { log, disposeChannels } from './utils/Logger';
 import { initTelemetry, sendEvent } from './utils/TelemetryManager';
+import { version as extensionVersion } from '../package.json';
 
 export function activate(context: vscode.ExtensionContext): void {
   log('ACP Client extension activating...');
@@ -24,9 +27,10 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // --- Core services ---
   context.subscriptions.push(...initializeOpenEditorsTracker());
-  const sessionUpdateHandler = new SessionUpdateHandler();
+  const debugTraceStore = new DebugTraceStore();
+  const sessionUpdateHandler = new SessionUpdateHandler(debugTraceStore);
   const agentManager = new AgentManager();
-  const connectionManager = new ConnectionManager(sessionUpdateHandler);
+  const connectionManager = new ConnectionManager(sessionUpdateHandler, debugTraceStore);
   const sessionManager = new SessionManager(
     agentManager,
     connectionManager,
@@ -48,6 +52,12 @@ export function activate(context: vscode.ExtensionContext): void {
   const treeView = vscode.window.createTreeView('acp-sessions', {
     treeDataProvider: sessionTreeProvider,
   });
+  const debugWebviewPanel = new DebugWebviewPanel(
+    context.extensionUri,
+    sessionManager,
+    debugTraceStore,
+    extensionVersion,
+  );
 
   const chatWebviewProvider = new ChatWebviewProvider(
     context.extensionUri,
@@ -58,6 +68,8 @@ export function activate(context: vscode.ExtensionContext): void {
       vscode.window.activeTextEditor,
       captureOpenEditorPaths(vscode.window.tabGroups.all),
     ),
+    debugTraceStore,
+    (chatState) => debugWebviewPanel.open(chatState),
   );
   const initialEditorContextLinked = context.workspaceState.get<boolean>(
     EDITOR_CONTEXT_LINK_STATE_KEY,
@@ -79,6 +91,12 @@ export function activate(context: vscode.ExtensionContext): void {
   });
 
   sessionManager.on('context-family-changed', (sessionId: string) => {
+    if (sessionId === sessionManager.getActiveSessionId()) {
+      chatWebviewProvider.notifyActiveSessionChanged();
+    }
+  });
+
+  sessionManager.on('pending-shared-context-changed', (sessionId: string) => {
     if (sessionId === sessionManager.getActiveSessionId()) {
       chatWebviewProvider.notifyActiveSessionChanged();
     }
@@ -132,12 +150,17 @@ export function activate(context: vscode.ExtensionContext): void {
     chatWebviewProvider,
     historyStore,
   });
+  const openDebugSnapshotCmd = vscode.commands.registerCommand('acp.openDebugSnapshot', async () => {
+    sendEvent('command/openDebugSnapshot');
+    await debugWebviewPanel.open();
+  });
 
   // --- Register disposables ---
   context.subscriptions.push(
     treeView,
     chatViewRegistration,
     statusBarManager,
+    openDebugSnapshotCmd,
     ...commandDisposables,
     {
       dispose: () => {
@@ -146,6 +169,7 @@ export function activate(context: vscode.ExtensionContext): void {
         sessionUpdateHandler.dispose();
         chatWebviewProvider.dispose();
         sessionTreeProvider.dispose();
+        debugWebviewPanel.dispose();
         disposeChannels();
       },
     },

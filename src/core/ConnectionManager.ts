@@ -9,6 +9,7 @@ import { FileSystemHandler } from '../handlers/FileSystemHandler';
 import { TerminalHandler } from '../handlers/TerminalHandler';
 import { PermissionHandler } from '../handlers/PermissionHandler';
 import { SessionUpdateHandler } from '../handlers/SessionUpdateHandler';
+import { DebugTraceStore } from './DebugTraceStore';
 import { log, logError, logTraffic } from '../utils/Logger';
 import { version as extensionVersion } from '../../package.json';
 
@@ -27,6 +28,7 @@ export class ConnectionManager {
 
   constructor(
     private readonly sessionUpdateHandler: SessionUpdateHandler,
+    private readonly debugTraceStore?: DebugTraceStore,
   ) {}
 
   /**
@@ -47,7 +49,7 @@ export class ConnectionManager {
     const stream = ndJsonStream(writable, readable);
 
     // Wrap the stream to intercept and log all ACP traffic
-    const tappedStream = this.tapStream(stream);
+    const tappedStream = this.tapStream(stream, agentId);
 
     // Create handlers with workspace root for security boundary enforcement
     const fsHandler = new FileSystemHandler(workspaceCwd);
@@ -60,6 +62,8 @@ export class ConnectionManager {
       terminalHandler,
       permissionHandler,
       this.sessionUpdateHandler,
+      this.debugTraceStore,
+      agentId,
     );
 
     // Create connection — toClient factory receives the Agent proxy
@@ -111,11 +115,19 @@ export class ConnectionManager {
   /**
    * Wrap a Stream to intercept and log all messages in both directions.
    */
-  private tapStream(stream: Stream): Stream {
+  private tapStream(stream: Stream, agentId: string): Stream {
     // Tap outgoing messages (client → agent)
+    const debugTraceStore = this.debugTraceStore;
     const sendTap = new TransformStream({
       transform(chunk: unknown, controller: TransformStreamDefaultController) {
         logTraffic('send', chunk);
+        debugTraceStore?.record({
+          category: 'traffic',
+          direction: 'send',
+          agentId,
+          method: getTrafficMethod(chunk),
+          payload: chunk,
+        });
         controller.enqueue(chunk);
       },
     });
@@ -124,6 +136,13 @@ export class ConnectionManager {
     const recvTap = new TransformStream({
       transform(chunk: unknown, controller: TransformStreamDefaultController) {
         logTraffic('recv', chunk);
+        debugTraceStore?.record({
+          category: 'traffic',
+          direction: 'recv',
+          agentId,
+          method: getTrafficMethod(chunk),
+          payload: chunk,
+        });
         controller.enqueue(chunk);
       },
     });
@@ -138,4 +157,21 @@ export class ConnectionManager {
       readable: recvTap.readable,
     };
   }
+}
+
+function getTrafficMethod(chunk: unknown): string | undefined {
+  if (!chunk || typeof chunk !== 'object') {
+    return undefined;
+  }
+
+  const message = chunk as Record<string, unknown>;
+  if (typeof message.method === 'string') {
+    return message.method;
+  }
+  if ('result' in message || 'error' in message) {
+    return typeof message.id === 'string' || typeof message.id === 'number'
+      ? `response:${message.id}`
+      : 'response';
+  }
+  return undefined;
 }

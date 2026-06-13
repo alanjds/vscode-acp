@@ -202,6 +202,7 @@ export function normalizeSessionSnapshot(value: unknown): SessionSnapshot | null
     configOptions: normalizeConfigOptions(candidate.configOptions),
     availableCommands: normalizeSlashCommands(candidate.availableCommands),
     contextFamily: normalizeContextFamily(candidate.contextFamily),
+    pendingSharedContext: candidate.pendingSharedContext === true,
   };
 }
 

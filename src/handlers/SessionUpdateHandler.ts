@@ -1,4 +1,5 @@
 import { log } from '../utils/Logger';
+import { DebugTraceStore } from '../core/DebugTraceStore';
 
 import type { SessionNotification } from '@agentclientprotocol/sdk';
 
@@ -11,6 +12,8 @@ export type SessionUpdateListener = (update: SessionNotification) => void;
 export class SessionUpdateHandler {
   private listeners: Set<SessionUpdateListener> = new Set();
 
+  constructor(private readonly debugTraceStore?: DebugTraceStore) {}
+
   addListener(listener: SessionUpdateListener): void {
     this.listeners.add(listener);
   }
@@ -22,6 +25,12 @@ export class SessionUpdateHandler {
   handleUpdate(update: SessionNotification): void {
     const updateType = (update.update as any)?.sessionUpdate || 'unknown';
     log(`sessionUpdate: type=${updateType}, sessionId=${update.sessionId}`);
+    this.debugTraceStore?.record({
+      category: 'session-update',
+      sessionId: update.sessionId,
+      method: updateType,
+      payload: update,
+    });
 
     for (const listener of this.listeners) {
       try {

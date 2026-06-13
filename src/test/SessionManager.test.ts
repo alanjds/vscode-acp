@@ -69,6 +69,13 @@ function createManager() {
       historyCalls.push({ agentName, sessionId, title });
     },
     setFirstPromptIfMissing: () => undefined,
+    appendUserMessage: () => undefined,
+    appendUserMessageChunk: () => undefined,
+    appendAssistantMessageChunk: () => undefined,
+    clearDiscussion: () => undefined,
+    buildDiscussionContext: () => null,
+    getContextFamily: () => null,
+    linkContextFamily: () => null,
     touch: () => undefined,
     upsertNew: () => undefined,
     reconcileFromAgent: () => undefined,
@@ -282,6 +289,53 @@ suite('SessionManager', () => {
     assert.strictEqual(manager.getActiveSessionId(), 's1');
     assert.strictEqual(events.filter(e => e.event === 'active-session-changed').length, 1);
     assert.strictEqual(events[0].arg, 's1');
+  });
+
+  test('connectToAgent does not share active context by default', async () => {
+    const { manager } = createManager();
+    const linked: any[] = [];
+    Object.assign((manager as any).historyStore, {
+      buildDiscussionContext: () => 'Previous context',
+      linkContextFamily: (...args: any[]) => {
+        linked.push(args);
+        return { contextFamilyId: 'ctx-1' };
+      },
+    });
+    registerSession(manager, {
+      sessionId: 'source',
+      agentName: 'Old Agent',
+      agentId: 'old-agent-1',
+      active: true,
+    });
+
+    await manager.connectToAgent('New Agent');
+
+    assert.strictEqual(manager.hasPendingSharedDiscussionContext('s1'), false);
+    assert.deepStrictEqual(linked, []);
+  });
+
+  test('connectToAgent can explicitly prepare shared context for next prompt', async () => {
+    const { manager } = createManager();
+    const linked: any[] = [];
+    Object.assign((manager as any).historyStore, {
+      buildDiscussionContext: (agentName: string, sessionId: string) =>
+        agentName === 'Old Agent' && sessionId === 'source' ? 'Previous context' : null,
+      linkContextFamily: (...args: any[]) => {
+        linked.push(args);
+        return { contextFamilyId: 'ctx-1' };
+      },
+    });
+    registerSession(manager, {
+      sessionId: 'source',
+      agentName: 'Old Agent',
+      agentId: 'old-agent-1',
+      active: true,
+    });
+
+    await manager.connectToAgent('New Agent', { shareCurrentContext: true });
+
+    assert.strictEqual(manager.hasPendingSharedDiscussionContext('s1'), true);
+    assert.deepStrictEqual(linked[0].slice(0, 4), ['Old Agent', 'source', 'New Agent', 's1']);
   });
 
   test('connectToAgent disconnects current agent before connecting to new one', async () => {

@@ -32,6 +32,8 @@ suite('ChatWebviewProvider', () => {
       getActiveSessionId: () => 'session-1',
       getActiveAgentName: () => 'agent-1',
       getSession: (sessionId: string) => sessions.get(sessionId),
+      getSessionContextFamily: () => null,
+      hasPendingSharedDiscussionContext: () => false,
       recordFirstPrompt: (_sessionId: string, prompt: string) => {
         recordedPrompts.push(prompt);
       },
@@ -665,5 +667,16 @@ suite('ChatWebviewProvider', () => {
       vscode.workspace.openTextDocument = originalOpenTextDocument;
       vscode.window.showTextDocument = originalShowTextDocument;
     }
+  });
+
+  test('includes pending shared context in session state snapshot', async () => {
+    const { provider, messages } = await createProvider(null);
+    (provider as any).sessionManager.hasPendingSharedDiscussionContext = () => true;
+    messages.length = 0;
+
+    (provider as any).sendCurrentState();
+
+    const stateMessage = messages.find(message => message.type === 'state');
+    assert.strictEqual(stateMessage.session.pendingSharedContext, true);
   });
 });

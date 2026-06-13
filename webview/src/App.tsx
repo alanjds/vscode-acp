@@ -451,6 +451,21 @@ export function App(): JSX.Element {
     postMessage({ type: 'executeCommand', command });
   }, []);
 
+  const handleOpenDebugSnapshot = useCallback((): void => {
+    const currentState = stateRef.current;
+    postMessage({
+      type: 'openDebugSnapshot',
+      chatState: {
+        persisted: currentState.persisted,
+        currentTurn: currentState.currentTurn,
+        renderedMarkdown: currentState.renderedMarkdown,
+        isProcessing: currentState.isProcessing,
+        isLoadingSession: currentState.isLoadingSession,
+        promptText: currentState.promptText,
+      },
+    });
+  }, []);
+
   const handleApprovePipelinePlan = useCallback((plan: string): void => {
     dispatch({
       type: 'updatePipelinePlanStatus',
@@ -670,8 +685,19 @@ export function App(): JSX.Element {
           <div className="agent">{sessionState?.title || sessionState?.agentName || 'Agent'}</div>
           <div className="cwd">{sessionState?.cwd || ''}</div>
           {contextFamilyLabel ? <div className="context-family">{contextFamilyLabel}</div> : null}
+          {sessionState?.pendingSharedContext ? (
+            <div className="pending-shared-context">Next prompt includes shared context</div>
+          ) : null}
         </div>
         <span className="status">{state.isProcessing ? <span className="spinner" /> : null}</span>
+        <button
+          className="banner-debug-btn"
+          title="Open debug snapshot"
+          type="button"
+          onClick={handleOpenDebugSnapshot}
+        >
+          Debug
+        </button>
       </div>
 
       <div className="messages" id="messages" ref={messagesRef}>

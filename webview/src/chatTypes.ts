@@ -90,6 +90,7 @@ export type SessionSnapshot = {
   configOptions?: SessionConfigOption[] | null;
   availableCommands?: SlashCommand[] | null;
   contextFamily?: ContextFamilySnapshot | null;
+  pendingSharedContext?: boolean;
 };
 
 export type MessageHistoryItem = {
@@ -253,4 +254,52 @@ export type CurrentTurn = {
   thought: CurrentThought | null;
   toolCalls: CurrentToolCall[];
   historyToolCallIndexes: number[];
+};
+
+export type DebugEventCategory =
+  | 'traffic'
+  | 'session-update'
+  | 'prompt'
+  | 'client-request'
+  | 'client-response'
+  | 'client-error'
+  | 'lifecycle';
+
+export type DebugEventDirection = 'send' | 'recv';
+
+export type DebugEvent = {
+  id: number;
+  timestamp: string;
+  category: DebugEventCategory | string;
+  direction?: DebugEventDirection;
+  agentId?: string;
+  sessionId?: string;
+  method?: string;
+  status?: string;
+  durationMs?: number;
+  payload?: unknown;
+  payloadSizeBytes: number;
+};
+
+export type DebugTraceSnapshot = {
+  version: 1;
+  startedAt: string;
+  capturedAt: string;
+  events: DebugEvent[];
+  eventCount: number;
+  droppedEvents: number;
+  maxEvents: number;
+  maxBytes: number;
+  totalBytes: number;
+};
+
+export type DebugSnapshot = {
+  version: 1;
+  generatedAt: string;
+  extension: {
+    version: string;
+  };
+  activeSession: Record<string, unknown> | null;
+  trace: DebugTraceSnapshot;
+  chatState: unknown;
 };

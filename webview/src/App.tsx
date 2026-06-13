@@ -655,6 +655,12 @@ export function App(): JSX.Element {
     state.persisted.chatHistory.length === 0 &&
     !state.currentTurn &&
     !state.isLoadingSession;
+  const contextFamily = sessionState?.contextFamily;
+  const contextFamilyLabel = contextFamily
+    ? contextFamily.contextLinkedFrom
+      ? `Context family · from ${contextFamily.contextLinkedFrom.agentName}`
+      : 'Context family'
+    : null;
 
   return (
     <>
@@ -663,6 +669,7 @@ export function App(): JSX.Element {
         <div className="info">
           <div className="agent">{sessionState?.title || sessionState?.agentName || 'Agent'}</div>
           <div className="cwd">{sessionState?.cwd || ''}</div>
+          {contextFamilyLabel ? <div className="context-family">{contextFamilyLabel}</div> : null}
         </div>
         <span className="status">{state.isProcessing ? <span className="spinner" /> : null}</span>
       </div>

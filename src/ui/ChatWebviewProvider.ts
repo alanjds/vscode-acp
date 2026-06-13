@@ -517,6 +517,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
         models: session.models,
         configOptions: session.configOptions,
         availableCommands: session.availableCommands,
+        contextFamily: this.sessionManager.getSessionContextFamily(session.sessionId),
       } : null,
     });
   }

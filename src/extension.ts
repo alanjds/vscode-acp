@@ -78,6 +78,12 @@ export function activate(context: vscode.ExtensionContext): void {
     chatWebviewProvider.notifyActiveSessionChanged();
   });
 
+  sessionManager.on('context-family-changed', (sessionId: string) => {
+    if (sessionId === sessionManager.getActiveSessionId()) {
+      chatWebviewProvider.notifyActiveSessionChanged();
+    }
+  });
+
   // Clear chat when new conversation is started
   sessionManager.on('clear-chat', () => {
     chatWebviewProvider.clearChat();

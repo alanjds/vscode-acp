@@ -18,7 +18,7 @@ import { PROTOCOL_VERSION, RequestError } from '@agentclientprotocol/sdk';
 import { AgentManager } from './AgentManager';
 import { ConnectionManager, ConnectionInfo } from './ConnectionManager';
 import { SessionUpdateHandler } from '../handlers/SessionUpdateHandler';
-import { SessionHistoryStore } from './SessionHistoryStore';
+import { ContextFamilyInfo, SessionHistoryStore } from './SessionHistoryStore';
 import { classifyAgentError } from './AgentError';
 import { resolveWorkspaceIdentity, type WorkspaceIdentity } from './WorkspaceIdentity';
 import { getAgentConfigs } from '../config/AgentConfig';
@@ -61,6 +61,12 @@ export interface AgentCapabilitySummary {
 
 export interface OpenSessionOptions {
   shareCurrentContext?: boolean;
+}
+
+interface SharedDiscussionContext {
+  text: string;
+  sourceAgentName: string;
+  sourceSessionId: string;
 }
 
 /**
@@ -136,6 +142,21 @@ export class SessionManager extends EventEmitter {
   /** Return true when the active session has discussion context worth sharing to the target. */
   hasShareableDiscussionContext(targetAgentName: string, targetSessionId?: string): boolean {
     return this.buildSharedDiscussionContextForTarget(targetAgentName, targetSessionId) !== null;
+  }
+
+  /** Return context-family metadata for a live session, if available. */
+  getSessionContextFamily(sessionId: string): ContextFamilyInfo | null {
+    const session = this.sessions.get(sessionId);
+    if (!session || !this.historyStore) {
+      return null;
+    }
+    return this.historyStore.getContextFamily(session.agentName, sessionId, session.cwd);
+  }
+
+  /** Return the active session's context-family id, used by the tree view. */
+  getActiveContextFamilyId(): string | null {
+    const activeId = this.getActiveSessionId();
+    return activeId ? this.getSessionContextFamily(activeId)?.contextFamilyId ?? null : null;
   }
 
   /**
@@ -272,7 +293,8 @@ export class SessionManager extends EventEmitter {
         fingerprintAgentConfig(config),
       );
       if (sharedDiscussionContext) {
-        this.pendingSharedDiscussionContext.set(sessionInfo.sessionId, sharedDiscussionContext);
+        this.pendingSharedDiscussionContext.set(sessionInfo.sessionId, sharedDiscussionContext.text);
+        this.linkContextFamily(sharedDiscussionContext, agentName, sessionInfo.sessionId, workspace);
       }
 
       this.agentSessions.set(agentName, sessionInfo.sessionId);
@@ -335,7 +357,8 @@ export class SessionManager extends EventEmitter {
 
     this.sessions.set(sessionId, sessionInfo);
     if (sharedDiscussionContext) {
-      this.pendingSharedDiscussionContext.set(sessionId, sharedDiscussionContext);
+      this.pendingSharedDiscussionContext.set(sessionId, sharedDiscussionContext.text);
+      this.linkContextFamily(sharedDiscussionContext, agentName, sessionId, cwd);
     }
     this.agentSessions.set(agentName, sessionId);
     this.activeSessionId = sessionId;
@@ -464,7 +487,7 @@ export class SessionManager extends EventEmitter {
       || (typeof e?.message === 'string' && /auth.?required/i.test(e.message));
   }
 
-  private buildSharedDiscussionContextForTarget(targetAgentName: string, targetSessionId?: string): string | null {
+  private buildSharedDiscussionContextForTarget(targetAgentName: string, targetSessionId?: string): SharedDiscussionContext | null {
     const currentSession = this.getActiveSession();
     if (!currentSession || !this.historyStore) {
       return null;
@@ -472,7 +495,36 @@ export class SessionManager extends EventEmitter {
     if (currentSession.agentName === targetAgentName && currentSession.sessionId === targetSessionId) {
       return null;
     }
-    return this.historyStore.buildDiscussionContext(currentSession.agentName, currentSession.sessionId);
+    const text = this.historyStore.buildDiscussionContext(currentSession.agentName, currentSession.sessionId);
+    return text
+      ? {
+          text,
+          sourceAgentName: currentSession.agentName,
+          sourceSessionId: currentSession.sessionId,
+        }
+      : null;
+  }
+
+  private linkContextFamily(
+    sharedDiscussionContext: SharedDiscussionContext,
+    targetAgentName: string,
+    targetSessionId: string,
+    workspace: string | WorkspaceIdentity,
+  ): void {
+    if (!this.historyStore) {
+      return;
+    }
+    this.historyStore.upsertNew(targetAgentName, workspace, targetSessionId);
+    const contextFamily = this.historyStore.linkContextFamily(
+      sharedDiscussionContext.sourceAgentName,
+      sharedDiscussionContext.sourceSessionId,
+      targetAgentName,
+      targetSessionId,
+      workspace,
+    );
+    if (contextFamily) {
+      this.emit('context-family-changed', targetSessionId, contextFamily);
+    }
   }
 
   private consumePendingSharedDiscussionContext(sessionId: string, text: string): string {
@@ -962,6 +1014,7 @@ export class SessionManager extends EventEmitter {
     if (!agentId) {
       throw new Error(`Unable to locate agent process for "${agentName}".`);
     }
+    this.historyStore?.upsertNew(agentName, cwd, sessionId);
 
     // Pre-register a placeholder so notifications that arrive during the
     // replay can be associated with the session (closing the same race the
@@ -983,9 +1036,6 @@ export class SessionManager extends EventEmitter {
     };
     this.sessions.set(sessionId, placeholder);
     this.drainPending(placeholder);
-    if (sharedDiscussionContext) {
-      this.pendingSharedDiscussionContext.set(sessionId, sharedDiscussionContext);
-    }
     this.loadingSessionIds.add(sessionId);
     this.historyStore?.clearDiscussion(agentName, sessionId);
     // Mark this session as active up front so handleSessionUpdate forwards
@@ -1028,6 +1078,10 @@ export class SessionManager extends EventEmitter {
     }
 
     this.loadingSessionIds.delete(sessionId);
+    if (sharedDiscussionContext) {
+      this.pendingSharedDiscussionContext.set(sessionId, sharedDiscussionContext.text);
+      this.linkContextFamily(sharedDiscussionContext, agentName, sessionId, cwd);
+    }
     this.emit('session-load-end', sessionId, agentName, /*ok=*/true);
 
     // Touch history-store activity timestamp.
@@ -1105,7 +1159,8 @@ export class SessionManager extends EventEmitter {
     };
     this.sessions.set(sessionId, sessionInfo);
     if (sharedDiscussionContext) {
-      this.pendingSharedDiscussionContext.set(sessionId, sharedDiscussionContext);
+      this.pendingSharedDiscussionContext.set(sessionId, sharedDiscussionContext.text);
+      this.linkContextFamily(sharedDiscussionContext, agentName, sessionId, cwd);
     }
     this.drainPending(sessionInfo);
     this.agentSessions.set(agentName, sessionId);

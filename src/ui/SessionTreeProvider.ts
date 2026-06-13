@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import type { SessionInfo as ProtocolSessionInfo } from '@agentclientprotocol/sdk';
 import { SessionManager, AgentCapabilitySummary } from '../core/SessionManager';
-import { SessionHistoryStore, PersistedSessionEntry } from '../core/SessionHistoryStore';
+import { ContextFamilyInfo, SessionHistoryStore, PersistedSessionEntry } from '../core/SessionHistoryStore';
 import { classifyAgentError } from '../core/AgentError';
 import {
   resolveWorkspaceIdentity,
@@ -22,6 +22,7 @@ export class AgentTreeItem extends vscode.TreeItem {
     public readonly agentName: string,
     public readonly connected: boolean,
     collapsibleState: vscode.TreeItemCollapsibleState,
+    public readonly linkedToActiveContext: boolean = false,
   ) {
     super(agentName, collapsibleState);
 
@@ -39,9 +40,16 @@ export class AgentTreeItem extends vscode.TreeItem {
       this.description = '';
     }
 
+    if (linkedToActiveContext) {
+      this.description = connected ? 'connected · linked context' : 'linked context';
+    }
+
     this.tooltip = connected
       ? `${agentName} — connected\nClick to open chat`
       : `${agentName} — not connected\nUse the plug icon to connect`;
+    if (linkedToActiveContext) {
+      this.tooltip += '\nShares the active context family';
+    }
   }
 }
 
@@ -58,16 +66,20 @@ export class SessionTreeItem extends vscode.TreeItem {
     description: string | undefined,
     tooltip: string,
     public readonly source: 'agent' | 'local',
+    public readonly contextFamily: ContextFamilyInfo | null = null,
+    public readonly linkedToActiveContext: boolean = false,
   ) {
     super(label, vscode.TreeItemCollapsibleState.None);
     this.contextValue = source === 'local' ? 'session-local' : 'session';
-    this.description = description;
-    this.tooltip = tooltip;
+    this.description = linkedToActiveContext ? appendDescription(description, 'linked') : description;
+    this.tooltip = contextFamily ? appendContextFamilyTooltip(tooltip, contextFamily) : tooltip;
     if (isActive) {
       this.iconPath = new vscode.ThemeIcon(
         'circle-filled',
         new vscode.ThemeColor('testing.iconPassed'),
       );
+    } else if (linkedToActiveContext) {
+      this.iconPath = new vscode.ThemeIcon('references');
     } else {
       this.iconPath = new vscode.ThemeIcon('comment-discussion');
     }
@@ -166,6 +178,7 @@ export class SessionTreeProvider implements vscode.TreeDataProvider<AgentNode | 
     this.sessionManager.on('agent-disconnected', () => this.refresh());
     this.sessionManager.on('active-session-changed', () => this.refresh());
     this.sessionManager.on('session-info-changed', () => this.refresh());
+    this.sessionManager.on('context-family-changed', () => this.refresh());
     if (this.historyStore) {
       this.historyStore.onDidChange(() => this.refresh());
     }
@@ -205,22 +218,29 @@ export class SessionTreeProvider implements vscode.TreeDataProvider<AgentNode | 
   // --- Tier 1 ---
 
   private getAgentNodes(): AgentTreeItem[] {
+    const activeContextFamilyId = this.sessionManager.getActiveContextFamilyId();
+    const workspace = this.getWorkspaceIdentity();
     return getAgentNames().map(name => {
+      const linkedToActiveContext = activeContextFamilyId
+        ? this.historyStore?.agentHasContextFamily(name, activeContextFamilyId, workspace) ?? false
+        : false;
       if (isPipelineVirtualAgentName(name)) {
         return new AgentTreeItem(
           name,
           this.sessionManager.isAgentConnected(name),
           vscode.TreeItemCollapsibleState.None,
+          linkedToActiveContext,
         );
       }
 
       const caps = this.sessionManager.getCachedCapabilities(name);
-      const localCount = this.historyStore?.list(name, this.getWorkspaceIdentity()).length ?? 0;
+      const localCount = this.historyStore?.list(name, workspace).length ?? 0;
       const collapsibleState = this.computeCollapsibleState(name, caps, localCount);
       return new AgentTreeItem(
         name,
         this.sessionManager.isAgentConnected(name),
         collapsibleState,
+        linkedToActiveContext,
       );
     });
   }
@@ -332,6 +352,8 @@ export class SessionTreeProvider implements vscode.TreeDataProvider<AgentNode | 
     const label = info.title?.trim() || shortSessionId(info.sessionId);
     const description = relativeTime(info.updatedAt);
     const tooltip = buildSessionTooltip(agentName, info.sessionId, info.cwd, info.updatedAt, 'agent');
+    const contextFamily = this.historyStore?.getContextFamily(agentName, info.sessionId, this.getWorkspaceIdentity()) ?? null;
+    const linkedToActiveContext = this.isInActiveContextFamily(contextFamily);
     return new SessionTreeItem(
       agentName,
       info.sessionId,
@@ -340,6 +362,8 @@ export class SessionTreeProvider implements vscode.TreeDataProvider<AgentNode | 
       description,
       tooltip,
       'agent',
+      contextFamily,
+      linkedToActiveContext,
     );
   }
 
@@ -442,6 +466,8 @@ export class SessionTreeProvider implements vscode.TreeDataProvider<AgentNode | 
       entry.lastActiveAt,
       'local',
     );
+    const contextFamily = this.historyStore?.getContextFamily(entry.agentName, entry.sessionId, this.getWorkspaceIdentity()) ?? null;
+    const linkedToActiveContext = this.isInActiveContextFamily(contextFamily);
     return new SessionTreeItem(
       entry.agentName,
       entry.sessionId,
@@ -450,7 +476,14 @@ export class SessionTreeProvider implements vscode.TreeDataProvider<AgentNode | 
       description,
       tooltip,
       'local',
+      contextFamily,
+      linkedToActiveContext,
     );
+  }
+
+  private isInActiveContextFamily(contextFamily: ContextFamilyInfo | null): boolean {
+    const activeContextFamilyId = this.sessionManager.getActiveContextFamilyId();
+    return Boolean(activeContextFamilyId && contextFamily?.contextFamilyId === activeContextFamilyId);
   }
 
   // --- Capability probe ---
@@ -537,6 +570,10 @@ function truncate(s: string, max: number): string {
   return s.length > max ? s.slice(0, max - 1) + '…' : s;
 }
 
+function appendDescription(description: string | undefined, suffix: string): string {
+  return description ? `${description} · ${suffix}` : suffix;
+}
+
 function relativeTime(iso: string | null | undefined): string | undefined {
   if (!iso) { return undefined; }
   const t = Date.parse(iso);
@@ -575,5 +612,19 @@ function buildSessionTooltip(
   lines.push(source === 'local'
     ? 'Stored locally — agent does not list sessions'
     : 'Listed by agent');
+  return lines.join('\n');
+}
+
+function appendContextFamilyTooltip(tooltip: string, contextFamily: ContextFamilyInfo): string {
+  const lines = [
+    tooltip,
+    `Context family: ${contextFamily.contextFamilyId}`,
+  ];
+  if (contextFamily.contextLinkedFrom) {
+    lines.push(`Linked from: ${contextFamily.contextLinkedFrom.agentName} (${contextFamily.contextLinkedFrom.sessionId})`);
+  }
+  if (contextFamily.contextLinkedAt) {
+    lines.push(`Linked at: ${contextFamily.contextLinkedAt}`);
+  }
   return lines.join('\n');
 }

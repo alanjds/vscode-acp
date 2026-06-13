@@ -14,6 +14,7 @@ import type {
   PlanUpdate,
   ConfigOptionGroup,
   ConfigOptionValue,
+  ContextLinkedFrom,
   SessionSnapshot,
   SessionConfigOption,
   SessionUpdate,
@@ -155,6 +156,36 @@ export function normalizeConfigOptions(value: unknown): SessionConfigOption[] {
     .filter((option) => option.id.length > 0);
 }
 
+function normalizeContextLinkedFrom(value: unknown): ContextLinkedFrom | undefined {
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+  const candidate = value as Record<string, unknown>;
+  const agentName = typeof candidate.agentName === 'string' ? candidate.agentName : '';
+  const sessionId = typeof candidate.sessionId === 'string' ? candidate.sessionId : '';
+  const createdAt = typeof candidate.createdAt === 'string' ? candidate.createdAt : '';
+  if (!agentName || !sessionId || !createdAt) {
+    return undefined;
+  }
+  return { agentName, sessionId, createdAt };
+}
+
+function normalizeContextFamily(value: unknown): SessionSnapshot['contextFamily'] {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+  const candidate = value as Record<string, unknown>;
+  const contextFamilyId = typeof candidate.contextFamilyId === 'string' ? candidate.contextFamilyId : '';
+  if (!contextFamilyId) {
+    return null;
+  }
+  return {
+    contextFamilyId,
+    contextLinkedFrom: normalizeContextLinkedFrom(candidate.contextLinkedFrom),
+    contextLinkedAt: typeof candidate.contextLinkedAt === 'string' ? candidate.contextLinkedAt : undefined,
+  };
+}
+
 export function normalizeSessionSnapshot(value: unknown): SessionSnapshot | null {
   if (!value || typeof value !== 'object') {
     return null;
@@ -170,6 +201,7 @@ export function normalizeSessionSnapshot(value: unknown): SessionSnapshot | null
     models: normalizeModelsState(candidate.models),
     configOptions: normalizeConfigOptions(candidate.configOptions),
     availableCommands: normalizeSlashCommands(candidate.availableCommands),
+    contextFamily: normalizeContextFamily(candidate.contextFamily),
   };
 }
 

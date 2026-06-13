@@ -68,6 +68,18 @@ export type SessionConfigOption = {
   options?: Array<ConfigOptionValue | ConfigOptionGroup>;
 };
 
+export type ContextLinkedFrom = {
+  agentName: string;
+  sessionId: string;
+  createdAt: string;
+};
+
+export type ContextFamilySnapshot = {
+  contextFamilyId: string;
+  contextLinkedFrom?: ContextLinkedFrom;
+  contextLinkedAt?: string;
+};
+
 export type SessionSnapshot = {
   sessionId?: string;
   agentName?: string;
@@ -77,6 +89,7 @@ export type SessionSnapshot = {
   models?: ModelsState | null;
   configOptions?: SessionConfigOption[] | null;
   availableCommands?: SlashCommand[] | null;
+  contextFamily?: ContextFamilySnapshot | null;
 };
 
 export type MessageHistoryItem = {

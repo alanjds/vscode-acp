@@ -29,33 +29,36 @@ export function registerCommands({
   chatWebviewProvider,
   historyStore,
 }: RegisterCommandsDependencies): vscode.Disposable[] {
-  const connectAgentCmd = vscode.commands.registerCommand('acp.connectAgent', async (agentNameOrItem?: string | any) => {
-    let agentName: string | undefined;
+  const resolveAgentName = async (agentNameOrItem?: string | any): Promise<string | undefined> => {
     if (typeof agentNameOrItem === 'string') {
-      agentName = agentNameOrItem;
-    } else if (agentNameOrItem?.agentName) {
-      agentName = agentNameOrItem.agentName;
+      return agentNameOrItem;
+    }
+    if (agentNameOrItem?.agentName) {
+      return agentNameOrItem.agentName;
     }
 
-    if (!agentName) {
-      const agentNames = getAgentNames();
-      if (agentNames.length === 0) {
-        vscode.window.showWarningMessage(
-          'No ACP agents configured. Add agents in Settings > ACP > Agents.',
-        );
-        return;
-      }
-      agentName = await vscode.window.showQuickPick(agentNames, {
-        placeHolder: 'Select an agent to connect',
-        title: 'Connect to Agent',
-      });
-      if (!agentName) { return; }
+    const agentNames = getAgentNames();
+    if (agentNames.length === 0) {
+      vscode.window.showWarningMessage(
+        'No ACP agents configured. Add agents in Settings > ACP > Agents.',
+      );
+      return undefined;
     }
+
+    return vscode.window.showQuickPick(agentNames, {
+      placeHolder: 'Select an agent to connect',
+      title: 'Connect to Agent',
+    });
+  };
+
+  const connectAgentCmd = vscode.commands.registerCommand('acp.connectAgent', async (agentNameOrItem?: string | any) => {
+    const agentName = await resolveAgentName(agentNameOrItem);
+    if (!agentName) { return; }
 
     const currentAgent = sessionManager.getActiveAgentName();
     if (currentAgent && currentAgent !== agentName && chatWebviewProvider.hasChatContent) {
       const choice = await vscode.window.showWarningMessage(
-        `Switch to ${agentName}? This will disconnect ${currentAgent} and clear the chat history.`,
+        `Switch to ${agentName}? This will disconnect ${currentAgent} and clear the visible chat history.`,
         'Switch Agent',
         'Cancel',
       );
@@ -77,6 +80,51 @@ export function registerCommands({
     } catch (e: any) {
       logError('Failed to connect to agent', e);
       await showClassifiedAgentError('Failed to connect', e);
+    }
+  });
+
+  const connectAgentWithCurrentContextCmd = vscode.commands.registerCommand('acp.connectAgentWithCurrentContext', async (agentNameOrItem?: string | any) => {
+    const agentName = await resolveAgentName(agentNameOrItem);
+    if (!agentName) { return; }
+
+    const currentAgent = sessionManager.getActiveAgentName();
+    if (currentAgent === agentName) {
+      vscode.window.showInformationMessage(`${agentName} is already active. No context handoff was prepared.`);
+      return;
+    }
+
+    const hasShareableContext = sessionManager.hasShareableDiscussionContext(agentName);
+    if (currentAgent && chatWebviewProvider.hasChatContent) {
+      const choice = await vscode.window.showWarningMessage(
+        `Connect to ${agentName} with current context? This will disconnect ${currentAgent}, clear the visible chat history, and include the current discussion in the next prompt.`,
+        'Connect With Context',
+        'Cancel',
+      );
+      if (choice !== 'Connect With Context') { return; }
+      chatWebviewProvider.clearChat();
+    }
+
+    try {
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: `Connecting to ${agentName} with current context...`,
+          cancellable: false,
+        },
+        async () => {
+          await sessionManager.connectToAgent(agentName, { shareCurrentContext: true });
+        },
+      );
+      await vscode.commands.executeCommand(FOCUS_CHAT_COMMAND);
+      if (hasShareableContext) {
+        chatWebviewProvider.showInfoMessage('Next prompt will include shared context.');
+      } else {
+        vscode.window.showInformationMessage('Connected. No current discussion context was available to share.');
+        chatWebviewProvider.showInfoMessage('Connected. No current discussion context was available to share.');
+      }
+    } catch (e: any) {
+      logError('Failed to connect to agent with current context', e);
+      await showClassifiedAgentError('Failed to connect with context', e);
     }
   });
 
@@ -222,7 +270,7 @@ export function registerCommands({
     sessionTreeProvider.invalidate(agentName);
   });
 
-  const openSessionCmd = vscode.commands.registerCommand('acp.openSession', async (arg?: any) => {
+  const openSessionFromTree = async (arg: any, shareCurrentContext: boolean): Promise<void> => {
     const agentName: string | undefined = arg?.agentName;
     const sessionId: string | undefined = arg?.sessionId;
     if (!agentName || !sessionId) {
@@ -235,17 +283,24 @@ export function registerCommands({
       return;
     }
 
+    const hasShareableContext = shareCurrentContext
+      && sessionManager.hasShareableDiscussionContext(agentName, sessionId);
+
     if (chatWebviewProvider.hasChatContent) {
+      const message = shareCurrentContext
+        ? 'Open a different session with the current context? This will replace the current chat history and share the current discussion with the target session on your next prompt.'
+        : 'Open a different session? This will replace the current chat history.';
       const choice = await vscode.window.showWarningMessage(
-        'Open a different session? This will replace the current chat history.',
-        'Open Session',
+        message,
+        shareCurrentContext ? 'Open With Context' : 'Open Session',
         'Cancel',
       );
-      if (choice !== 'Open Session') { return; }
+      if (choice !== (shareCurrentContext ? 'Open With Context' : 'Open Session')) { return; }
     }
 
     try {
       await vscode.commands.executeCommand(FOCUS_CHAT_COMMAND);
+      let opened = false;
       const caps = sessionManager.getCachedCapabilities(agentName);
       if (caps?.load) {
         await vscode.window.withProgress(
@@ -255,21 +310,34 @@ export function registerCommands({
             cancellable: false,
           },
           async () => {
-            await sessionManager.loadSession(agentName, sessionId);
+            await sessionManager.loadSession(agentName, sessionId, { shareCurrentContext });
           },
         );
+        opened = true;
       } else if (caps?.resume) {
-        await sessionManager.resumeSession(agentName, sessionId);
+        await sessionManager.resumeSession(agentName, sessionId, { shareCurrentContext });
+        opened = true;
         vscode.window.showInformationMessage('Resumed session (history not replayed).');
       } else {
         vscode.window.showErrorMessage(
           `Agent "${agentName}" does not support loading or resuming sessions.`,
         );
       }
+      if (opened && shareCurrentContext && !hasShareableContext) {
+        vscode.window.showInformationMessage('Opened session. No current discussion context was available to share.');
+      }
     } catch (e: any) {
       logError('Failed to open session', e);
       await showClassifiedAgentError('Failed to open session', e);
     }
+  };
+
+  const openSessionCmd = vscode.commands.registerCommand('acp.openSession', async (arg?: any) => {
+    await openSessionFromTree(arg, false);
+  });
+
+  const openSessionWithCurrentContextCmd = vscode.commands.registerCommand('acp.openSessionWithCurrentContext', async (arg?: any) => {
+    await openSessionFromTree(arg, true);
   });
 
   const loadMoreSessionsCmd = vscode.commands.registerCommand('acp.loadMoreSessions', async (agentName?: string) => {
@@ -395,6 +463,7 @@ export function registerCommands({
 
   return [
     connectAgentCmd,
+    connectAgentWithCurrentContextCmd,
     newConversationCmd,
     disconnectAgentCmd,
     openChatCmd,
@@ -408,6 +477,7 @@ export function registerCommands({
     refreshAgentsCmd,
     refreshSessionsCmd,
     openSessionCmd,
+    openSessionWithCurrentContextCmd,
     loadMoreSessionsCmd,
     copySessionIdCmd,
     forgetSessionCmd,

@@ -37,8 +37,15 @@ export interface PersistedSessionEntry {
   createdAt: string;
   /** ISO timestamp of the most recent activity (prompt end / update). */
   lastActiveAt: string;
+  /** Saved discussion turns for carrying context across agents. */
+  discussion?: PersistedDiscussionMessage[];
   /** Availability status of the local record. */
   status: PersistedSessionStatus;
+}
+
+export interface PersistedDiscussionMessage {
+  role: 'user' | 'assistant';
+  text: string;
 }
 
 interface PersistedSessionEntryV1 {
@@ -66,6 +73,9 @@ const STATE_KEY_V2 = 'acp.sessionHistory.v2';
 const MAX_PROMPT_LEN = 120;
 const DEFAULT_CAP_PER_AGENT_WORKSPACE = 50;
 const DEFAULT_VISIBLE_STATUSES = new Set<PersistedSessionStatus>(['available']);
+const MAX_DISCUSSION_MESSAGES = 40;
+const MAX_DISCUSSION_MESSAGE_LEN = 8_000;
+const DEFAULT_CONTEXT_MAX_CHARS = 12_000;
 
 export interface SessionHistoryListOptions {
   includeStatuses?: readonly PersistedSessionStatus[];
@@ -190,6 +200,54 @@ export class SessionHistoryStore {
     this.persist();
   }
 
+  /** Append a full user message to the saved discussion transcript. */
+  appendUserMessage(agentName: string, sessionId: string, text: string): void {
+    this.appendDiscussionMessage(agentName, sessionId, 'user', text, false);
+  }
+
+  /** Append a streamed user-message chunk, merging it into the previous user message. */
+  appendUserMessageChunk(agentName: string, sessionId: string, text: string): void {
+    this.appendDiscussionMessage(agentName, sessionId, 'user', text, true);
+  }
+
+  /** Append a streamed assistant-message chunk to the saved discussion transcript. */
+  appendAssistantMessageChunk(agentName: string, sessionId: string, text: string): void {
+    this.appendDiscussionMessage(agentName, sessionId, 'assistant', text, true);
+  }
+
+  /** Clear the saved discussion before rebuilding it from a session replay. */
+  clearDiscussion(agentName: string, sessionId: string): void {
+    const entry = this.get(agentName, sessionId);
+    if (!entry?.discussion) { return; }
+    delete entry.discussion;
+    this.persist();
+  }
+
+  /** Build a compact discussion context suitable for sharing with another agent. */
+  buildDiscussionContext(agentName: string, sessionId: string, maxChars: number = DEFAULT_CONTEXT_MAX_CHARS): string | null {
+    const discussion = this.get(agentName, sessionId)?.discussion ?? [];
+    const messages = discussion
+      .filter(message => message.text.trim().length > 0)
+      .slice(-MAX_DISCUSSION_MESSAGES);
+    if (messages.length === 0) {
+      return null;
+    }
+
+    const lines = messages.map(message => {
+      const label = message.role === 'user' ? 'User' : 'Assistant';
+      return `${label}: ${message.text.trim()}`;
+    });
+    const body = lines.join('\n\n');
+    const trimmedBody = body.length > maxChars
+      ? body.slice(body.length - maxChars)
+      : body;
+
+    return [
+      'Previous ACP session discussion, shared so you can continue with context:',
+      trimmedBody,
+    ].join('\n\n');
+  }
+
   /** Bump `lastActiveAt` to now and mark the local record available again. */
   touch(agentName: string, sessionId: string): void {
     const entry = this.get(agentName, sessionId);
@@ -282,6 +340,39 @@ export class SessionHistoryStore {
     this.entries = this.entries.filter(
       e => !(e.agentName === agentName && e.workspaceKey === workspaceKey && stale.has(e.sessionId)),
     );
+  }
+
+  private appendDiscussionMessage(
+    agentName: string,
+    sessionId: string,
+    role: PersistedDiscussionMessage['role'],
+    text: string,
+    mergeWithPrevious: boolean,
+  ): void {
+    const entry = this.get(agentName, sessionId);
+    if (!entry || text.length === 0) { return; }
+
+    const discussion = entry.discussion ?? [];
+    const last = discussion[discussion.length - 1];
+    if (mergeWithPrevious && last?.role === role) {
+      last.text = this.truncateDiscussionMessage(last.text + text);
+    } else if (!mergeWithPrevious && last?.role === role && last.text === text) {
+      return;
+    } else {
+      discussion.push({
+        role,
+        text: this.truncateDiscussionMessage(text),
+      });
+    }
+
+    entry.discussion = discussion.slice(-MAX_DISCUSSION_MESSAGES);
+    this.persist();
+  }
+
+  private truncateDiscussionMessage(text: string): string {
+    return text.length > MAX_DISCUSSION_MESSAGE_LEN
+      ? text.slice(text.length - MAX_DISCUSSION_MESSAGE_LEN)
+      : text;
   }
 
   private persist(fireEvent = true): void {

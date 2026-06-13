@@ -35,6 +35,9 @@ suite('ChatWebviewProvider', () => {
       recordFirstPrompt: (_sessionId: string, prompt: string) => {
         recordedPrompts.push(prompt);
       },
+      recordUserMessage: () => undefined,
+      recordUserMessageChunk: () => undefined,
+      recordAssistantMessageChunk: () => undefined,
       sendPrompt: async (_sessionId: string, prompt: string) => {
         sentPrompts.push(prompt);
         return { stopReason: 'end_turn' };
@@ -67,6 +70,7 @@ suite('ChatWebviewProvider', () => {
         }
       },
       isPipelineSession: () => false,
+      isLoading: () => false,
       getConnectedAgentNames: () => ['agent-1'],
     };
     const sessionUpdateHandler = {

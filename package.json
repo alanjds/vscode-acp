@@ -71,6 +71,11 @@
         "icon": "$(plug)"
       },
       {
+        "command": "acp.connectAgentWithCurrentContext",
+        "title": "ACP: Connect With Current Context",
+        "icon": "$(references)"
+      },
+      {
         "command": "acp.newConversation",
         "title": "ACP: New Conversation",
         "icon": "$(add)"
@@ -148,6 +153,11 @@
         "title": "ACP: Open Session"
       },
       {
+        "command": "acp.openSessionWithCurrentContext",
+        "title": "ACP: Open Session With Current Context",
+        "icon": "$(references)"
+      },
+      {
         "command": "acp.loadMoreSessions",
         "title": "ACP: Load More Sessions"
       },
@@ -169,6 +179,14 @@
       "commandPalette": [
         {
           "command": "acp.openSession",
+          "when": "false"
+        },
+        {
+          "command": "acp.connectAgentWithCurrentContext",
+          "when": "false"
+        },
+        {
+          "command": "acp.openSessionWithCurrentContext",
           "when": "false"
         },
         {
@@ -261,6 +279,11 @@
           "when": "view == acp-sessions && viewItem =~ /^agent/"
         },
         {
+          "command": "acp.connectAgentWithCurrentContext",
+          "when": "view == acp-sessions && viewItem =~ /^agent/",
+          "group": "context@1"
+        },
+        {
           "command": "acp.restartAgent",
           "when": "view == acp-sessions && viewItem == agent-connected"
         },
@@ -273,6 +296,11 @@
           "command": "acp.copySessionId",
           "when": "view == acp-sessions && viewItem =~ /^session/",
           "group": "session@1"
+        },
+        {
+          "command": "acp.openSessionWithCurrentContext",
+          "when": "view == acp-sessions && viewItem =~ /^session/",
+          "group": "inline"
         },
         {
           "command": "acp.forgetSession",

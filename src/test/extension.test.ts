@@ -18,6 +18,7 @@ suite('Extension Test Suite', () => {
 		const acpCommands = commands.filter(c => c.startsWith('acp.'));
 		assert.ok(acpCommands.length > 0, 'ACP commands should be registered');
 		assert.ok(acpCommands.includes('acp.connectAgent'), 'connectAgent command should exist');
+		assert.ok(acpCommands.includes('acp.connectAgentWithCurrentContext'), 'connectAgentWithCurrentContext command should exist');
 		assert.ok(acpCommands.includes('acp.newConversation'), 'newConversation command should exist');
 		assert.ok(acpCommands.includes('acp.openChat'), 'openChat command should exist');
 	});
@@ -80,12 +81,14 @@ suite('Extension Test Suite', () => {
 
     const commands = await vscode.commands.getCommands(true);
     const expectedCommands = [
-      'acp.connectAgent',
-      'acp.newConversation',
+	      'acp.connectAgent',
+	      'acp.connectAgentWithCurrentContext',
+	      'acp.newConversation',
       'acp.openChat',
       'acp.cancelTurn',
       'acp.disconnectAgent',
-      'acp.openSession',
+	      'acp.openSession',
+	      'acp.openSessionWithCurrentContext',
       'acp.loadMoreSessions',
       'acp.enableEditorContextLink',
       'acp.disableEditorContextLink',

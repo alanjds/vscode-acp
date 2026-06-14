@@ -41,7 +41,7 @@ Exposer deux agents synthétiques de pipeline qui routent les prompts à travers
 - Transmettre les mises à jour de session de l'implementer dans le chat du pipeline virtuel actif pour que l'utilisateur voie la progression de l'implémentation.
 - Réutiliser le comportement de permission ACP existant (`ask` ou `allowAll`) pour les actions de Vibe.
 - Prendre en charge la révision du plan avant approbation : un second prompt dans la même session pipeline renvoie au planner le plan précédent, le nouveau feedback/la nouvelle demande utilisateur et la demande originale.
-- Sélectionner le profil de pipeline depuis le nom de l'agent synthétique actif ; `getPipelineConfigForAgent` est le lookup prévu pour mapper un agent virtuel vers ses settings planner et implementer.
+- Résoudre les settings planner et implementer depuis l'agent synthétique de pipeline actif afin que chaque pipeline garde sa propre configuration.
 
 ## Conséquences
 **Positives** :
@@ -54,10 +54,3 @@ Exposer deux agents synthétiques de pipeline qui routent les prompts à travers
 - Deux serveurs HTTP locaux A2A sont lancés pendant l'exécution.
 - Le pipeline dépend des agents planner/implementer configurés.
 - Le format strict `<proposed_plan>` peut nécessiter un nouvel essai si le planner répond mal.
-- `express` conserve le warning Webpack mentionné dans l'ADR.
-
-## Notes d'implémentation actuelles
-- `AgentConfig.getAgentNames()` ajoute les deux agents virtuels de pipeline quand `acp.pipeline.enabled` vaut true.
-- `isPipelineVirtualAgentName()` reconnaît les deux noms virtuels comme sessions de pipeline.
-- `PipelineService` est partagé par les deux pipelines et garde les serveurs A2A planner et implementer réutilisables.
-- L'agent virtuel sélectionné doit déterminer quelle configuration planner/implementer est lue. Si `PipelineService` lit uniquement la configuration par défaut du pipeline Codex, le pipeline Gemini est exposé dans l'UI mais ne s'exécutera pas avec ses settings spécifiques Gemini ; ce mapping doit rester couvert par des tests.

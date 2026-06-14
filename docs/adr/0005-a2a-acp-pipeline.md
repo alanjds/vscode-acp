@@ -41,7 +41,7 @@ Expose two synthetic pipeline agents that route prompts through the same local A
 - Forward implementer session updates into the active virtual pipeline chat so the user sees implementation progress.
 - Reuse the existing ACP permission behavior (`ask` or `allowAll`) for Vibe actions.
 - Support plan revision before approval: a second prompt on the same pipeline session sends the previous plan, the new user feedback/request, and the original request back to the planner.
-- Select the pipeline profile from the active synthetic agent name; `getPipelineConfigForAgent` is the intended lookup for mapping a virtual agent to its planner and implementer settings.
+- Resolve the planner and implementer settings from the active synthetic pipeline agent so each pipeline keeps its own configuration.
 
 ## Consequences
 **Positive**:
@@ -59,13 +59,6 @@ Expose two synthetic pipeline agents that route prompts through the same local A
 - The Gemini pipeline adds a second visible virtual agent and more settings to keep aligned.
 - Planner output must satisfy a strict XML-like block format, which can fail and require retrying.
 - The webview now has an additional interactive message type for editable plans.
-- Bundling `express` introduces a Webpack warning from Express dynamic view loading.
-
-## Current Implementation Notes
-- `AgentConfig.getAgentNames()` appends both virtual pipeline agents when `acp.pipeline.enabled` is true.
-- `isPipelineVirtualAgentName()` recognizes both virtual names as pipeline sessions.
-- `PipelineService` is shared by both pipelines and keeps the A2A planner and implementer servers reusable.
-- The selected virtual agent should drive which planner/implementer configuration is read. If `PipelineService` only reads the default Codex pipeline config, the Gemini pipeline is exposed in the UI but will not execute with its Gemini-specific settings; that mapping must be kept covered by tests.
 
 ## Alternatives Considered
 - Call planners and Vibe directly from `PipelineService` without A2A - rejected because the feature explicitly needs A2A as the communication boundary between agents.

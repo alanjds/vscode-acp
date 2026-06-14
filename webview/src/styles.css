@@ -357,6 +357,33 @@ body {
   max-width: 95%;
 }
 
+.planning-draft {
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--vscode-editorWidget-background);
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 6px;
+}
+
+.planning-draft-title {
+  margin-bottom: 6px;
+  font-size: 0.85em;
+  font-weight: 600;
+  opacity: 0.75;
+}
+
+.planning-draft-content {
+  max-height: 260px;
+  margin: 0;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--vscode-editor-font-family);
+  font-size: 0.88em;
+  line-height: 1.45;
+  color: var(--vscode-descriptionForeground);
+}
+
 .turn-tools {
   display: flex;
   flex-direction: column;

@@ -455,6 +455,7 @@ suite('ChatWebviewProvider', () => {
     const updateData = { sessionUpdate: 'available_commands_update', availableCommands: [{ id: 'cmd1' }] };
     const event = {
       sessionId: 'active_s1',
+      phase: 'planner',
       update: { update: updateData },
     };
 
@@ -463,6 +464,7 @@ suite('ChatWebviewProvider', () => {
     const updateMessage = messages.find(m => m.type === 'sessionUpdate');
     assert.ok(updateMessage);
     assert.deepStrictEqual(updateMessage.update, updateData);
+    assert.strictEqual(updateMessage.phase, 'planner');
   });
 
   test('renderMarkdown removes script tags', async () => {

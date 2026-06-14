@@ -1,6 +1,7 @@
 import type { JSX } from 'react';
 
 import type { CurrentToolCall, ToolCallHistoryItem } from '../chatTypes';
+import { PlanningDraftBlock } from './PlanningDraftBlock';
 import { ThoughtBlock, type ThoughtBlockProps } from './ThoughtBlock';
 import { TurnTools } from './TurnTools';
 
@@ -12,6 +13,7 @@ type TurnToolHistoryItem = {
 export type TurnBlockProps = {
   turnKey: string;
   thought: ThoughtBlockProps | null;
+  planningDraftText?: string;
   assistantText?: string;
   assistantHtml?: string;
   toolCalls: CurrentToolCall[] | TurnToolHistoryItem[];
@@ -22,6 +24,7 @@ export type TurnBlockProps = {
 export function TurnBlock({
   turnKey,
   thought,
+  planningDraftText,
   assistantText,
   assistantHtml,
   toolCalls,
@@ -30,7 +33,8 @@ export function TurnBlock({
 }: TurnBlockProps): JSX.Element | null {
   const hasAssistantContent = typeof assistantText === 'string' && assistantText.trim().length > 0;
   const hasAssistant = Boolean(assistantHtml) || assistantText !== undefined;
-  const hasVisibleContent = Boolean(thought) || hasAssistant || toolCalls.length > 0;
+  const hasPlanningDraft = typeof planningDraftText === 'string' && planningDraftText.trim().length > 0;
+  const hasVisibleContent = Boolean(thought) || hasPlanningDraft || hasAssistant || toolCalls.length > 0;
 
   if (!hasVisibleContent) {
     return null;
@@ -39,6 +43,7 @@ export function TurnBlock({
   return (
     <div className="turn" key={turnKey}>
       {thought ? <ThoughtBlock {...thought} /> : null}
+      {hasPlanningDraft ? <PlanningDraftBlock text={planningDraftText ?? ''} /> : null}
       {hasAssistant ? (
         <div
           className={`message assistant${assistantHtml ? ' md-rendered' : ''}`}

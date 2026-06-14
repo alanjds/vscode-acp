@@ -71,6 +71,7 @@ export type AppAction =
   | { type: 'appendThoughtChunk'; text: string }
   | { type: 'setCurrentThoughtOpen'; isOpen: boolean }
   | { type: 'appendAssistantChunk'; text: string }
+  | { type: 'appendPlanningDraftChunk'; text: string }
   | { type: 'appendToolCall'; toolCallId: string; title: string; status: ToolCallStatus }
   | { type: 'updateToolCall'; toolCallId: string; title?: string; status: ToolCallStatus }
   | { type: 'appendPlan'; plan: PlanUpdate }
@@ -92,6 +93,7 @@ export function createCurrentTurn(turnId: string): CurrentTurn {
   return {
     turnId,
     assistantText: '',
+    planningDraft: '',
     thought: null,
     toolCalls: [],
     historyToolCallIndexes: [],
@@ -556,6 +558,17 @@ export function appReducer(state: AppState, action: AppAction): AppState {
                   isOpen: false,
                 }
               : currentTurn.thought,
+        },
+      };
+    }
+
+    case 'appendPlanningDraftChunk': {
+      const currentTurn = ensureCurrentTurn(state);
+      return {
+        ...state,
+        currentTurn: {
+          ...currentTurn,
+          planningDraft: currentTurn.planningDraft + action.text,
         },
       };
     }

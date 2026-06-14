@@ -16,6 +16,7 @@ import type {
   FileSearchResult,
   ModelOption,
   ModeOption,
+  PipelinePhase,
   PipelinePlanStatus,
   PersistedWebviewState,
   SelectedFileMention,
@@ -227,7 +228,10 @@ export function App(): JSX.Element {
         }
 
         case 'sessionUpdate':
-          for (const action of mapSessionUpdateToActions(normalizeSessionUpdate(message.update))) {
+          for (const action of mapSessionUpdateToActions(
+            normalizeSessionUpdate(message.update),
+            normalizePipelinePhase(message.phase),
+          )) {
             dispatch(action);
           }
           break;
@@ -791,6 +795,7 @@ export function App(): JSX.Element {
         {state.currentTurn ? (
           <TurnBlock
             assistantText={state.currentTurn.assistantText.trim().length > 0 ? state.currentTurn.assistantText : undefined}
+            planningDraftText={state.currentTurn.planningDraft}
             collapsed={getToolCollapseState('current-turn', state.currentTurn.toolCalls.length, state.collapsedTools)}
             onToggleTools={() =>
               dispatch({
@@ -875,6 +880,10 @@ function normalizePipelineStatus(status: unknown): PipelinePlanStatus | null {
     default:
       return null;
   }
+}
+
+function normalizePipelinePhase(phase: unknown): PipelinePhase | undefined {
+  return phase === 'planner' || phase === 'implementer' ? phase : undefined;
 }
 
 function getEditableCursorPosition(input: HTMLDivElement): number {

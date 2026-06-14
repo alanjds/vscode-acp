@@ -141,6 +141,8 @@ export type PipelinePlanStatus =
   | 'error'
   | 'cancelled';
 
+export type PipelinePhase = 'planner' | 'implementer';
+
 export type PipelinePlanHistoryItem = {
   kind: 'pipelinePlan';
   plan: string;
@@ -251,6 +253,7 @@ export type CurrentToolCall = {
 export type CurrentTurn = {
   turnId: string;
   assistantText: string;
+  planningDraft: string;
   thought: CurrentThought | null;
   toolCalls: CurrentToolCall[];
   historyToolCallIndexes: number[];

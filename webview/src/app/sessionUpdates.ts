@@ -1,4 +1,4 @@
-import type { SessionUpdate } from '../chatTypes';
+import type { PipelinePhase, SessionUpdate } from '../chatTypes';
 import {
   normalizePlanUpdate,
   normalizeSlashCommands,
@@ -14,15 +14,32 @@ function getTextContent(update: SessionUpdate): string | undefined {
   return content?.type === 'text' && typeof content.text === 'string' ? content.text : undefined;
 }
 
-export function mapSessionUpdateToActions(update: SessionUpdate): AppAction[] {
+export function mapSessionUpdateToActions(update: SessionUpdate, phase?: PipelinePhase): AppAction[] {
   if (!update || typeof update !== 'object') {
+    return [];
+  }
+
+  if (
+    phase === 'planner' &&
+    update.sessionUpdate !== 'agent_message_chunk' &&
+    update.sessionUpdate !== 'agent_thought_chunk' &&
+    update.sessionUpdate !== 'tool_call' &&
+    update.sessionUpdate !== 'tool_call_update'
+  ) {
     return [];
   }
 
   switch (update.sessionUpdate) {
     case 'agent_message_chunk': {
       const contentText = getTextContent(update);
-      return contentText ? [{ type: 'appendAssistantChunk', text: contentText }] : [];
+      if (!contentText) {
+        return [];
+      }
+      return [
+        phase === 'planner'
+          ? { type: 'appendPlanningDraftChunk', text: contentText }
+          : { type: 'appendAssistantChunk', text: contentText },
+      ];
     }
 
     case 'user_message_chunk':

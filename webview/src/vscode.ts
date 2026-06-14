@@ -4,6 +4,7 @@ import type {
   MarkdownRenderedItem,
   ModelsState,
   ModesState,
+  PipelinePhase,
   SessionConfigOption,
   DebugSnapshot,
   SessionSnapshot,
@@ -16,7 +17,7 @@ export type HostToWebviewMessage =
       activeSessionId?: string | null;
       session?: SessionSnapshot | null;
     }
-  | { type: 'sessionUpdate'; update: SessionUpdate; sessionId?: string }
+  | { type: 'sessionUpdate'; update: SessionUpdate; sessionId?: string; phase?: PipelinePhase }
   | { type: 'promptStart' }
   | { type: 'promptEnd'; stopReason?: string; usage?: unknown }
   | { type: 'clearChat' }

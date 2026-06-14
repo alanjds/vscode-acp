@@ -54,10 +54,11 @@ export interface PipelinePlanReadyEvent {
 
 export interface PipelineSessionUpdateEvent {
   sessionId: string;
+  phase: PipelineExecutorKind;
   update: SessionNotification;
 }
 
-type PipelineExecutorKind = 'planner' | 'implementer';
+export type PipelineExecutorKind = 'planner' | 'implementer';
 
 interface PipelineRunState {
   originalPrompt: string;
@@ -292,7 +293,12 @@ export class PipelineService extends EventEmitter {
     if (kind === 'planner') {
       if (!this.plannerServer) {
         this.plannerServer = new LocalA2AAgentServer(kind, new AcpBackedA2AExecutor(
-          async (promptText) => this.runConfiguredAcpAgent('planner', promptText),
+          async (promptText, requestContext) => {
+            const sessionId = getPipelineSessionId(requestContext);
+            return this.runConfiguredAcpAgent('planner', promptText, (update) => {
+              this.emit('session-update', { sessionId, phase: 'planner', update } satisfies PipelineSessionUpdateEvent);
+            });
+          },
         ));
       }
       await this.plannerServer.start();
@@ -304,7 +310,7 @@ export class PipelineService extends EventEmitter {
         async (promptText, requestContext) => {
           const sessionId = getPipelineSessionId(requestContext);
           return this.runConfiguredAcpAgent('implementer', promptText, (update) => {
-            this.emit('session-update', { sessionId, update } satisfies PipelineSessionUpdateEvent);
+            this.emit('session-update', { sessionId, phase: 'implementer', update } satisfies PipelineSessionUpdateEvent);
           });
         },
       ));
@@ -329,9 +335,7 @@ export class PipelineService extends EventEmitter {
     const runner = new AcpAgentRunner(this.workspaceCwd);
     return runner.run(agentName, promptText, {
       onSessionUpdate: (update) => {
-        if (kind === 'implementer') {
-          onSessionUpdate?.(update);
-        }
+        onSessionUpdate?.(update);
       },
     });
   }

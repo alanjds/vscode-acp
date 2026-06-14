@@ -426,32 +426,57 @@ suite('PipelineService', () => {
     }
   });
 
-  test('createPlan with onSessionUpdate emits session-update event', async () => {
-    const events: Array<{ type: string; sessionId: string }> = [];
+  test('planner and implementer ACP updates emit session-update events with phase', async () => {
+    const events: Array<{ type: string; sessionId: string; phase: string; updateType: string }> = [];
     const service = new PipelineService(
       () => '/repo',
       {
         getPipelineConfig: () => PIPELINE_CONFIG,
         getAgentConfigs: () => ({ Codex: {}, Vibe: {} }),
         runAcpAgent: async (kind, prompt, onSessionUpdate) => {
-          if (kind === 'implementer' && onSessionUpdate) {
-            onSessionUpdate({ sessionId: 'session-1', update: { sessionUpdate: 'test' } } as any);
+          if (kind === 'planner') {
+            onSessionUpdate?.({
+              sessionId: 'planner-session',
+              update: { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'planning' } },
+            } as any);
+            return '<proposed_plan>\nPlan\n</proposed_plan>';
           }
-          return '<proposed_plan>\nPlan\n</proposed_plan>';
+          onSessionUpdate?.({
+            sessionId: 'implementer-session',
+            update: { sessionUpdate: 'tool_call', toolCallId: 'tool-1', title: 'Edit file' },
+          } as any);
+          return 'implemented';
         },
       },
     );
 
     service.on('session-update', (event: any) => {
-      events.push({ type: 'session-update', sessionId: event.sessionId });
+      events.push({
+        type: 'session-update',
+        sessionId: event.sessionId,
+        phase: event.phase,
+        updateType: event.update.update.sessionUpdate,
+      });
     });
 
     try {
       await service.createPlan('session-1', 'build feature');
       await service.approvePlan('session-1', '<proposed_plan>\nPlan\n</proposed_plan>');
 
-      assert.strictEqual(events.length, 1);
-      assert.strictEqual(events[0].sessionId, 'session-1');
+      assert.deepStrictEqual(events, [
+        {
+          type: 'session-update',
+          sessionId: 'session-1',
+          phase: 'planner',
+          updateType: 'agent_thought_chunk',
+        },
+        {
+          type: 'session-update',
+          sessionId: 'session-1',
+          phase: 'implementer',
+          updateType: 'tool_call',
+        },
+      ]);
     } finally {
       await service.dispose();
     }

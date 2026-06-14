@@ -112,6 +112,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       type: 'sessionUpdate',
       update: event.update.update,
       sessionId: event.sessionId,
+      phase: event.phase,
     });
   };
 

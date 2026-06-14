@@ -1,0 +1,77 @@
+version: 2
+id: cicd-security-hardening
+title: CI CD Security Hardening
+
+primitives:
+  scope_pipeline:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Identifie les workflows CI/CD, secrets, permissions et points sensibles à auditer.
+
+      Demande utilisateur :
+      {{userPrompt}}
+
+  inspect_permissions:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Audite permissions, GITHUB_TOKEN, environnements protégés et accès aux secrets.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  inspect_actions:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Audite actions tierces, pinning de versions, scripts inline et risques d'injection.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  inspect_artifacts:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Audite artefacts, caches, provenance, attestations et risques de supply chain.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  hardening_report:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Produit un plan de durcissement CI/CD priorisé.
+
+      Permissions :
+      {{steps.audit.branches.permissions.output}}
+
+      Actions :
+      {{steps.audit.branches.actions.output}}
+
+      Artefacts :
+      {{steps.audit.branches.artifacts.output}}
+
+steps:
+  - id: scope
+    use: scope_pipeline
+
+  - id: audit
+    type: parallel
+    branches:
+      - id: permissions
+        use: inspect_permissions
+      - id: actions
+        use: inspect_actions
+      - id: artifacts
+        use: inspect_artifacts
+
+  - id: report
+    use: hardening_report

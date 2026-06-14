@@ -830,12 +830,12 @@ suite('SessionManager', () => {
     const pipelineService = {};
     const manager = createPipelineManager(pipelineService);
 
-    const result = await manager.connectToAgent('Codex Plan -> Vibe Implement');
+    const result = await manager.connectToAgent('Plan Execute Verify');
 
     assert.ok(result.sessionId.startsWith('pipeline_'));
-    assert.strictEqual(result.agentName, 'Codex Plan -> Vibe Implement');
+    assert.strictEqual(result.agentName, 'Plan Execute Verify');
     assert.strictEqual(manager.getActiveSessionId(), result.sessionId);
-    assert.strictEqual((manager as any).agentSessions.get('Codex Plan -> Vibe Implement'), result.sessionId);
+    assert.strictEqual((manager as any).agentSessions.get('Plan Execute Verify'), result.sessionId);
     assert.strictEqual(manager.isPipelineSession(result.sessionId), true);
   });
 
@@ -845,16 +845,16 @@ suite('SessionManager', () => {
 
     registerSession(manager, {
       sessionId: 'pipeline_existing',
-      agentName: 'Codex Plan -> Vibe Implement',
+      agentName: 'Plan Execute Verify',
       agentId: 'pipeline_agent_existing',
       active: false,
     });
 
-    const result = await manager.connectToAgent('Codex Plan -> Vibe Implement');
+    const result = await manager.connectToAgent('Plan Execute Verify');
 
     assert.strictEqual(result.sessionId, 'pipeline_existing');
     assert.strictEqual(manager.getActiveSessionId(), 'pipeline_existing');
-    assert.strictEqual((manager as any).agentSessions.get('Codex Plan -> Vibe Implement'), 'pipeline_existing');
+    assert.strictEqual((manager as any).agentSessions.get('Plan Execute Verify'), 'pipeline_existing');
   });
 
   test('isPipelineSession returns false for non-pipeline sessions', () => {
@@ -875,7 +875,7 @@ suite('SessionManager', () => {
     const { manager } = createManager();
     registerSession(manager, {
       sessionId: 'pipeline_s1',
-      agentName: 'Codex Plan -> Vibe Implement',
+      agentName: 'Plan Execute Verify',
       agentId: 'pipeline_agent_1',
     });
 

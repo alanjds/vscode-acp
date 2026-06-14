@@ -83,6 +83,16 @@ title: Plan Execute Verify
 
 Dans VS Code, l'agent virtuel s'appellera `Plan Execute Verify`.
 
+## Catalogue de workflows
+
+Le repo contient maintenant un catalogue plus large de workflows prêts à tester :
+
+```text
+doc_fr/pipelines-workflows-catalog.md
+```
+
+Il couvre notamment les démos simples, les audits read-only, les flows avec approbation, et les patterns créatifs de réconciliation multi-edit.
+
 ## Démo simple
 
 Pour tester le mécanisme sans modifier le workspace, le repo fournit :

@@ -1,0 +1,65 @@
+version: 2
+id: bugfix-test-driven
+title: Bugfix Test Driven
+
+primitives:
+  reproduce_and_plan:
+    agent: Codex CLI
+    output: proposed_plan
+    sideEffects: none
+    prompt: |
+      Prépare un plan de bugfix guidé par les tests.
+      Identifie :
+      - symptôme à reproduire
+      - test de reproduction attendu
+      - patch minimal
+      - validation après patch
+      Retourne exactement un bloc <proposed_plan>...</proposed_plan>.
+
+      Demande utilisateur :
+      {{userPrompt}}
+
+  implement_fix:
+    agent: Vibe
+    output: markdown
+    sideEffects: workspace
+    prompt: |
+      Implémente uniquement le plan approuvé.
+      Commence par le test de reproduction si possible, puis applique le patch minimal.
+
+      Demande utilisateur :
+      {{userPrompt}}
+
+      Plan approuvé :
+      {{steps.approval.output}}
+
+  verify_fix:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Vérifie le bugfix.
+      Retourne : fichiers modifiés, tests à lancer, risques, et lacunes restantes.
+
+      Demande utilisateur :
+      {{userPrompt}}
+
+      Plan approuvé :
+      {{steps.approval.output}}
+
+      Sortie implémentation :
+      {{steps.implement.output}}
+
+steps:
+  - id: plan
+    use: reproduce_and_plan
+
+  - id: approval
+    type: approval
+    input: "{{steps.plan.output}}"
+
+  - id: implement
+    use: implement_fix
+
+  - id: verify
+    use: verify_fix

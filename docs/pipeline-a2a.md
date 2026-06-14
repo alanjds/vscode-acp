@@ -1,61 +1,101 @@
-# Pipeline A2A Workflow
+# Pipeline LangGraph Workflow
 
-ACP Client includes optional virtual agents that split a task into two phases:
+ACP Client exposes optional virtual agents from workspace pipeline files in `.acp/pipelines/*.yaml`.
 
-1. A planner ACP agent produces a single `<proposed_plan>` block.
-2. The user reviews, edits, approves, or rejects the plan.
-3. An implementer ACP agent receives the approved plan and performs the workspace changes.
-
-The virtual agent is exposed in the same Agents view as normal ACP agents, but internally it starts local A2A JSON-RPC servers on `127.0.0.1` and bridges each A2A request to the configured ACP agents.
-
-## Available Virtual Agents
-
-Two pipeline presets are available when `acp.pipeline.enabled` is true:
-
-| Virtual agent | Planner | Implementer |
-|---------------|---------|-------------|
-| `Codex Plan -> Vibe Implement` | `Codex CLI` | `Vibe` |
-| `Gemini Plan -> Vibe Implement` | `Gemini CLI` | `Vibe` |
-
-The display names and backing agents are configurable with `acp.pipeline.*` settings.
+Each pipeline is compiled into a local LangGraph graph. Graph nodes call configured ACP agents, approval steps pause execution for human review, and approved runs resume from the same VS Code pipeline session.
 
 ## Settings
 
 | Setting | Default | Purpose |
 |---------|---------|---------|
-| `acp.pipeline.enabled` | `true` | Shows or hides pipeline virtual agents. |
-| `acp.pipeline.virtualAgentName` | `Codex Plan -> Vibe Implement` | Display name for the Codex-backed pipeline. |
-| `acp.pipeline.plannerAgentName` | `Codex CLI` | ACP agent used for planning in the Codex-backed pipeline. |
-| `acp.pipeline.implementerAgentName` | `Vibe` | ACP agent used for implementation in the Codex-backed pipeline. |
-| `acp.pipeline.geminiVirtualAgentName` | `Gemini Plan -> Vibe Implement` | Display name for the Gemini-backed pipeline. |
-| `acp.pipeline.geminiPlannerAgentName` | `Gemini CLI` | ACP agent used for planning in the Gemini-backed pipeline. |
-| `acp.pipeline.geminiImplementerAgentName` | `Vibe` | ACP agent used for implementation in the Gemini-backed pipeline. |
+| `acp.pipeline.enabled` | `true` | Shows or hides workspace-defined pipeline virtual agents. |
 
-Each configured planner or implementer name must exist in `acp.agents`. The pipeline does not install agents automatically.
+Every `primitives.*.agent` value in a pipeline file must exist in `acp.agents`. The pipeline system does not install agents automatically.
+
+## DSL v2
+
+```yaml
+version: 2
+id: plan-execute-verify
+title: Plan Execute Verify
+
+primitives:
+  planner:
+    agent: Codex CLI
+    output: proposed_plan
+    sideEffects: none
+    prompt: |
+      Create a decision-complete implementation plan only.
+      Return exactly one <proposed_plan> block.
+
+      User request:
+      {{userPrompt}}
+
+  implementer:
+    agent: Vibe
+    output: markdown
+    sideEffects: workspace
+    prompt: |
+      Implement the approved plan in the current workspace.
+
+      Approved plan:
+      {{steps.approval.output}}
+
+steps:
+  - id: plan
+    use: planner
+
+  - id: approval
+    type: approval
+    input: "{{steps.plan.output}}"
+
+  - id: implement
+    use: implementer
+```
+
+Supported step types:
+
+- Agent step: `id` plus `use`, where `use` references a primitive.
+- Approval step: `id`, `type: approval`, and `input`.
+- Parallel step: `id`, `type: parallel`, and at least two read-only branches.
+
+Supported template variables:
+
+- `{{userPrompt}}`
+- `{{steps.<stepId>.output}}`
+- `{{steps.<parallelStepId>.branches.<branchId>.output}}`
+
+## Safety Rules
+
+- `version` must be `2`; legacy v1 pipelines are rejected.
+- `sideEffects: workspace` is rejected before an approval step.
+- `sideEffects: workspace` is rejected inside `type: parallel`.
+- `output: proposed_plan` must contain exactly one `<proposed_plan>...</proposed_plan>` block.
+- Approved plans must contain only one `<proposed_plan>` block and no text outside it.
 
 ## User Flow
 
-1. Open the ACP Client activity bar view.
-2. Connect to one of the pipeline virtual agents.
-3. Send the task as a normal chat prompt.
-4. Wait for the proposed plan to appear.
-5. Edit the plan if needed.
-6. Click approve to start implementation, or reject to stop the run.
-7. Watch implementation output in the chat and inspect ACP logs if a failure occurs.
+1. Add or edit a pipeline file in `.acp/pipelines`.
+2. Ensure referenced agents exist in `acp.agents`.
+3. Open the ACP Client activity bar view.
+4. Connect to the pipeline virtual agent.
+5. Send the task as a normal chat prompt.
+6. Review, edit, approve, or reject the proposed plan.
+7. Watch later ACP agent output in the same pipeline chat.
 
 ## Failure Modes
 
 | Symptom | Likely cause | Fix |
 |---------|--------------|-----|
-| `Missing configured ACP pipeline agent(s)` | The planner or implementer name does not exist in `acp.agents`. | Update `acp.pipeline.*` or add the missing agent configuration. |
-| Planner never returns a plan | The planner did not emit exactly one `<proposed_plan>` block. | Retry with a clearer request or inspect the planner agent logs. |
-| Implementation fails immediately | The implementer agent cannot start, authenticate, or initialize ACP. | Check PATH, credentials, and ACP Client logs. |
+| `Missing configured ACP pipeline agent(s)` | A primitive references an agent not present in `acp.agents`. | Update the YAML or add the missing agent configuration. |
+| Pipeline virtual agent is missing | The pipeline is invalid, `acp.pipeline.enabled` is false, or the file is outside `.acp/pipelines`. | Check ACP logs and YAML validation errors. |
+| Planner never returns a plan | A `proposed_plan` primitive did not emit exactly one plan block. | Retry with a clearer request or inspect the agent logs. |
+| Implementation fails immediately | The workspace-changing agent cannot start, authenticate, or initialize ACP. | Check PATH, credentials, and ACP Client logs. |
 | Pipeline cancelled | The active turn was cancelled or the virtual session was disconnected. | Reconnect to the virtual agent and start a new request. |
-| Local A2A server startup fails | Port binding or local networking is blocked. | Ensure `127.0.0.1` loopback connections are allowed. |
 
 ## Notes
 
-- The planner is instructed not to mutate the workspace.
-- The implementer receives the original prompt plus the approved plan.
+- LangGraph owns orchestration and approval resume state.
+- ACP remains the communication protocol for all agent calls.
 - Existing ACP permission handling still applies to filesystem and terminal actions.
-- The pipeline is single-session from the chat perspective; planner and implementer runs are implementation details.
+- The pipeline is single-session from the chat perspective; internal agent runs are implementation details.

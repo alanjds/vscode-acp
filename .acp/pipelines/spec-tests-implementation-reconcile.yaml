@@ -1,0 +1,112 @@
+version: 2
+id: spec-tests-implementation-reconcile
+title: Spec Tests Implementation Reconcile
+
+primitives:
+  scope_work:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Cadre le travail à faire et les critères de succès.
+
+      Demande utilisateur :
+      {{userPrompt}}
+
+  draft_spec:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Rédige une mini-spécification fonctionnelle.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  draft_tests:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Rédige la stratégie de tests qui prouverait la spécification.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  draft_impl:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Rédige un plan d'implémentation compatible avec la spec et les tests.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  reconcile_std:
+    agent: Codex CLI
+    output: proposed_plan
+    sideEffects: none
+    prompt: |
+      Réconcilie spec, tests et implémentation.
+      Corrige les contradictions et retourne un plan exécutable.
+      Retourne exactement un bloc <proposed_plan>...</proposed_plan>.
+
+      Spec :
+      {{steps.drafts.branches.spec.output}}
+
+      Tests :
+      {{steps.drafts.branches.tests.output}}
+
+      Implémentation :
+      {{steps.drafts.branches.impl.output}}
+
+  execute_std:
+    agent: Vibe
+    output: markdown
+    sideEffects: workspace
+    prompt: |
+      Exécute le plan approuvé dans l'ordre : tests utiles, implémentation, ajustements.
+
+      Plan approuvé :
+      {{steps.approval.output}}
+
+  verify_std:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Vérifie la cohérence spec/tests/implémentation après exécution.
+
+      Plan approuvé :
+      {{steps.approval.output}}
+
+      Sortie exécution :
+      {{steps.execute.output}}
+
+steps:
+  - id: scope
+    use: scope_work
+
+  - id: drafts
+    type: parallel
+    branches:
+      - id: spec
+        use: draft_spec
+      - id: tests
+        use: draft_tests
+      - id: impl
+        use: draft_impl
+
+  - id: reconcile
+    use: reconcile_std
+
+  - id: approval
+    type: approval
+    input: "{{steps.reconcile.output}}"
+
+  - id: execute
+    use: execute_std
+
+  - id: verify
+    use: verify_std

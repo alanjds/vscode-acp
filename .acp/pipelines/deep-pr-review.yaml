@@ -1,0 +1,93 @@
+version: 2
+id: deep-pr-review
+title: Deep PR Review
+
+primitives:
+  scope_review:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Cadre la revue demandée : intention, fichiers probables, risques majeurs.
+
+      Demande utilisateur :
+      {{userPrompt}}
+
+  review_correctness:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Fais une revue centrée sur la correction fonctionnelle et les régressions possibles.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  review_tests:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Fais une revue centrée sur les tests manquants, fragiles ou mal ciblés.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  review_maintainability:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Fais une revue centrée sur la maintenabilité, le découplage et la lisibilité.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  review_security:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Fais une revue centrée sur sécurité, validation d'entrée, secrets et permissions.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  synthesize_pr_review:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Synthétise la revue comme une vraie review de PR.
+      Mets d'abord les findings bloquants, puis les risques moyens, puis les suggestions.
+
+      Correction :
+      {{steps.review.branches.correctness.output}}
+
+      Tests :
+      {{steps.review.branches.tests.output}}
+
+      Maintenabilité :
+      {{steps.review.branches.maintainability.output}}
+
+      Sécurité :
+      {{steps.review.branches.security.output}}
+
+steps:
+  - id: scope
+    use: scope_review
+
+  - id: review
+    type: parallel
+    branches:
+      - id: correctness
+        use: review_correctness
+      - id: tests
+        use: review_tests
+      - id: maintainability
+        use: review_maintainability
+      - id: security
+        use: review_security
+
+  - id: synthesize
+    use: synthesize_pr_review

@@ -1,0 +1,58 @@
+version: 2
+id: docs-update-approved
+title: Docs Update Approved
+
+primitives:
+  docs_plan:
+    agent: Codex CLI
+    output: proposed_plan
+    sideEffects: none
+    prompt: |
+      Prépare un plan de mise à jour documentaire.
+      Indique les pages à modifier, le public cible, et les exemples à ajouter.
+      Retourne exactement un bloc <proposed_plan>...</proposed_plan>.
+
+      Demande utilisateur :
+      {{userPrompt}}
+
+  write_docs:
+    agent: Vibe
+    output: markdown
+    sideEffects: workspace
+    prompt: |
+      Mets à jour uniquement la documentation selon le plan approuvé.
+      Évite les changements de code sauf correction minimale d'exemple cassé.
+
+      Demande utilisateur :
+      {{userPrompt}}
+
+      Plan approuvé :
+      {{steps.approval.output}}
+
+  docs_review:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Relis la documentation modifiée.
+      Vérifie clarté, cohérence, exemples, liens et zones encore floues.
+
+      Demande utilisateur :
+      {{userPrompt}}
+
+      Sortie rédaction :
+      {{steps.write.output}}
+
+steps:
+  - id: plan
+    use: docs_plan
+
+  - id: approval
+    type: approval
+    input: "{{steps.plan.output}}"
+
+  - id: write
+    use: write_docs
+
+  - id: review
+    use: docs_review

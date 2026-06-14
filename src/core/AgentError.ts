@@ -25,7 +25,7 @@ export function classifyAgentError(error: unknown): ClassifiedAgentError {
     return {
       kind: 'missing-pipeline-agent',
       message,
-      actionHint: 'Check acp.pipeline.* settings and configured agents.',
+      actionHint: 'Check .acp/pipelines/*.yaml and configured acp.agents.',
     };
   }
 
@@ -72,4 +72,3 @@ export function formatAgentError(error: unknown): string {
   const classified = classifyAgentError(error);
   return `${classified.message}\n${classified.actionHint}`;
 }
-

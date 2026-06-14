@@ -1,0 +1,77 @@
+version: 2
+id: api-contract-guardian
+title: API Contract Guardian
+
+primitives:
+  scope_api:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Cadre le contrat API, ses consommateurs et les contraintes de compatibilité.
+
+      Demande utilisateur :
+      {{userPrompt}}
+
+  inspect_public_surface:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Analyse la surface publique : types, endpoints, commandes, events, settings.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  inspect_compatibility:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Analyse compatibilité descendante, migrations et comportement existant.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  inspect_contract_tests:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Propose contract tests, fixtures et cas limites.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  api_guard_report:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Produit un rapport de garde-fou API : risques, tests, migration, décisions.
+
+      Surface :
+      {{steps.audit.branches.surface.output}}
+
+      Compatibilité :
+      {{steps.audit.branches.compatibility.output}}
+
+      Tests :
+      {{steps.audit.branches.contract_tests.output}}
+
+steps:
+  - id: scope
+    use: scope_api
+
+  - id: audit
+    type: parallel
+    branches:
+      - id: surface
+        use: inspect_public_surface
+      - id: compatibility
+        use: inspect_compatibility
+      - id: contract_tests
+        use: inspect_contract_tests
+
+  - id: report
+    use: api_guard_report

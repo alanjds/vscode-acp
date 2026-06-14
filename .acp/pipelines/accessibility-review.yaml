@@ -1,0 +1,77 @@
+version: 2
+id: accessibility-review
+title: Accessibility Review
+
+primitives:
+  scope_a11y:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Cadre l'interface ou le parcours à auditer pour accessibilité.
+
+      Demande utilisateur :
+      {{userPrompt}}
+
+  inspect_keyboard:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Analyse navigation clavier, focus visible, ordre de tabulation et raccourcis.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  inspect_semantics:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Analyse sémantique, labels, rôles ARIA et lecteurs d'écran.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  inspect_visuals:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Analyse contraste, tailles, états, mouvement, zoom et erreurs visibles.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  a11y_report:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Produit une checklist d'accessibilité priorisée avec tests manuels.
+
+      Clavier :
+      {{steps.audit.branches.keyboard.output}}
+
+      Sémantique :
+      {{steps.audit.branches.semantics.output}}
+
+      Visuel :
+      {{steps.audit.branches.visuals.output}}
+
+steps:
+  - id: scope
+    use: scope_a11y
+
+  - id: audit
+    type: parallel
+    branches:
+      - id: keyboard
+        use: inspect_keyboard
+      - id: semantics
+        use: inspect_semantics
+      - id: visuals
+        use: inspect_visuals
+
+  - id: report
+    use: a11y_report

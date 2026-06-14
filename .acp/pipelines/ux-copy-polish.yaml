@@ -1,0 +1,77 @@
+version: 2
+id: ux-copy-polish
+title: UX Copy Polish
+
+primitives:
+  scope_ux:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Cadre le parcours UX à améliorer : utilisateur, action, friction et contexte.
+
+      Demande utilisateur :
+      {{userPrompt}}
+
+  inspect_flow:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Analyse le flow : étapes, feedback, erreurs, états vides et états de chargement.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  inspect_copy:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Analyse microcopy : clarté, ton, verbes d'action, anxiété utilisateur.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  inspect_polish:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Analyse polish visuel : densité, hiérarchie, états, affordances, cohérence.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  ux_recommendations:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Produit une liste d'améliorations UX/copy priorisées et testables.
+
+      Flow :
+      {{steps.review.branches.flow.output}}
+
+      Copy :
+      {{steps.review.branches.copy.output}}
+
+      Polish :
+      {{steps.review.branches.polish.output}}
+
+steps:
+  - id: scope
+    use: scope_ux
+
+  - id: review
+    type: parallel
+    branches:
+      - id: flow
+        use: inspect_flow
+      - id: copy
+        use: inspect_copy
+      - id: polish
+        use: inspect_polish
+
+  - id: recommendations
+    use: ux_recommendations

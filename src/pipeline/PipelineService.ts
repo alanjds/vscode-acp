@@ -1,36 +1,23 @@
 import { EventEmitter } from 'node:events';
-import { randomUUID } from 'node:crypto';
-import type { Server } from 'node:http';
 
-import express from 'express';
-import type { AddressInfo } from 'node:net';
-import type {
-  AgentCard,
-  Message,
-  MessageSendParams,
-  Part,
-  Task,
-} from '@a2a-js/sdk';
-import { ClientFactory, type Client } from '@a2a-js/sdk/client';
-import {
-  type AgentExecutor,
-  DefaultRequestHandler,
-  type ExecutionEventBus,
-  InMemoryTaskStore,
-  RequestContext,
-} from '@a2a-js/sdk/server';
-import {
-  UserBuilder,
-  agentCardHandler,
-  jsonRpcHandler,
-} from '@a2a-js/sdk/server/express';
 import type { SessionNotification } from '@agentclientprotocol/sdk';
+import { Command, INTERRUPT, MemorySaver } from '@langchain/langgraph';
 
 import { getAgentConfigs } from '../config/AgentConfig';
-import { getPipelineConfig, PipelineConfig } from '../config/PipelineConfig';
-import { log } from '../utils/Logger';
+import {
+  getPipelineDefinitionForAgent,
+  getPipelineDefinitions,
+  type PipelineDefinition,
+  type PipelinePrimitiveDefinition,
+} from '../config/PipelineCatalog';
 import { AcpAgentRunner } from './AcpAgentRunner';
-import { assertSingleProposedPlan, extractSingleProposedPlan } from './ProposedPlan';
+import { assertSingleProposedPlan } from './ProposedPlan';
+import {
+  type AcpRunCallback,
+  type CompiledPipelineGraph,
+  createInitialPipelineState,
+  PipelineGraphCompiler,
+} from './PipelineGraphCompiler';
 
 export type PipelineStatus =
   | 'planning'
@@ -45,138 +32,48 @@ export interface PipelineStatusEvent {
   sessionId: string;
   status: PipelineStatus;
   message: string;
+  stepId?: string;
+  branchId?: string;
 }
 
 export interface PipelinePlanReadyEvent {
   sessionId: string;
   plan: string;
+  stepId: string;
 }
 
 export interface PipelineSessionUpdateEvent {
   sessionId: string;
   phase: PipelineExecutorKind;
   update: SessionNotification;
+  stepId?: string;
+  branchId?: string;
 }
 
-export type PipelineExecutorKind = 'planner' | 'implementer';
+export type PipelineExecutorKind = string;
+
+interface PendingApprovalState {
+  stepId: string;
+  plan: string;
+}
 
 interface PipelineRunState {
-  originalPrompt: string;
-  plan?: string;
+  pipeline: PipelineDefinition;
+  graph: CompiledPipelineGraph;
+  pendingApproval: PendingApprovalState | null;
   cancelled: boolean;
 }
 
-type RunnerCallback = (promptText: string, requestContext: RequestContext) => Promise<string>;
-type AcpRunCallback = (
-  kind: PipelineExecutorKind,
-  promptText: string,
-  onSessionUpdate?: (update: SessionNotification) => void,
-) => Promise<string>;
-
 export interface PipelineServiceDependencies {
-  getPipelineConfig?: () => PipelineConfig;
+  getPipelineDefinitions?: () => PipelineDefinition[];
+  getPipelineDefinitionForAgent?: (agentName: string) => PipelineDefinition | null;
   getAgentConfigs?: () => Record<string, unknown>;
   runAcpAgent?: AcpRunCallback;
 }
 
-class AcpBackedA2AExecutor implements AgentExecutor {
-  constructor(
-    private readonly runAgent: RunnerCallback,
-  ) {}
-
-  async execute(requestContext: RequestContext, eventBus: ExecutionEventBus): Promise<void> {
-    try {
-      const promptText = getMessageText(requestContext.userMessage);
-      const result = await this.runAgent(promptText, requestContext);
-      eventBus.publish(createAgentMessage(result, requestContext));
-      eventBus.finished();
-    } catch (e: any) {
-      // In A2A, we should probably publish an error or just let it reject.
-      // If we let it reject, we need to make sure the server handles it.
-      // For now, let's rethrow and see if we can catch it on the client side.
-      throw e;
-    }
-  }
-
-  async cancelTask(_taskId: string, eventBus: ExecutionEventBus): Promise<void> {
-    eventBus.finished();
-  }
-}
-
-class LocalA2AAgentServer {
-  private server: Server | null = null;
-  private agentCard: AgentCard | null = null;
-
-  constructor(
-    private readonly kind: PipelineExecutorKind,
-    private readonly executor: AgentExecutor,
-  ) {}
-
-  async start(): Promise<AgentCard> {
-    if (this.agentCard) {
-      return this.agentCard;
-    }
-
-    const app = express();
-    app.use(express.json({ limit: '2mb' }));
-
-    await new Promise<void>((resolve, reject) => {
-      const server = app.listen(0, '127.0.0.1', () => {
-        this.server = server;
-        resolve();
-      });
-      server.once('error', reject);
-    });
-
-    const address = this.server?.address() as AddressInfo | null;
-    if (!address) {
-      throw new Error(`Failed to start ${this.kind} A2A server.`);
-    }
-
-    const baseUrl = `http://127.0.0.1:${address.port}`;
-    const jsonRpcUrl = `${baseUrl}/a2a/jsonrpc`;
-    this.agentCard = createAgentCard(this.kind, jsonRpcUrl);
-    const requestHandler = new DefaultRequestHandler(
-      this.agentCard,
-      new InMemoryTaskStore(),
-      this.executor,
-    );
-
-    app.use('/.well-known/agent-card.json', agentCardHandler({ agentCardProvider: requestHandler }));
-    app.use('/a2a/jsonrpc', jsonRpcHandler({
-      requestHandler,
-      userBuilder: UserBuilder.noAuthentication,
-    }));
-
-    log(`Pipeline ${this.kind} A2A server listening on ${baseUrl}`);
-    return this.agentCard;
-  }
-
-  get baseUrl(): string {
-    if (!this.agentCard) {
-      throw new Error(`${this.kind} A2A server is not started.`);
-    }
-    return this.agentCard.url.replace(/\/a2a\/jsonrpc$/, '');
-  }
-
-  async dispose(): Promise<void> {
-    const server = this.server;
-    this.server = null;
-    this.agentCard = null;
-    if (!server) {
-      return;
-    }
-
-    await new Promise<void>((resolve) => {
-      server.close(() => resolve());
-    });
-  }
-}
-
 export class PipelineService extends EventEmitter {
-  private plannerServer: LocalA2AAgentServer | null = null;
-  private implementerServer: LocalA2AAgentServer | null = null;
   private readonly runs: Map<string, PipelineRunState> = new Map();
+  private readonly checkpointer = new MemorySaver();
 
   constructor(
     private readonly workspaceCwd: () => string,
@@ -185,64 +82,47 @@ export class PipelineService extends EventEmitter {
     super();
   }
 
-  async createPlan(sessionId: string, userPrompt: string): Promise<string> {
-    const config = this.readPipelineConfig();
-    this.assertConfiguredAgents(config);
+  async createPlan(sessionId: string, userPrompt: string, pipelineAgentName?: string): Promise<string> {
+    const pipeline = this.readPipelineDefinition(pipelineAgentName);
+    this.assertConfiguredAgents(pipeline);
 
-    // Récupérer ou créer le state (NE PAS écraser)
-    let state = this.runs.get(sessionId);
-    if (!state) {
-      state = { originalPrompt: userPrompt, cancelled: false };
-      this.runs.set(sessionId, state);
-    }
-    // Si state existe déjà, on garde originalPrompt et plan précédent
-
-    this.emitStatus(sessionId, 'planning', `Planning with ${config.plannerAgentName}...`);
+    const state: PipelineRunState = {
+      pipeline,
+      graph: this.compileGraph(sessionId, pipeline),
+      pendingApproval: null,
+      cancelled: false,
+    };
+    this.runs.set(sessionId, state);
 
     try {
-      const planner = await this.getClient('planner');
-      // Inclure le plan précédent si il existe
-      const prompt = state.plan
-        ? buildPlannerPrompt(userPrompt, state.plan, state.originalPrompt)
-        : buildPlannerPrompt(userPrompt);
-
-      const responseText = await this.sendA2AMessage(planner, prompt, sessionId);
-      this.throwIfCancelled(state);
-      const plan = extractSingleProposedPlan(responseText);
-      state.plan = plan;  // Mettre à jour avec le nouveau plan
-      this.emit('plan-ready', { sessionId, plan } satisfies PipelinePlanReadyEvent);
-      this.emitStatus(sessionId, 'awaiting_approval', 'Plan ready for review.');
-      return plan;
+      const result = await state.graph.invoke(
+        createInitialPipelineState(userPrompt),
+        this.graphConfig(sessionId),
+      );
+      return this.handleGraphResult(sessionId, state, result, 'Pipeline completed.');
     } catch (e: any) {
-      this.emitStatus(sessionId, 'error', e.message || 'Pipeline planning failed.');
+      this.emitStatus(sessionId, 'error', e.message || 'Pipeline failed.');
       this.runs.delete(sessionId);
       throw e;
     }
   }
 
   async approvePlan(sessionId: string, approvedPlan: string): Promise<string> {
-    const config = this.readPipelineConfig();
-    this.assertConfiguredAgents(config);
     const state = this.runs.get(sessionId);
-    if (!state) {
+    if (!state?.pendingApproval) {
       throw new Error('No pending pipeline plan for this session.');
     }
-    assertSingleProposedPlan(approvedPlan.trim());
-    state.plan = approvedPlan.trim();
 
-    this.emitStatus(sessionId, 'implementing', `Implementing with ${config.implementerAgentName}...`);
+    const approvedOutput = approvedPlan.trim();
+    assertSingleProposedPlan(approvedOutput);
+    state.pendingApproval = null;
 
     try {
-      const implementer = await this.getClient('implementer');
-      const responseText = await this.sendA2AMessage(
-        implementer,
-        buildImplementerPrompt(state.originalPrompt, state.plan),
-        sessionId,
+      const result = await state.graph.invoke(
+        new Command({ resume: { approved: true, plan: approvedOutput } }),
+        this.graphConfig(sessionId),
       );
-      this.throwIfCancelled(state);
-      this.emitStatus(sessionId, 'completed', 'Pipeline implementation completed.');
-      this.runs.delete(sessionId);
-      return responseText;
+      return this.handleGraphResult(sessionId, state, result, 'Pipeline completed.');
     } catch (e: any) {
       this.emitStatus(sessionId, 'error', e.message || 'Pipeline implementation failed.');
       this.runs.delete(sessionId);
@@ -274,96 +154,138 @@ export class PipelineService extends EventEmitter {
       this.emitStatus(sessionId, 'cancelled', 'Pipeline cancelled.');
     }
     this.runs.clear();
-    await Promise.all([
-      this.plannerServer?.dispose(),
-      this.implementerServer?.dispose(),
-    ]);
-    this.plannerServer = null;
-    this.implementerServer = null;
     this.removeAllListeners();
   }
 
-  private async getClient(kind: PipelineExecutorKind) {
-    const server = await this.getServer(kind);
-    const factory = new ClientFactory();
-    return factory.createFromUrl(server.baseUrl);
+  private compileGraph(sessionId: string, pipeline: PipelineDefinition): CompiledPipelineGraph {
+    const compiler = new PipelineGraphCompiler(
+      async (kind, promptText, onSessionUpdate) =>
+        this.runConfiguredAcpAgent(sessionId, kind, promptText, onSessionUpdate),
+      {
+        onStepStart: (stepId, primitive, branchId) => {
+          const phase = this.getStepPhase(pipeline, stepId);
+          this.emitStatus(
+            sessionId,
+            phase,
+            `Running ${branchId ? `${stepId}/${branchId}` : stepId} with ${primitive.agent}...`,
+            stepId,
+            branchId,
+          );
+        },
+        onStepSessionUpdate: (stepId, update, branchId) => {
+          this.emit('session-update', {
+            sessionId,
+            phase: branchId ? `${stepId}/${branchId}` : stepId,
+            update,
+            stepId,
+            branchId,
+          } satisfies PipelineSessionUpdateEvent);
+        },
+      },
+      this.checkpointer,
+    );
+    return compiler.compile(pipeline);
   }
 
-  private async getServer(kind: PipelineExecutorKind): Promise<LocalA2AAgentServer> {
-    if (kind === 'planner') {
-      if (!this.plannerServer) {
-        this.plannerServer = new LocalA2AAgentServer(kind, new AcpBackedA2AExecutor(
-          async (promptText, requestContext) => {
-            const sessionId = getPipelineSessionId(requestContext);
-            return this.runConfiguredAcpAgent('planner', promptText, (update) => {
-              this.emit('session-update', { sessionId, phase: 'planner', update } satisfies PipelineSessionUpdateEvent);
-            });
-          },
-        ));
-      }
-      await this.plannerServer.start();
-      return this.plannerServer;
+  private handleGraphResult(
+    sessionId: string,
+    state: PipelineRunState,
+    result: any,
+    completionMessage: string,
+  ): string {
+    this.throwIfCancelled(state);
+    const interrupt = this.readApprovalInterrupt(result);
+    if (interrupt) {
+      assertSingleProposedPlan(interrupt.plan);
+      state.pendingApproval = interrupt;
+      this.emit('plan-ready', {
+        sessionId,
+        plan: interrupt.plan,
+        stepId: interrupt.stepId,
+      } satisfies PipelinePlanReadyEvent);
+      this.emitStatus(sessionId, 'awaiting_approval', 'Plan ready for review.', interrupt.stepId);
+      return interrupt.plan;
     }
 
-    if (!this.implementerServer) {
-      this.implementerServer = new LocalA2AAgentServer(kind, new AcpBackedA2AExecutor(
-        async (promptText, requestContext) => {
-          const sessionId = getPipelineSessionId(requestContext);
-          return this.runConfiguredAcpAgent('implementer', promptText, (update) => {
-            this.emit('session-update', { sessionId, phase: 'implementer', update } satisfies PipelineSessionUpdateEvent);
-          });
-        },
-      ));
+    this.emitStatus(sessionId, 'completed', completionMessage);
+    this.runs.delete(sessionId);
+    return typeof result?.lastOutput === 'string' ? result.lastOutput : '';
+  }
+
+  private readApprovalInterrupt(result: any): PendingApprovalState | null {
+    const interrupts = result?.[INTERRUPT];
+    if (!Array.isArray(interrupts) || interrupts.length === 0) {
+      return null;
     }
-    await this.implementerServer.start();
-    return this.implementerServer;
+    const value = interrupts[0]?.value;
+    if (!value || typeof value.stepId !== 'string' || typeof value.plan !== 'string') {
+      throw new Error('Pipeline approval interrupt was malformed.');
+    }
+    return {
+      stepId: value.stepId,
+      plan: value.plan,
+    };
+  }
+
+  private getStepPhase(pipeline: PipelineDefinition, stepId: string): PipelineStatus {
+    let approvalSeen = false;
+    for (const step of pipeline.steps) {
+      if (step.id === stepId) {
+        return approvalSeen ? 'implementing' : 'planning';
+      }
+      if ('type' in step && step.type === 'approval') {
+        approvalSeen = true;
+      }
+    }
+    return 'planning';
   }
 
   private async runConfiguredAcpAgent(
+    sessionId: string,
     kind: PipelineExecutorKind,
     promptText: string,
     onSessionUpdate?: (update: SessionNotification) => void,
   ): Promise<string> {
+    const state = this.runs.get(sessionId);
+    if (!state || state.cancelled) {
+      throw new Error('Pipeline cancelled.');
+    }
+
     if (this.dependencies.runAcpAgent) {
       return this.dependencies.runAcpAgent(kind, promptText, onSessionUpdate);
     }
 
-    const config = this.readPipelineConfig();
-    const agentName = kind === 'planner'
-      ? config.plannerAgentName
-      : config.implementerAgentName;
+    const primitive = this.findPrimitiveForExecutorKind(state.pipeline, kind);
     const runner = new AcpAgentRunner(this.workspaceCwd);
-    return runner.run(agentName, promptText, {
-      onSessionUpdate: (update) => {
-        onSessionUpdate?.(update);
-      },
+    return runner.run(primitive.agent, promptText, {
+      onSessionUpdate,
     });
   }
 
-  private async sendA2AMessage(client: Client, text: string, sessionId: string): Promise<string> {
-    const params: MessageSendParams = {
-      configuration: {
-        acceptedOutputModes: ['text/plain'],
-        blocking: true,
-      },
-      message: {
-        kind: 'message',
-        role: 'user',
-        messageId: randomUUID(),
-        metadata: {
-          pipelineSessionId: sessionId,
-        },
-        parts: [{ kind: 'text', text }],
-      },
-    };
-    const result = await client.sendMessage(params);
-    return getA2AResultText(result);
+  private findPrimitiveForExecutorKind(
+    pipeline: PipelineDefinition,
+    kind: PipelineExecutorKind,
+  ): PipelinePrimitiveDefinition {
+    for (const step of pipeline.steps) {
+      if ('use' in step && step.id === kind) {
+        return pipeline.primitives[step.use];
+      }
+      if ('type' in step && step.type === 'parallel') {
+        for (const branch of step.branches) {
+          if (`${step.id}__${branch.id}` === kind) {
+            return pipeline.primitives[branch.use];
+          }
+        }
+      }
+    }
+    throw new Error(`Unable to resolve pipeline executor "${kind}".`);
   }
 
-  private assertConfiguredAgents(config: PipelineConfig): void {
+  private assertConfiguredAgents(pipeline: PipelineDefinition): void {
     const agents = this.readAgentConfigs();
-    const missing = [config.plannerAgentName, config.implementerAgentName]
-      .filter(agentName => !agents[agentName]);
+    const missing = Object.values(pipeline.primitives)
+      .map(primitive => primitive.agent)
+      .filter((agentName, index, names) => !agents[agentName] && names.indexOf(agentName) === index);
     if (missing.length > 0) {
       throw new Error(`Missing configured ACP pipeline agent(s): ${missing.join(', ')}.`);
     }
@@ -375,150 +297,49 @@ export class PipelineService extends EventEmitter {
     }
   }
 
-  private emitStatus(sessionId: string, status: PipelineStatus, message: string): void {
-    this.emit('status', { sessionId, status, message } satisfies PipelineStatusEvent);
+  private graphConfig(sessionId: string): { configurable: { thread_id: string } } {
+    return { configurable: { thread_id: sessionId } };
   }
 
-  private readPipelineConfig(): PipelineConfig {
-    return this.dependencies.getPipelineConfig?.() ?? getPipelineConfig();
+  private emitStatus(
+    sessionId: string,
+    status: PipelineStatus,
+    message: string,
+    stepId?: string,
+    branchId?: string,
+  ): void {
+    this.emit('status', {
+      sessionId,
+      status,
+      message,
+      stepId,
+      branchId,
+    } satisfies PipelineStatusEvent);
+  }
+
+  private readPipelineDefinition(pipelineAgentName?: string): PipelineDefinition {
+    if (pipelineAgentName) {
+      const definition = this.dependencies.getPipelineDefinitionForAgent?.(pipelineAgentName)
+        ?? getPipelineDefinitionForAgent(pipelineAgentName, this.workspaceCwd(), this.readAgentConfigs());
+      if (definition) {
+        return definition;
+      }
+    }
+
+    const definitions = this.dependencies.getPipelineDefinitions?.()
+      ?? getPipelineDefinitions(this.workspaceCwd(), this.readAgentConfigs());
+    const definition = pipelineAgentName
+      ? definitions.find(candidate => candidate.title === pipelineAgentName)
+      : definitions[0];
+    if (!definition) {
+      throw new Error(pipelineAgentName
+        ? `Unknown ACP pipeline "${pipelineAgentName}".`
+        : 'No ACP pipelines are configured.');
+    }
+    return definition;
   }
 
   private readAgentConfigs(): Record<string, unknown> {
     return this.dependencies.getAgentConfigs?.() ?? getAgentConfigs();
   }
-}
-
-function createAgentCard(kind: PipelineExecutorKind, url: string): AgentCard {
-  return {
-    name: `ACP Pipeline ${kind}`,
-    description: kind === 'planner'
-      ? 'Produces implementation plans through a configured ACP planner agent.'
-      : 'Implements approved plans through a configured ACP implementer agent.',
-    version: '0.1.0',
-    protocolVersion: '0.3.0',
-    url,
-    preferredTransport: 'JSONRPC',
-    additionalInterfaces: [{ transport: 'JSONRPC', url }],
-    capabilities: {
-      streaming: false,
-      pushNotifications: false,
-      stateTransitionHistory: false,
-    },
-    defaultInputModes: ['text/plain'],
-    defaultOutputModes: ['text/plain'],
-    skills: [
-      {
-        id: kind,
-        name: kind === 'planner' ? 'Plan' : 'Implement',
-        description: kind === 'planner'
-          ? 'Create a single proposed implementation plan.'
-          : 'Implement a validated proposed plan.',
-        tags: ['acp', 'pipeline', kind],
-      },
-    ],
-  };
-}
-
-function createAgentMessage(text: string, requestContext: RequestContext): Message {
-  return {
-    kind: 'message',
-    role: 'agent',
-    messageId: randomUUID(),
-    taskId: requestContext.taskId,
-    contextId: requestContext.contextId,
-    parts: [{ kind: 'text', text }],
-  };
-}
-
-function getMessageText(message: Message): string {
-  return getTextFromParts(message.parts);
-}
-
-function getA2AResultText(result: Message | Task): string {
-  if (result.kind === 'message') {
-    return getTextFromParts(result.parts);
-  }
-  return getTaskText(result);
-}
-
-function getPipelineSessionId(requestContext: RequestContext): string {
-  const sessionId = requestContext.userMessage.metadata?.pipelineSessionId;
-  if (typeof sessionId !== 'string' || !sessionId) {
-    throw new Error('Missing pipeline session metadata.');
-  }
-  return sessionId;
-}
-
-function getTaskText(task: Task): string {
-  if (task.status.state === 'failed' || task.status.state === 'canceled') {
-    const errorMsg = task.status.message ? getTextFromParts(task.status.message.parts) : `Task ${task.status.state}`;
-    throw new Error(errorMsg);
-  }
-  const statusText = task.status.message ? getTextFromParts(task.status.message.parts) : '';
-  const historyText = (task.history ?? [])
-    .filter(message => message.role === 'agent')
-    .map(message => getTextFromParts(message.parts))
-    .filter(Boolean)
-    .join('\n');
-  const artifactText = (task.artifacts ?? [])
-    .flatMap(artifact => artifact.parts ?? [])
-    .map(part => getTextFromPart(part))
-    .filter(Boolean)
-    .join('\n');
-  return [statusText, historyText, artifactText].filter(Boolean).join('\n').trim();
-}
-
-function getTextFromParts(parts: Part[]): string {
-  return parts.map(part => getTextFromPart(part)).filter(Boolean).join('\n').trim();
-}
-
-function getTextFromPart(part: Part): string {
-  return part.kind === 'text' ? part.text : '';
-}
-
-function buildPlannerPrompt(
-  userPrompt: string,
-  previousPlan?: string,
-  originalPrompt?: string
-): string {
-  const parts = [
-    'You are the planning agent in a two-agent ACP pipeline.',
-    'Create an implementation plan only. Do not edit files or run commands that mutate the workspace.',
-    'Your response must contain exactly one <proposed_plan> block and no other text outside it.',
-    'The plan must be decision-complete enough for another coding agent to implement.',
-    '',
-  ];
-
-  if (previousPlan) {
-    parts.push('Previous plan:');
-    parts.push(previousPlan);
-    parts.push('');
-    parts.push('User feedback/request:');
-  } else {
-    parts.push('User request:');
-  }
-
-  parts.push(userPrompt);
-
-  if (originalPrompt && originalPrompt !== userPrompt) {
-    parts.push('');
-    parts.push('Original request:');
-    parts.push(originalPrompt);
-  }
-
-  return parts.join('\n');
-}
-
-function buildImplementerPrompt(originalPrompt: string, approvedPlan: string): string {
-  return [
-    'You are the implementation agent in a two-agent ACP pipeline.',
-    'Implement the approved plan in the current workspace using the available ACP capabilities.',
-    'Use the existing permission policy for filesystem and terminal actions.',
-    '',
-    'Original user request:',
-    originalPrompt,
-    '',
-    'Approved plan:',
-    approvedPlan,
-  ].join('\n');
 }

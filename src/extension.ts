@@ -13,7 +13,12 @@ import { ChatWebviewProvider } from './ui/ChatWebviewProvider';
 import { DebugWebviewPanel } from './ui/DebugWebviewPanel';
 import { captureEditorContext, captureOpenEditorPaths, initializeOpenEditorsTracker } from './ui/EditorContext';
 import { PipelineService } from './pipeline/PipelineService';
-import { EDITOR_CONTEXT_LINK_STATE_KEY, registerCommands } from './commands/RegisterCommands';
+import {
+  EDITOR_CONTEXT_LINK_STATE_KEY,
+  PIPELINE_ENABLED_CONTEXT_KEY,
+  registerCommands,
+} from './commands/RegisterCommands';
+import { isPipelineEnabled } from './config/PipelineConfig';
 import { log, disposeChannels } from './utils/Logger';
 import { initTelemetry, sendEvent } from './utils/TelemetryManager';
 import { version as extensionVersion } from '../package.json';
@@ -77,6 +82,7 @@ export function activate(context: vscode.ExtensionContext): void {
   );
   chatWebviewProvider.setEditorContextLinked(initialEditorContextLinked);
   void vscode.commands.executeCommand('setContext', EDITOR_CONTEXT_LINK_STATE_KEY, initialEditorContextLinked);
+  void vscode.commands.executeCommand('setContext', PIPELINE_ENABLED_CONTEXT_KEY, isPipelineEnabled());
   const chatViewRegistration = vscode.window.registerWebviewViewProvider(
     ChatWebviewProvider.viewType,
     chatWebviewProvider,
@@ -84,6 +90,27 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   const statusBarManager = new StatusBarManager(sessionManager);
+  const pipelineYamlWatcher = vscode.workspace.createFileSystemWatcher('**/.acp/pipelines/*.yaml');
+  const pipelineYmlWatcher = vscode.workspace.createFileSystemWatcher('**/.acp/pipelines/*.yml');
+  const refreshPipelineAgents = () => {
+    sessionTreeProvider.invalidate();
+  };
+  pipelineYamlWatcher.onDidCreate(refreshPipelineAgents);
+  pipelineYamlWatcher.onDidChange(refreshPipelineAgents);
+  pipelineYamlWatcher.onDidDelete(refreshPipelineAgents);
+  pipelineYmlWatcher.onDidCreate(refreshPipelineAgents);
+  pipelineYmlWatcher.onDidChange(refreshPipelineAgents);
+  pipelineYmlWatcher.onDidDelete(refreshPipelineAgents);
+  const pipelineConfigWatcher = vscode.workspace.onDidChangeConfiguration(event => {
+    if (
+      event.affectsConfiguration('acp.agents')
+      || event.affectsConfiguration('acp.pipeline.enabled')
+      || event.affectsConfiguration('acp.defaultWorkingDirectory')
+    ) {
+      void vscode.commands.executeCommand('setContext', PIPELINE_ENABLED_CONTEXT_KEY, isPipelineEnabled());
+      refreshPipelineAgents();
+    }
+  });
 
   // Notify chat webview when active session changes
   sessionManager.on('active-session-changed', () => {
@@ -160,6 +187,9 @@ export function activate(context: vscode.ExtensionContext): void {
     treeView,
     chatViewRegistration,
     statusBarManager,
+    pipelineYamlWatcher,
+    pipelineYmlWatcher,
+    pipelineConfigWatcher,
     openDebugSnapshotCmd,
     ...commandDisposables,
     {

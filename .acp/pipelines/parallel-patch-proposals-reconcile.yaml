@@ -1,0 +1,120 @@
+version: 2
+id: parallel-patch-proposals-reconcile
+title: Parallel Patch Proposals Reconcile
+
+primitives:
+  scope_feature:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Cadre la demande et les contraintes non négociables.
+
+      Demande utilisateur :
+      {{userPrompt}}
+
+  propose_minimal_patch:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Propose une approche patch minimal.
+      Ne modifie rien. Donne fichiers, étapes, risques et tests.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  propose_architectural_patch:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Propose une approche plus architecturée et durable.
+      Ne modifie rien. Donne fichiers, étapes, risques et tests.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  propose_fast_experiment:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Propose une approche expérimentale rapide, facilement réversible.
+      Ne modifie rien. Donne fichiers, étapes, risques et tests.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  reconcile_patches:
+    agent: Codex CLI
+    output: proposed_plan
+    sideEffects: none
+    prompt: |
+      Réconcilie les trois propositions en un seul plan cohérent.
+      Garde les meilleures idées, élimine les conflits, et signale les compromis.
+      Retourne exactement un bloc <proposed_plan>...</proposed_plan>.
+
+      Patch minimal :
+      {{steps.proposals.branches.minimal.output}}
+
+      Patch architectural :
+      {{steps.proposals.branches.architectural.output}}
+
+      Patch expérimental :
+      {{steps.proposals.branches.experiment.output}}
+
+  implement_reconciled_patch:
+    agent: Vibe
+    output: markdown
+    sideEffects: workspace
+    prompt: |
+      Implémente uniquement le plan réconcilié approuvé.
+      Ne réintroduis pas les alternatives rejetées.
+
+      Demande utilisateur :
+      {{userPrompt}}
+
+      Plan approuvé :
+      {{steps.approval.output}}
+
+  verify_reconciliation:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Vérifie que l'implémentation respecte le plan réconcilié.
+      Cherche les compromis perdus, conflits non résolus et tests manquants.
+
+      Plan approuvé :
+      {{steps.approval.output}}
+
+      Sortie implémentation :
+      {{steps.implement.output}}
+
+steps:
+  - id: scope
+    use: scope_feature
+
+  - id: proposals
+    type: parallel
+    branches:
+      - id: minimal
+        use: propose_minimal_patch
+      - id: architectural
+        use: propose_architectural_patch
+      - id: experiment
+        use: propose_fast_experiment
+
+  - id: reconcile
+    use: reconcile_patches
+
+  - id: approval
+    type: approval
+    input: "{{steps.reconcile.output}}"
+
+  - id: implement
+    use: implement_reconciled_patch
+
+  - id: verify
+    use: verify_reconciliation

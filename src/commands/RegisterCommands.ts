@@ -11,6 +11,7 @@ import { getOutputChannel, getTrafficChannel, logError } from '../utils/Logger';
 import { sendEvent } from '../utils/TelemetryManager';
 
 export const EDITOR_CONTEXT_LINK_STATE_KEY = 'acp.editorContextLinked';
+export const PIPELINE_ENABLED_CONTEXT_KEY = 'acp.pipelineEnabled';
 
 const FOCUS_CHAT_COMMAND = 'acp-chat.focus';
 
@@ -265,6 +266,22 @@ export function registerCommands({
     sessionTreeProvider.refresh();
   });
 
+  const setPipelineEnabled = async (enabled: boolean): Promise<void> => {
+    const config = vscode.workspace.getConfiguration('acp');
+    await config.update('pipeline.enabled', enabled, vscode.ConfigurationTarget.Workspace);
+    await vscode.commands.executeCommand('setContext', PIPELINE_ENABLED_CONTEXT_KEY, enabled);
+    sessionTreeProvider.invalidate();
+    vscode.window.showInformationMessage(`ACP pipeline agents ${enabled ? 'enabled' : 'disabled'}.`);
+  };
+
+  const enablePipelineAgentsCmd = vscode.commands.registerCommand('acp.enablePipelineAgents', async () => {
+    await setPipelineEnabled(true);
+  });
+
+  const disablePipelineAgentsCmd = vscode.commands.registerCommand('acp.disablePipelineAgents', async () => {
+    await setPipelineEnabled(false);
+  });
+
   const refreshSessionsCmd = vscode.commands.registerCommand('acp.refreshSessions', (arg?: any) => {
     const agentName = typeof arg === 'string' ? arg : arg?.agentName;
     sessionTreeProvider.invalidate(agentName);
@@ -475,6 +492,8 @@ export function registerCommands({
     setModeCmd,
     setModelCmd,
     refreshAgentsCmd,
+    enablePipelineAgentsCmd,
+    disablePipelineAgentsCmd,
     refreshSessionsCmd,
     openSessionCmd,
     openSessionWithCurrentContextCmd,

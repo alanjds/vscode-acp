@@ -1,0 +1,77 @@
+version: 2
+id: release-notes-builder
+title: Release Notes Builder
+
+primitives:
+  scope_notes:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Cadre les release notes à produire : audience, version, période, ton.
+
+      Demande utilisateur :
+      {{userPrompt}}
+
+  collect_user_changes:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Liste les changements utilisateur importants et bénéfices visibles.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  collect_breaking_changes:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Liste breaking changes, migrations, dépréciations et compatibilité.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  collect_internal_changes:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Liste les changements internes qui méritent mention technique.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  write_release_notes:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Rédige des release notes claires et structurées.
+
+      Utilisateur :
+      {{steps.collect.branches.user_changes.output}}
+
+      Breaking :
+      {{steps.collect.branches.breaking_changes.output}}
+
+      Interne :
+      {{steps.collect.branches.internal_changes.output}}
+
+steps:
+  - id: scope
+    use: scope_notes
+
+  - id: collect
+    type: parallel
+    branches:
+      - id: user_changes
+        use: collect_user_changes
+      - id: breaking_changes
+        use: collect_breaking_changes
+      - id: internal_changes
+        use: collect_internal_changes
+
+  - id: notes
+    use: write_release_notes

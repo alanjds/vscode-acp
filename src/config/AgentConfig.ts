@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { getPipelineConfig, getGeminiPipelineConfig } from './PipelineConfig';
+import { getPipelineAgentNames } from './PipelineCatalog';
 
 /**
  * Configuration for a single ACP agent.
@@ -32,20 +32,13 @@ export function getAgentConfigs(): Record<string, AgentConfigEntry> {
 /**
  * Get the list of agent names available.
  */
-export function getAgentNames(): string[] {
-  const agentNames = Object.keys(getAgentConfigs());
-  const pipeline = getPipelineConfig();
-  const geminiPipeline = getGeminiPipelineConfig();
-
-  const namesToAdd: string[] = [];
-  
-  if (pipeline.enabled && !agentNames.includes(pipeline.virtualAgentName)) {
-    namesToAdd.push(pipeline.virtualAgentName);
-  }
-  
-  if (pipeline.enabled && !agentNames.includes(geminiPipeline.virtualAgentName)) {
-    namesToAdd.push(geminiPipeline.virtualAgentName);
-  }
+export function getAgentNames(
+  workspaceCwd?: string,
+  agentConfigs: Record<string, AgentConfigEntry> = getAgentConfigs(),
+): string[] {
+  const agentNames = Object.keys(agentConfigs);
+  const namesToAdd = getPipelineAgentNames(workspaceCwd, agentConfigs)
+    .filter(name => !agentNames.includes(name));
 
   return [...agentNames, ...namesToAdd];
 }

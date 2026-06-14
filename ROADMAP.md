@@ -43,6 +43,18 @@ Cette roadmap regroupe les idées d'évolution et les possibilités pour ACP Cli
 - Ajouter une télémétrie optionnelle centrée sur la fiabilité : erreurs de connexion, échecs de reprise, latence de session et causes d'annulation.
 - Clarifier les états UI lorsque l'agent ne supporte pas certaines capacités ACP, au lieu de masquer implicitement les actions.
 
+## Nouvelles Idées à Explorer
+
+- Visualiser les familles de contexte entre sessions sous forme de graphe ou de filiation.
+- Prévisualiser et éditer le contexte qui sera injecté avant l'envoi au nouvel agent.
+- Ajouter des profils de pipeline configurables avec rôles planner, reviewer, implementer et tester.
+- Conserver un historique des plans proposés, approuvés, rejetés ou modifiés.
+- Comparer le plan approuvé avec les changements réellement produits par l'agent d'implémentation.
+- Ajouter un centre de diagnostic capable de générer un bundle de support filtré à partir des snapshots de debug.
+- Ajouter des indicateurs de budget de contexte/tokens pour éviter les prompts trop volumineux.
+- Proposer des politiques de permissions par workspace ou par profil d'agent.
+- Améliorer le registre d'agents avec des contrôles de disponibilité, installation et authentification.
+
 ## Priorités Suggérées
 
 1. Fiabiliser les fonctionnalités déjà visibles : sessions, contexte VS Code, mentions de fichiers et erreurs de connexion.

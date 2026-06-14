@@ -150,6 +150,16 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "acp.enablePipelineAgents",
+        "title": "ACP: Enable Pipeline Agents",
+        "icon": "$(play)"
+      },
+      {
+        "command": "acp.disablePipelineAgents",
+        "title": "ACP: Disable Pipeline Agents",
+        "icon": "$(debug-pause)"
+      },
+      {
         "command": "acp.refreshSessions",
         "title": "ACP: Refresh Sessions"
       },
@@ -213,6 +223,14 @@
         {
           "command": "acp.disableEditorContextLink",
           "when": "acp.editorContextLinked"
+        },
+        {
+          "command": "acp.enablePipelineAgents",
+          "when": "!acp.pipelineEnabled"
+        },
+        {
+          "command": "acp.disablePipelineAgents",
+          "when": "acp.pipelineEnabled"
         }
       ],
       "view/title": [
@@ -224,6 +242,16 @@
         {
           "command": "acp.refreshAgents",
           "when": "view == acp-sessions",
+          "group": "navigation@3"
+        },
+        {
+          "command": "acp.enablePipelineAgents",
+          "when": "view == acp-sessions && !acp.pipelineEnabled",
+          "group": "navigation@2"
+        },
+        {
+          "command": "acp.disablePipelineAgents",
+          "when": "view == acp-sessions && acp.pipelineEnabled",
           "group": "navigation@2"
         },
         {
@@ -429,11 +457,6 @@
                 "acp"
               ],
               "env": {}
-            },
-            "Vibe": {
-              "command": "vibe-acp",
-              "args": [],
-              "env": {}
             }
           }
         },
@@ -459,37 +482,7 @@
         "acp.pipeline.enabled": {
           "type": "boolean",
           "default": true,
-          "description": "Enable the synthetic Codex plan then Vibe implementation pipeline agent."
-        },
-        "acp.pipeline.virtualAgentName": {
-          "type": "string",
-          "default": "Codex Plan -> Vibe Implement",
-          "description": "Display name of the synthetic pipeline agent shown in the Agents view."
-        },
-        "acp.pipeline.plannerAgentName": {
-          "type": "string",
-          "default": "Codex CLI",
-          "description": "Configured ACP agent name used to produce the pipeline plan."
-        },
-        "acp.pipeline.implementerAgentName": {
-          "type": "string",
-          "default": "Vibe",
-          "description": "Configured ACP agent name used to implement the approved pipeline plan."
-        },
-        "acp.pipeline.geminiVirtualAgentName": {
-          "type": "string",
-          "default": "Gemini Plan -> Vibe Implement",
-          "description": "Display name of the synthetic pipeline agent using Gemini for planning and Vibe for implementation."
-        },
-        "acp.pipeline.geminiPlannerAgentName": {
-          "type": "string",
-          "default": "Gemini CLI",
-          "description": "Configured ACP agent name used to produce the pipeline plan with Gemini."
-        },
-        "acp.pipeline.geminiImplementerAgentName": {
-          "type": "string",
-          "default": "Vibe",
-          "description": "Configured ACP agent name used to implement the approved pipeline plan."
+          "description": "Enable workspace-defined LangGraph pipeline agents from .acp/pipelines/*.yaml."
         }
       }
     }
@@ -507,16 +500,16 @@
     "test": "vscode-test"
   },
   "dependencies": {
-    "@a2a-js/sdk": "^0.3.13",
     "@agentclientprotocol/sdk": "^0.21.1",
+    "@langchain/core": "^1.1.49",
+    "@langchain/langgraph": "^1.4.2",
     "@vscode/extension-telemetry": "^1.5.0",
-    "express": "^5.2.1",
+    "js-yaml": "^4.1.1",
     "marked": "^15.0.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6"
   },
   "devDependencies": {
-    "@types/express": "^5.0.6",
     "@types/mocha": "^10.0.6",
     "@types/node": "^20.0.0",
     "@types/react": "^19.2.14",

@@ -9,7 +9,7 @@ import {
   workspaceIdentityFromCwd,
 } from '../core/WorkspaceIdentity';
 import { getAgentNames } from '../config/AgentConfig';
-import { isPipelineVirtualAgentName } from '../config/PipelineConfig';
+import { isPipelineVirtualAgentName } from '../config/PipelineCatalog';
 import { log, logError } from '../utils/Logger';
 
 /**
@@ -220,11 +220,11 @@ export class SessionTreeProvider implements vscode.TreeDataProvider<AgentNode | 
   private getAgentNodes(): AgentTreeItem[] {
     const activeContextFamilyId = this.sessionManager.getActiveContextFamilyId();
     const workspace = this.getWorkspaceIdentity();
-    return getAgentNames().map(name => {
+    return getAgentNames(workspace.cwd).map(name => {
       const linkedToActiveContext = activeContextFamilyId
         ? this.historyStore?.agentHasContextFamily(name, activeContextFamilyId, workspace) ?? false
         : false;
-      if (isPipelineVirtualAgentName(name)) {
+      if (isPipelineVirtualAgentName(name, workspace.cwd)) {
         return new AgentTreeItem(
           name,
           this.sessionManager.isAgentConnected(name),

@@ -22,7 +22,7 @@ import { ContextFamilyInfo, SessionHistoryStore } from './SessionHistoryStore';
 import { classifyAgentError } from './AgentError';
 import { resolveWorkspaceIdentity, type WorkspaceIdentity } from './WorkspaceIdentity';
 import { getAgentConfigs } from '../config/AgentConfig';
-import { getPipelineConfig, isPipelineVirtualAgentName } from '../config/PipelineConfig';
+import { getPipelineDefinitionForAgent, isPipelineVirtualAgentName } from '../config/PipelineCatalog';
 import { PipelineService } from '../pipeline/PipelineService';
 import { log, logError } from '../utils/Logger';
 import { sendEvent, sendError } from '../utils/TelemetryManager';
@@ -332,19 +332,20 @@ export class SessionManager extends EventEmitter {
 
     const cwd = this.getWorkspaceCwd();
     const sessionId = `pipeline_${Date.now()}`;
-    const pipeline = getPipelineConfig();
+    const pipeline = getPipelineDefinitionForAgent(agentName, cwd);
+    const displayName = pipeline?.title ?? agentName;
     const sessionInfo: SessionInfo = {
       sessionId,
       agentId: `pipeline_agent_${Date.now()}`,
       agentName,
-      agentDisplayName: pipeline.virtualAgentName,
+      agentDisplayName: displayName,
       cwd,
       createdAt: new Date().toISOString(),
       initResponse: {
         protocolVersion: PROTOCOL_VERSION,
         agentInfo: {
           name: 'acp-pipeline',
-          title: pipeline.virtualAgentName,
+          title: displayName,
           version: '0.1.0',
         },
         agentCapabilities: {},
@@ -353,7 +354,7 @@ export class SessionManager extends EventEmitter {
       models: null,
       configOptions: null,
       availableCommands: [],
-      title: pipeline.virtualAgentName,
+      title: displayName,
     };
 
     this.sessions.set(sessionId, sessionInfo);
@@ -629,18 +630,17 @@ export class SessionManager extends EventEmitter {
    */
   async sendPrompt(sessionId: string, text: string): Promise<PromptResponse> {
     const textWithSharedContext = this.consumePendingSharedDiscussionContext(sessionId, text);
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
 
     if (this.isPipelineSession(sessionId)) {
       if (!this.pipelineService) {
         throw new Error('Pipeline service is not available.');
       }
-      await this.pipelineService.createPlan(sessionId, textWithSharedContext);
+      await this.pipelineService.createPlan(sessionId, textWithSharedContext, session.agentName);
       return { stopReason: 'end_turn' } as PromptResponse;
-    }
-
-    const session = this.sessions.get(sessionId);
-    if (!session) {
-      throw new Error(`Session not found: ${sessionId}`);
     }
 
     const connInfo = this.connectionManager.getConnection(session.agentId);

@@ -1,0 +1,77 @@
+version: 2
+id: localization-readiness
+title: Localization Readiness
+
+primitives:
+  scope_l10n:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Cadre la localisation : langues, UI, messages, formats, documents.
+
+      Demande utilisateur :
+      {{userPrompt}}
+
+  inspect_strings:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Analyse chaînes hardcodées, concaténations, pluriels et contexte traducteur.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  inspect_layout:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Analyse layout, longueur de texte, RTL, icônes et truncation.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  inspect_formats:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Analyse dates, nombres, devises, fuseaux horaires et tri.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  l10n_report:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Produit un rapport de readiness localisation avec priorités.
+
+      Chaînes :
+      {{steps.audit.branches.strings.output}}
+
+      Layout :
+      {{steps.audit.branches.layout.output}}
+
+      Formats :
+      {{steps.audit.branches.formats.output}}
+
+steps:
+  - id: scope
+    use: scope_l10n
+
+  - id: audit
+    type: parallel
+    branches:
+      - id: strings
+        use: inspect_strings
+      - id: layout
+        use: inspect_layout
+      - id: formats
+        use: inspect_formats
+
+  - id: report
+    use: l10n_report

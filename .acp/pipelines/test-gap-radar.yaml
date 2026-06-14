@@ -1,0 +1,77 @@
+version: 2
+id: test-gap-radar
+title: Test Gap Radar
+
+primitives:
+  scope_testing:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Cadre la surface à tester : comportement, risques, modules et type de changement.
+
+      Demande utilisateur :
+      {{userPrompt}}
+
+  inspect_unit:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Identifie les tests unitaires manquants ou fragiles.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  inspect_integration:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Identifie les tests d'intégration ou contract tests manquants.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  inspect_manual:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Identifie les validations manuelles ou exploratoires nécessaires.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  testing_strategy:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Produit une stratégie de tests priorisée et réaliste.
+
+      Unit :
+      {{steps.gaps.branches.unit.output}}
+
+      Integration :
+      {{steps.gaps.branches.integration.output}}
+
+      Manual :
+      {{steps.gaps.branches.manual.output}}
+
+steps:
+  - id: scope
+    use: scope_testing
+
+  - id: gaps
+    type: parallel
+    branches:
+      - id: unit
+        use: inspect_unit
+      - id: integration
+        use: inspect_integration
+      - id: manual
+        use: inspect_manual
+
+  - id: strategy
+    use: testing_strategy

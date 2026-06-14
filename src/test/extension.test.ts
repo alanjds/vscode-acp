@@ -92,6 +92,8 @@ suite('Extension Test Suite', () => {
       'acp.loadMoreSessions',
       'acp.enableEditorContextLink',
       'acp.disableEditorContextLink',
+      'acp.enablePipelineAgents',
+      'acp.disablePipelineAgents',
       'acp.setMode',
       'acp.setModel',
       'acp.refreshAgents',

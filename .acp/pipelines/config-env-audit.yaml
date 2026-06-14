@@ -1,0 +1,77 @@
+version: 2
+id: config-env-audit
+title: Config Env Audit
+
+primitives:
+  scope_config:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Cadre la configuration à auditer : settings, env vars, secrets, defaults.
+
+      Demande utilisateur :
+      {{userPrompt}}
+
+  inspect_defaults:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Analyse defaults dangereux, valeurs magiques, compatibilité et migration.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  inspect_secrets_env:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Analyse secrets, env vars, logging, redaction et exposition accidentelle.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  inspect_runtime_modes:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Analyse modes dev/test/prod, feature flags et différences d'environnement.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  config_report:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Produit un rapport d'audit config/env avec corrections recommandées.
+
+      Defaults :
+      {{steps.audit.branches.defaults.output}}
+
+      Secrets/env :
+      {{steps.audit.branches.secrets_env.output}}
+
+      Runtime :
+      {{steps.audit.branches.runtime_modes.output}}
+
+steps:
+  - id: scope
+    use: scope_config
+
+  - id: audit
+    type: parallel
+    branches:
+      - id: defaults
+        use: inspect_defaults
+      - id: secrets_env
+        use: inspect_secrets_env
+      - id: runtime_modes
+        use: inspect_runtime_modes
+
+  - id: report
+    use: config_report

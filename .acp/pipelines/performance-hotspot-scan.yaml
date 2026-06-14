@@ -1,0 +1,77 @@
+version: 2
+id: performance-hotspot-scan
+title: Performance Hotspot Scan
+
+primitives:
+  scope_perf:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Cadre le problème de performance : scénario, métrique, budget, zone probable.
+
+      Demande utilisateur :
+      {{userPrompt}}
+
+  inspect_runtime:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Cherche les hotspots runtime : boucles, I/O, allocations, appels réseau, cache.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  inspect_frontend:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Si applicable, cherche les hotspots UI : rendu, bundle, hydration, layout, assets.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  inspect_measurement:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Propose comment mesurer avant/après et éviter une optimisation non prouvée.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  perf_report:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Produit un rapport performance : hypothèses, mesures, quick wins, risques.
+
+      Runtime :
+      {{steps.scan.branches.runtime.output}}
+
+      Frontend :
+      {{steps.scan.branches.frontend.output}}
+
+      Mesure :
+      {{steps.scan.branches.measurement.output}}
+
+steps:
+  - id: scope
+    use: scope_perf
+
+  - id: scan
+    type: parallel
+    branches:
+      - id: runtime
+        use: inspect_runtime
+      - id: frontend
+        use: inspect_frontend
+      - id: measurement
+        use: inspect_measurement
+
+  - id: report
+    use: perf_report

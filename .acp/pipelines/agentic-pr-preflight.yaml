@@ -1,0 +1,77 @@
+version: 2
+id: agentic-pr-preflight
+title: Agentic PR Preflight
+
+primitives:
+  scope_pr:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Cadre le changement à pré-vérifier avant PR agentique.
+
+      Demande utilisateur :
+      {{userPrompt}}
+
+  inspect_diff_risk:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Analyse les risques du diff attendu : blast radius, contrats, edge cases.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  inspect_ci_path:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Propose la trajectoire CI : tests, lint, typecheck, commandes rapides et complètes.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  inspect_review_packet:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Prépare le paquet de review : résumé, fichiers clés, risques à signaler.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  preflight_report:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Produit une checklist pré-PR pour agent : prêt, pas prêt, ou besoin de test.
+
+      Risques diff :
+      {{steps.preflight.branches.diff_risk.output}}
+
+      CI :
+      {{steps.preflight.branches.ci_path.output}}
+
+      Review :
+      {{steps.preflight.branches.review_packet.output}}
+
+steps:
+  - id: scope
+    use: scope_pr
+
+  - id: preflight
+    type: parallel
+    branches:
+      - id: diff_risk
+        use: inspect_diff_risk
+      - id: ci_path
+        use: inspect_ci_path
+      - id: review_packet
+        use: inspect_review_packet
+
+  - id: report
+    use: preflight_report

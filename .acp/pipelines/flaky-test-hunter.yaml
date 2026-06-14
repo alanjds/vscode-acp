@@ -1,0 +1,77 @@
+version: 2
+id: flaky-test-hunter
+title: Flaky Test Hunter
+
+primitives:
+  scope_flaky:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Cadre le test flaky : symptôme, fréquence, environnement, logs connus.
+
+      Demande utilisateur :
+      {{userPrompt}}
+
+  inspect_time_order:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Cherche les causes liées au temps, ordre d'exécution, async et race conditions.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  inspect_shared_state:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Cherche les causes liées à l'état partagé, fichiers, réseau, mocks ou globales.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  inspect_ci_variance:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Cherche les causes liées à CI : cache, ressources, OS, versions, parallélisme.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  flaky_plan:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Produit un plan de stabilisation avec reproduction, instrumentation et fix minimal.
+
+      Temps/ordre :
+      {{steps.hunt.branches.time_order.output}}
+
+      État partagé :
+      {{steps.hunt.branches.shared_state.output}}
+
+      Variance CI :
+      {{steps.hunt.branches.ci_variance.output}}
+
+steps:
+  - id: scope
+    use: scope_flaky
+
+  - id: hunt
+    type: parallel
+    branches:
+      - id: time_order
+        use: inspect_time_order
+      - id: shared_state
+        use: inspect_shared_state
+      - id: ci_variance
+        use: inspect_ci_variance
+
+  - id: plan
+    use: flaky_plan

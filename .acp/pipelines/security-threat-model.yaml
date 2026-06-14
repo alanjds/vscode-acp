@@ -1,0 +1,77 @@
+version: 2
+id: security-threat-model
+title: Security Threat Model
+
+primitives:
+  scope_asset:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Cadre les actifs, points d'entrée, données sensibles et frontières de confiance.
+
+      Demande utilisateur :
+      {{userPrompt}}
+
+  inspect_auth:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Analyse authentification, autorisation, élévation de privilèges et sessions.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  inspect_input:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Analyse injection, validation d'entrée, sérialisation, parsing et SSRF.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  inspect_secrets:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Analyse secrets, tokens, logs, permissions et exposition de données.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  threat_synthesis:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Produit un threat model court : menaces, sévérité, contrôles, tests de sécurité.
+
+      Auth :
+      {{steps.threats.branches.auth.output}}
+
+      Entrées :
+      {{steps.threats.branches.input.output}}
+
+      Secrets :
+      {{steps.threats.branches.secrets.output}}
+
+steps:
+  - id: scope
+    use: scope_asset
+
+  - id: threats
+    type: parallel
+    branches:
+      - id: auth
+        use: inspect_auth
+      - id: input
+        use: inspect_input
+      - id: secrets
+        use: inspect_secrets
+
+  - id: synthesize
+    use: threat_synthesis

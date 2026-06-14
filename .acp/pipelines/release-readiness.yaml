@@ -1,0 +1,77 @@
+version: 2
+id: release-readiness
+title: Release Readiness
+
+primitives:
+  scope_release:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Cadre la release : version, portée, risques, public et deadline.
+
+      Demande utilisateur :
+      {{userPrompt}}
+
+  inspect_quality:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Vérifie qualité, tests, dette critique et bugs connus.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  inspect_docs:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Vérifie docs, migration guide, changelog, exemples et annonces.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  inspect_ops:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Vérifie rollout, rollback, monitoring, support et flags.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  readiness_checklist:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Produit une checklist go/no-go de release.
+
+      Qualité :
+      {{steps.readiness.branches.quality.output}}
+
+      Docs :
+      {{steps.readiness.branches.docs.output}}
+
+      Ops :
+      {{steps.readiness.branches.ops.output}}
+
+steps:
+  - id: scope
+    use: scope_release
+
+  - id: readiness
+    type: parallel
+    branches:
+      - id: quality
+        use: inspect_quality
+      - id: docs
+        use: inspect_docs
+      - id: ops
+        use: inspect_ops
+
+  - id: checklist
+    use: readiness_checklist

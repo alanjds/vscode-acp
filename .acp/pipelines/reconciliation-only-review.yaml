@@ -1,0 +1,78 @@
+version: 2
+id: reconciliation-only-review
+title: Reconciliation Only Review
+
+primitives:
+  scope_conflict:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Cadre les propositions, diffs, avis ou contraintes à réconcilier.
+
+      Demande utilisateur :
+      {{userPrompt}}
+
+  read_product_side:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Analyse la situation depuis l'angle produit/utilisateur.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  read_engineering_side:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Analyse la situation depuis l'angle engineering/maintenance.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  read_risk_side:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Analyse la situation depuis l'angle risque, sécurité, release et support.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  reconcile_decision:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Réconcilie les trois angles.
+      Produit : décision, compromis acceptés, compromis refusés, prochaine action.
+
+      Produit :
+      {{steps.read.branches.product.output}}
+
+      Engineering :
+      {{steps.read.branches.engineering.output}}
+
+      Risque :
+      {{steps.read.branches.risk.output}}
+
+steps:
+  - id: scope
+    use: scope_conflict
+
+  - id: read
+    type: parallel
+    branches:
+      - id: product
+        use: read_product_side
+      - id: engineering
+        use: read_engineering_side
+      - id: risk
+        use: read_risk_side
+
+  - id: decision
+    use: reconcile_decision

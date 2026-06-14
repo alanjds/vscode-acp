@@ -1,0 +1,61 @@
+version: 2
+id: safe-refactor-lane
+title: Safe Refactor Lane
+
+primitives:
+  map_refactor:
+    agent: Codex CLI
+    output: proposed_plan
+    sideEffects: none
+    prompt: |
+      Propose un refactor sûr, découpé en petites étapes.
+      Le plan doit préserver le comportement public et inclure les tests de non-régression.
+      Retourne exactement un bloc <proposed_plan>...</proposed_plan>.
+
+      Demande utilisateur :
+      {{userPrompt}}
+
+  implement_refactor:
+    agent: Vibe
+    output: markdown
+    sideEffects: workspace
+    prompt: |
+      Exécute le refactor approuvé sans changement fonctionnel volontaire.
+      Ne mélange pas le refactor avec une nouvelle feature.
+
+      Demande utilisateur :
+      {{userPrompt}}
+
+      Plan approuvé :
+      {{steps.approval.output}}
+
+  refactor_audit:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Audite le refactor terminé.
+      Vérifie les changements de comportement possibles, la couverture de tests et les zones à relire.
+
+      Demande utilisateur :
+      {{userPrompt}}
+
+      Plan approuvé :
+      {{steps.approval.output}}
+
+      Sortie implémentation :
+      {{steps.implement.output}}
+
+steps:
+  - id: plan
+    use: map_refactor
+
+  - id: approval
+    type: approval
+    input: "{{steps.plan.output}}"
+
+  - id: implement
+    use: implement_refactor
+
+  - id: audit
+    use: refactor_audit

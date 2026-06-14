@@ -1,0 +1,77 @@
+version: 2
+id: onboarding-map
+title: Onboarding Map
+
+primitives:
+  scope_onboarding:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Cadre le profil d'onboarding : nouveau dev, mainteneur, reviewer, support ou produit.
+
+      Demande utilisateur :
+      {{userPrompt}}
+
+  map_architecture:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Cartographie architecture, modules, responsabilités et points d'entrée.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  map_workflows:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Cartographie workflows de dev, build, test, debug et release.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  map_first_tasks:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Propose une progression de premières tâches réalistes et vérifiables.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  onboarding_guide:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Produit un guide d'onboarding synthétique avec parcours jour 1, semaine 1, mois 1.
+
+      Architecture :
+      {{steps.map.branches.architecture.output}}
+
+      Workflows :
+      {{steps.map.branches.workflows.output}}
+
+      Premières tâches :
+      {{steps.map.branches.first_tasks.output}}
+
+steps:
+  - id: scope
+    use: scope_onboarding
+
+  - id: map
+    type: parallel
+    branches:
+      - id: architecture
+        use: map_architecture
+      - id: workflows
+        use: map_workflows
+      - id: first_tasks
+        use: map_first_tasks
+
+  - id: guide
+    use: onboarding_guide

@@ -1,0 +1,77 @@
+version: 2
+id: migration-blueprint
+title: Migration Blueprint
+
+primitives:
+  scope_migration:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Cadre la migration : source, cible, contraintes, compatibilité et fenêtre de risque.
+
+      Demande utilisateur :
+      {{userPrompt}}
+
+  inspect_code_migration:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Analyse les adaptations code et architecture nécessaires.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  inspect_data_config:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Analyse données, config, secrets, environnements et rollback.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  inspect_migration_tests:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Propose tests de migration, compatibilité et validation avant/après.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  migration_plan:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Produit un blueprint de migration en phases avec gates de validation.
+
+      Code :
+      {{steps.audit.branches.code.output}}
+
+      Données/config :
+      {{steps.audit.branches.data_config.output}}
+
+      Tests :
+      {{steps.audit.branches.tests.output}}
+
+steps:
+  - id: scope
+    use: scope_migration
+
+  - id: audit
+    type: parallel
+    branches:
+      - id: code
+        use: inspect_code_migration
+      - id: data_config
+        use: inspect_data_config
+      - id: tests
+        use: inspect_migration_tests
+
+  - id: plan
+    use: migration_plan

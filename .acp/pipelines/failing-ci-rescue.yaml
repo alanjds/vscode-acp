@@ -1,0 +1,78 @@
+version: 2
+id: failing-ci-rescue
+title: Failing CI Rescue
+
+primitives:
+  triage_ci:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Résume l'échec CI ou test mentionné.
+      Sépare signal fiable, hypothèses et informations manquantes.
+
+      Demande utilisateur :
+      {{userPrompt}}
+
+  inspect_failures:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Analyse les causes probables côté code ou tests.
+
+      Triage :
+      {{steps.triage.output}}
+
+  inspect_environment:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Analyse les causes probables côté environnement, versions, cache, timing ou configuration CI.
+
+      Triage :
+      {{steps.triage.output}}
+
+  inspect_recent_changes:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Analyse les changements récents probables et leur lien avec l'échec.
+
+      Triage :
+      {{steps.triage.output}}
+
+  rescue_plan:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Propose un plan de secours CI : reproduction locale, commandes, hypothèse à tester, fix minimal.
+
+      Causes code/tests :
+      {{steps.investigation.branches.failures.output}}
+
+      Causes environnement :
+      {{steps.investigation.branches.environment.output}}
+
+      Changements récents :
+      {{steps.investigation.branches.recent_changes.output}}
+
+steps:
+  - id: triage
+    use: triage_ci
+
+  - id: investigation
+    type: parallel
+    branches:
+      - id: failures
+        use: inspect_failures
+      - id: environment
+        use: inspect_environment
+      - id: recent_changes
+        use: inspect_recent_changes
+
+  - id: plan
+    use: rescue_plan

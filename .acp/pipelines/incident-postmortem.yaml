@@ -1,0 +1,77 @@
+version: 2
+id: incident-postmortem
+title: Incident Postmortem
+
+primitives:
+  scope_incident:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Cadre l'incident : impact utilisateur, durée, systèmes touchés, données disponibles.
+
+      Demande utilisateur :
+      {{userPrompt}}
+
+  reconstruct_timeline:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Reconstruis une timeline factuelle et distingue faits, suppositions et inconnues.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  analyze_root_causes:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Analyse causes racines techniques et organisationnelles, sans chercher de coupable.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  propose_prevention:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Propose actions préventives, détection, alerting, runbooks et ownership.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  write_postmortem:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Rédige un postmortem blameless complet, court et actionnable.
+
+      Timeline :
+      {{steps.analysis.branches.timeline.output}}
+
+      Causes :
+      {{steps.analysis.branches.causes.output}}
+
+      Prévention :
+      {{steps.analysis.branches.prevention.output}}
+
+steps:
+  - id: scope
+    use: scope_incident
+
+  - id: analysis
+    type: parallel
+    branches:
+      - id: timeline
+        use: reconstruct_timeline
+      - id: causes
+        use: analyze_root_causes
+      - id: prevention
+        use: propose_prevention
+
+  - id: postmortem
+    use: write_postmortem

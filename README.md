@@ -9,12 +9,18 @@ A [Visual Studio Code extension](https://marketplace.visualstudio.com/items?item
 
 ## Features
 
-- **Multi-Agent Support**: Connect to 11 pre-configured ACP agents or add your own
+- **Multi-Agent Support**: Connect to 12 pre-configured ACP agents or add your own
+- **Vibe Agent Support**: Vibe is included as a pre-configured ACP agent via `vibe-acp`.
 - **Single-Agent Focus**: One agent active at a time — seamlessly switch between agents
 - **Per-Agent Session List**: Each agent in the Agents view is expandable into its previous sessions. Click a session to restore its history in the chat. Backed by `session/list` when the agent supports it, or by a local per-workspace cache otherwise.
+- **Workspace-Scoped Session History**: Local cached sessions are scoped by workspace/cwd and agent.
 - **Session Config Options**: Dynamic per-session selectors (mode, model, reasoning level, …) advertised by the agent are rendered automatically in the composer toolbar.
+- **Editor Context Link**: Opt-in commands let users include current VS Code editor context in prompts.
+- **Prompt Enrichment**: When context link is enabled, prompts can include current file, cursor location, selected text, language, and open editor list.
+- **Context Handoff Across Agents**: Users can connect to another agent or open a session with the current context; context is injected once into the next prompt.
+- **Debug Snapshots**: In-memory ACP/client traces can be viewed, refreshed, copied, or exported from the debug snapshot panel.
 - **Interactive Chat**: Built-in chat panel with Markdown rendering, inline tool call display, and collapsible tool sections
-- **A2A Planning Pipeline**: Optional virtual agents can ask one ACP agent to produce a plan and another ACP agent to implement the approved plan.
+- **LangGraph Pipelines**: Optional virtual agents can orchestrate ACP agents from workspace YAML workflows with reviewable approvals.
 - **Thinking Display**: See agent reasoning in a collapsible block with streaming animation and elapsed time
 - **Slash Commands**: Autocomplete popup for agent-provided commands with keyboard navigation
 - **File Mentions**: Type `@` in the composer to search workspace files and send precise relative-path references to agents.
@@ -41,7 +47,7 @@ A [Visual Studio Code extension](https://marketplace.visualstudio.com/items?item
 
 ## Pre-configured Agents
 
-The extension comes with default configurations for:
+The extension comes with default configurations for 12 agents:
 
 | Agent | Command |
 |-------|---------|
@@ -52,6 +58,7 @@ The extension comes with default configurations for:
 | Auggie CLI | `npx @augmentcode/auggie@latest --acp` |
 | Qoder CLI | `npx @qoder-ai/qodercli@latest --acp` |
 | Codex CLI | `npx @zed-industries/codex-acp@latest` |
+| Vibe | `vibe-acp` |
 | OpenCode | `npx opencode-ai@latest acp` |
 | OpenClaw | `npx openclaw acp` |
 | [Kiro CLI](https://kiro.dev/docs/cli/acp/) | `kiro-cli acp` |
@@ -61,42 +68,40 @@ You can add custom agent configurations in settings.
 
 > **Note on Hermes Agent**: Hermes is a Python package, not an npm package. Install it via the [Hermes Quickstart](https://hermes-agent.nousresearch.com/docs/getting-started/quickstart) (Linux/macOS/WSL2 only — Windows requires [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install)). Make sure `hermes` is on your `PATH` and launch VS Code from the same shell/venv. Configure credentials with `hermes model`.
 
+> **Note on Vibe Agent**: Vibe must be installed separately and `vibe-acp` must be available on `PATH`.
+
 ## Extension Settings
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `acp.agents` | *(11 agents)* | Agent configurations. Each key is the agent name, value has `command`, `args`, and `env`. |
+| `acp.agents` | *(12 agents)* | Agent configurations. Each key is the agent name, value has `command`, `args`, and `env`. |
 | `acp.autoApprovePermissions` | `ask` | How agent permission requests are handled: `ask` or `allowAll`. |
 | `acp.defaultWorkingDirectory` | `""` | Default working directory for agent sessions. Empty uses current workspace. |
 | `acp.logTraffic` | `true` | Log all ACP protocol traffic to the ACP Traffic output channel. |
-| `acp.pipeline.enabled` | `true` | Enable synthetic pipeline agents in the Agents view. |
-| `acp.pipeline.virtualAgentName` | `Codex Plan -> Vibe Implement` | Display name for the Codex-backed pipeline virtual agent. |
-| `acp.pipeline.plannerAgentName` | `Codex CLI` | Configured ACP agent used to generate the implementation plan. |
-| `acp.pipeline.implementerAgentName` | `Vibe` | Configured ACP agent used to implement the approved plan. |
-| `acp.pipeline.geminiVirtualAgentName` | `Gemini Plan -> Vibe Implement` | Display name for the Gemini-backed pipeline virtual agent. |
-| `acp.pipeline.geminiPlannerAgentName` | `Gemini CLI` | Configured ACP agent used to generate the Gemini pipeline plan. |
-| `acp.pipeline.geminiImplementerAgentName` | `Vibe` | Configured ACP agent used to implement the approved Gemini pipeline plan. |
+| `acp.pipeline.enabled` | `true` | Enable virtual pipeline agents loaded from `.acp/pipelines/*.yaml`. |
 
-## Pipeline A2A Workflow
+## Pipeline Workflow
 
-When `acp.pipeline.enabled` is true, the Agents view includes virtual pipeline agents such as `Codex Plan -> Vibe Implement` and `Gemini Plan -> Vibe Implement`.
+When `acp.pipeline.enabled` is true, the Agents view includes one virtual agent for each valid workspace pipeline in `.acp/pipelines/*.yaml`.
 
 1. Connect to a pipeline virtual agent.
 2. Send a normal prompt.
-3. The planner agent creates exactly one proposed plan.
+3. LangGraph runs the YAML workflow until an approval step.
 4. Review or edit the plan in the chat.
-5. Approve the plan to send it to the implementer agent.
-6. The implementer agent performs the workspace changes through ACP.
+5. Approve the plan to resume the graph, or reject to stop it.
+6. Later steps call their configured ACP agents, including any workspace-changing step.
 
-The pipeline runs local A2A JSON-RPC servers on `127.0.0.1` and bridges them to the configured ACP agents. See [docs/pipeline-a2a.md](docs/pipeline-a2a.md) for setup details, failure modes, and troubleshooting.
+Pipeline YAML supports agent steps, approval steps, and read-only parallel branches. See [docs/pipeline-a2a.md](docs/pipeline-a2a.md) for the v2 DSL, failure modes, and troubleshooting. French documentation is available in [doc_fr/pipelines-langgraph.md](doc_fr/pipelines-langgraph.md).
 
 ## Commands
 
-All commands are accessible via the Command Palette (`Ctrl+Shift+P`):
+Main commands are available from the Command Palette, view title buttons, or context menus:
 
 | Command | Description |
 |---------|-------------|
 | `ACP: Connect to Agent` | Connect to an agent |
+| `ACP: Connect With Current Context` | Connect to an agent and pass current session context to the next prompt. |
+| `ACP: Open Session With Current Context` | Open or resume a session with current context prepared for the next prompt. |
 | `ACP: New Conversation` | Start a new conversation with the connected agent |
 | `ACP: Send Prompt` | Send a message to the agent |
 | `ACP: Cancel Current Turn` | Cancel the current agent turn |
@@ -107,9 +112,12 @@ All commands are accessible via the Command Palette (`Ctrl+Shift+P`):
 | `ACP: Remove Agent` | Remove an agent configuration |
 | `ACP: Set Agent Mode` | Change the agent's operating mode |
 | `ACP: Set Agent Model` | Change the agent's model |
+| `ACP: Enable Editor Context Link` | Enable automatic editor context injection from the chat view. |
+| `ACP: Disable Editor Context Link` | Disable automatic editor context injection. |
 | `ACP: Refresh Sessions` | Re-fetch the session list for an agent (also on the agent's right-click menu) |
 | `ACP: Show Log` | Open the ACP Client log output channel |
 | `ACP: Show Protocol Traffic` | Open the ACP Traffic output channel |
+| `ACP: Open Debug Snapshot` | Open the structured debug trace snapshot panel. |
 | `ACP: Browse Agent Registry` | Browse the ACP agent registry |
 
 ## Keyboard Shortcuts
@@ -161,10 +169,11 @@ npx @vscode/vsce package   # Create .vsix
 
 The extension follows a modular architecture:
 
-- **Core**: `AgentManager`, `ConnectionManager`, `SessionManager`, `AcpClientImpl`
+- **Core**: `AgentManager`, `ConnectionManager`, `SessionManager`, `AcpClientImpl`, `WorkspaceIdentity`, `SessionHistoryStore`, `DebugTraceStore`
 - **Handlers**: `FileSystemHandler`, `TerminalHandler`, `PermissionHandler`, `SessionUpdateHandler`
-- **UI**: `SessionTreeProvider`, `ChatWebviewProvider`, `StatusBarManager`
-- **Config**: `AgentConfig`, `RegistryClient`
+- **UI**: `SessionTreeProvider`, `ChatWebviewProvider`, `StatusBarManager`, `EditorContext`, `DebugWebviewPanel`
+- **Config**: `AgentConfig`, `RegistryClient`, `PipelineConfig`
+- **Pipeline**: `PipelineService`, `PipelineGraphCompiler`, `AcpAgentRunner`, `ProposedPlan`
 - **Utils**: `Logger`, `StreamAdapter`
 
 Communication with agents uses the ACP protocol (JSON-RPC 2.0 over stdio).

@@ -1,0 +1,77 @@
+version: 2
+id: cleanup-dead-code-plan
+title: Cleanup Dead Code Plan
+
+primitives:
+  scope_cleanup:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Cadre le nettoyage : code mort suspect, modules, flags, exports ou assets.
+
+      Demande utilisateur :
+      {{userPrompt}}
+
+  inspect_entrypoints:
+    agent: Vibe
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Analyse les points d'entrée, exports publics, usages dynamiques et compatibilité.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  inspect_tests_refs:
+    agent: Vibe
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Analyse tests, fixtures, docs et références qui pourraient encore utiliser ce code.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  inspect_rollout:
+    agent: Vibe
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Propose une stratégie de suppression progressive et rollback.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  cleanup_plan:
+    agent: Vibe
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Produit un plan de nettoyage sûr, sans suppression aveugle.
+
+      Entrypoints :
+      {{steps.audit.branches.entrypoints.output}}
+
+      Références :
+      {{steps.audit.branches.refs.output}}
+
+      Rollout :
+      {{steps.audit.branches.rollout.output}}
+
+steps:
+  - id: scope
+    use: scope_cleanup
+
+  - id: audit
+    type: parallel
+    branches:
+      - id: entrypoints
+        use: inspect_entrypoints
+      - id: refs
+        use: inspect_tests_refs
+      - id: rollout
+        use: inspect_rollout
+
+  - id: plan
+    use: cleanup_plan

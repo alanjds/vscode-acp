@@ -1,0 +1,111 @@
+version: 2
+id: feature-variants-arbiter
+title: Feature Variants Arbiter
+
+primitives:
+  scope_feature:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Cadre la feature et les critères de décision.
+
+      Demande utilisateur :
+      {{userPrompt}}
+
+  variant_safe:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Propose une variante conservatrice, stable et simple à reviewer.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  variant_powerful:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Propose une variante plus ambitieuse, extensible et orientée futur.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  variant_delight:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Propose une variante orientée expérience utilisateur et polish.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  arbitrate_variant:
+    agent: Codex CLI
+    output: proposed_plan
+    sideEffects: none
+    prompt: |
+      Compare les variantes, choisis une direction ou une combinaison, et justifie.
+      Retourne exactement un bloc <proposed_plan>...</proposed_plan>.
+
+      Conservatrice :
+      {{steps.variants.branches.safe.output}}
+
+      Ambitieuse :
+      {{steps.variants.branches.powerful.output}}
+
+      Delight :
+      {{steps.variants.branches.delight.output}}
+
+  implement_variant:
+    agent: Vibe
+    output: markdown
+    sideEffects: workspace
+    prompt: |
+      Implémente la variante arbitrée approuvée.
+
+      Plan approuvé :
+      {{steps.approval.output}}
+
+  review_variant:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Vérifie que l'implémentation correspond à la variante arbitrée et reste cohérente.
+
+      Plan approuvé :
+      {{steps.approval.output}}
+
+      Sortie implémentation :
+      {{steps.implement.output}}
+
+steps:
+  - id: scope
+    use: scope_feature
+
+  - id: variants
+    type: parallel
+    branches:
+      - id: safe
+        use: variant_safe
+      - id: powerful
+        use: variant_powerful
+      - id: delight
+        use: variant_delight
+
+  - id: arbitrate
+    use: arbitrate_variant
+
+  - id: approval
+    type: approval
+    input: "{{steps.arbitrate.output}}"
+
+  - id: implement
+    use: implement_variant
+
+  - id: review
+    use: review_variant

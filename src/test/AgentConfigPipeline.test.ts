@@ -1,4 +1,5 @@
 import * as assert from 'assert';
+import * as path from 'path';
 import * as vscode from 'vscode';
 
 import { getAgentNames } from '../config/AgentConfig';
@@ -20,11 +21,9 @@ suite('AgentConfig pipeline', () => {
         get: (key: string, defaultValue?: unknown) => {
           switch (key) {
             case 'agents':
-              return { Codex: { command: 'codex' }, Vibe: { command: 'vibe' } };
+              return { 'Codex CLI': { command: 'codex' }, Vibe: { command: 'vibe' } };
             case 'pipeline.enabled':
               return true;
-            case 'pipeline.virtualAgentName':
-              return 'Pipeline';
             default:
               return defaultValue;
           }
@@ -32,7 +31,7 @@ suite('AgentConfig pipeline', () => {
       } as any;
     };
 
-    assert.deepStrictEqual(getAgentNames(), ['Codex', 'Vibe', 'Pipeline', 'Gemini Plan -> Vibe Implement']);
+    assert.ok(getAgentNames().includes('Plan Execute Verify'));
   });
 
   test('does not add virtual pipeline agent when disabled', () => {
@@ -41,7 +40,7 @@ suite('AgentConfig pipeline', () => {
         get: (key: string, defaultValue?: unknown) => {
           switch (key) {
             case 'agents':
-              return { Codex: { command: 'codex' } };
+              return { 'Codex CLI': { command: 'codex' } };
             case 'pipeline.enabled':
               return false;
             default:
@@ -51,7 +50,27 @@ suite('AgentConfig pipeline', () => {
       } as any;
     };
 
-    assert.deepStrictEqual(getAgentNames(), ['Codex']);
+    assert.deepStrictEqual(getAgentNames(), ['Codex CLI']);
+  });
+
+  test('loads virtual pipeline agents from explicit workspace cwd', () => {
+    vscode.workspace.getConfiguration = function(_section) {
+      return {
+        get: (key: string, defaultValue?: unknown) => {
+          switch (key) {
+            case 'agents':
+              return { 'Codex CLI': { command: 'codex' }, Vibe: { command: 'vibe' } };
+            case 'pipeline.enabled':
+              return true;
+            default:
+              return defaultValue;
+          }
+        },
+      } as any;
+    };
+
+    const names = getAgentNames(path.join(__dirname, '..', '..'));
+    assert.ok(names.includes('Demo Simple'));
+    assert.ok(names.includes('Demo Parallel Review'));
   });
 });
-

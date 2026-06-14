@@ -1,0 +1,77 @@
+version: 2
+id: experiment-design
+title: Experiment Design
+
+primitives:
+  scope_experiment:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Cadre l'idée d'expérimentation : hypothèse, audience, contrainte, risque.
+
+      Demande utilisateur :
+      {{userPrompt}}
+
+  inspect_hypothesis:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Clarifie hypothèse, succès mesurable, risques de biais et signaux faibles.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  inspect_instrumentation:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Propose instrumentation, métriques, événements, logs et garde-fous.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  inspect_rollout:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Propose rollout, feature flag, cohortes, arrêt d'urgence et critères go/no-go.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  experiment_brief:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Produit un brief d'expérimentation complet mais court.
+
+      Hypothèse :
+      {{steps.design.branches.hypothesis.output}}
+
+      Instrumentation :
+      {{steps.design.branches.instrumentation.output}}
+
+      Rollout :
+      {{steps.design.branches.rollout.output}}
+
+steps:
+  - id: scope
+    use: scope_experiment
+
+  - id: design
+    type: parallel
+    branches:
+      - id: hypothesis
+        use: inspect_hypothesis
+      - id: instrumentation
+        use: inspect_instrumentation
+      - id: rollout
+        use: inspect_rollout
+
+  - id: brief
+    use: experiment_brief

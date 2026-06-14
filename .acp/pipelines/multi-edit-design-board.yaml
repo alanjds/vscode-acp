@@ -1,0 +1,116 @@
+version: 2
+id: multi-edit-design-board
+title: Multi Edit Design Board
+
+primitives:
+  scope_change:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Cadre le changement multi-fichiers : domaines touchés, contraintes et ordre de risque.
+
+      Demande utilisateur :
+      {{userPrompt}}
+
+  design_state_edit:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Conçois l'édition côté state/data model.
+      Ne modifie rien. Indique contrats, migration et tests.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  design_ui_edit:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Conçois l'édition côté UI/UX.
+      Ne modifie rien. Indique composants, états, accessibilité et tests.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  design_infra_edit:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Conçois l'édition côté config/build/infra.
+      Ne modifie rien. Indique scripts, settings, compatibilité et rollback.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  reconcile_designs:
+    agent: Codex CLI
+    output: proposed_plan
+    sideEffects: none
+    prompt: |
+      Réconcilie les designs en une séquence d'édition sûre.
+      Résous les conflits d'ordre, de contrat et de validation.
+      Retourne exactement un bloc <proposed_plan>...</proposed_plan>.
+
+      State :
+      {{steps.design.branches.state.output}}
+
+      UI :
+      {{steps.design.branches.ui.output}}
+
+      Infra :
+      {{steps.design.branches.infra.output}}
+
+  execute_design:
+    agent: Vibe
+    output: markdown
+    sideEffects: workspace
+    prompt: |
+      Exécute la séquence d'édition approuvée.
+      Garde les changements groupés par domaine logique.
+
+      Plan approuvé :
+      {{steps.approval.output}}
+
+  verify_design:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Vérifie la cohérence entre state, UI et infra après édition.
+
+      Plan approuvé :
+      {{steps.approval.output}}
+
+      Sortie exécution :
+      {{steps.execute.output}}
+
+steps:
+  - id: scope
+    use: scope_change
+
+  - id: design
+    type: parallel
+    branches:
+      - id: state
+        use: design_state_edit
+      - id: ui
+        use: design_ui_edit
+      - id: infra
+        use: design_infra_edit
+
+  - id: reconcile
+    use: reconcile_designs
+
+  - id: approval
+    type: approval
+    input: "{{steps.reconcile.output}}"
+
+  - id: execute
+    use: execute_design
+
+  - id: verify
+    use: verify_design

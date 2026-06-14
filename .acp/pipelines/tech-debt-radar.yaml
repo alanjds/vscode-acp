@@ -1,0 +1,77 @@
+version: 2
+id: tech-debt-radar
+title: Tech Debt Radar
+
+primitives:
+  scope_debt:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Cadre le périmètre de dette technique à analyser.
+
+      Demande utilisateur :
+      {{userPrompt}}
+
+  inspect_complexity:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Analyse complexité, couplage, duplication et zones difficiles à changer.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  inspect_stability:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Analyse fragilité, flaky tests, erreurs récurrentes et zones peu couvertes.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  inspect_product_drag:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Analyse la dette qui ralentit produit, support ou onboarding.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  debt_backlog:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Produit un backlog de dette technique priorisé par impact et effort.
+
+      Complexité :
+      {{steps.radar.branches.complexity.output}}
+
+      Stabilité :
+      {{steps.radar.branches.stability.output}}
+
+      Produit :
+      {{steps.radar.branches.product_drag.output}}
+
+steps:
+  - id: scope
+    use: scope_debt
+
+  - id: radar
+    type: parallel
+    branches:
+      - id: complexity
+        use: inspect_complexity
+      - id: stability
+        use: inspect_stability
+      - id: product_drag
+        use: inspect_product_drag
+
+  - id: backlog
+    use: debt_backlog

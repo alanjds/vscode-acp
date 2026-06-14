@@ -1,0 +1,112 @@
+version: 2
+id: code-tests-docs-reconcile
+title: Code Tests Docs Reconcile
+
+primitives:
+  scope_request:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Cadre la demande et les artefacts à garder cohérents : code, tests, docs.
+
+      Demande utilisateur :
+      {{userPrompt}}
+
+  plan_code:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Propose le plan côté code uniquement.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  plan_tests:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Propose le plan côté tests uniquement.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  plan_docs:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Propose le plan côté documentation uniquement.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  reconcile_artifacts:
+    agent: Codex CLI
+    output: proposed_plan
+    sideEffects: none
+    prompt: |
+      Réconcilie code, tests et docs en un plan unique.
+      Vérifie que chaque changement code a une validation et une explication utilisateur.
+      Retourne exactement un bloc <proposed_plan>...</proposed_plan>.
+
+      Code :
+      {{steps.plans.branches.code.output}}
+
+      Tests :
+      {{steps.plans.branches.tests.output}}
+
+      Docs :
+      {{steps.plans.branches.docs.output}}
+
+  implement_artifacts:
+    agent: Vibe
+    output: markdown
+    sideEffects: workspace
+    prompt: |
+      Implémente le plan approuvé en gardant code, tests et docs synchronisés.
+
+      Plan approuvé :
+      {{steps.approval.output}}
+
+  consistency_review:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Vérifie la cohérence code/tests/docs après implémentation.
+
+      Plan approuvé :
+      {{steps.approval.output}}
+
+      Sortie implémentation :
+      {{steps.implement.output}}
+
+steps:
+  - id: scope
+    use: scope_request
+
+  - id: plans
+    type: parallel
+    branches:
+      - id: code
+        use: plan_code
+      - id: tests
+        use: plan_tests
+      - id: docs
+        use: plan_docs
+
+  - id: reconcile
+    use: reconcile_artifacts
+
+  - id: approval
+    type: approval
+    input: "{{steps.reconcile.output}}"
+
+  - id: implement
+    use: implement_artifacts
+
+  - id: review
+    use: consistency_review

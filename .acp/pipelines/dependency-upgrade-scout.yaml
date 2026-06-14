@@ -1,0 +1,77 @@
+version: 2
+id: dependency-upgrade-scout
+title: Dependency Upgrade Scout
+
+primitives:
+  scope_upgrade:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Cadre la mise à jour de dépendance demandée : package, version cible, usages probables.
+
+      Demande utilisateur :
+      {{userPrompt}}
+
+  inspect_api_breaks:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Analyse les ruptures API probables et adaptations nécessaires.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  inspect_lockfiles:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Analyse lockfiles, scripts, peer dependencies et contraintes de runtime.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  inspect_validation:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Propose les tests et vérifications indispensables après upgrade.
+
+      Cadrage :
+      {{steps.scope.output}}
+
+  upgrade_plan:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Synthétise un plan d'upgrade sûr avec rollback.
+
+      API :
+      {{steps.scout.branches.api.output}}
+
+      Dépendances :
+      {{steps.scout.branches.deps.output}}
+
+      Validation :
+      {{steps.scout.branches.validation.output}}
+
+steps:
+  - id: scope
+    use: scope_upgrade
+
+  - id: scout
+    type: parallel
+    branches:
+      - id: api
+        use: inspect_api_breaks
+      - id: deps
+        use: inspect_lockfiles
+      - id: validation
+        use: inspect_validation
+
+  - id: plan
+    use: upgrade_plan

@@ -67,8 +67,3 @@ export function classifyAgentError(error: unknown): ClassifiedAgentError {
     actionHint: 'Open ACP logs for details and retry after fixing the agent configuration.',
   };
 }
-
-export function formatAgentError(error: unknown): string {
-  const classified = classifyAgentError(error);
-  return `${classified.message}\n${classified.actionHint}`;
-}

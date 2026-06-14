@@ -17,7 +17,6 @@ import { PROTOCOL_VERSION, RequestError } from '@agentclientprotocol/sdk';
 
 import { AgentManager } from './AgentManager';
 import { ConnectionManager, ConnectionInfo } from './ConnectionManager';
-import { SessionUpdateHandler } from '../handlers/SessionUpdateHandler';
 import { ContextFamilyInfo, SessionHistoryStore } from './SessionHistoryStore';
 import { classifyAgentError } from './AgentError';
 import { resolveWorkspaceIdentity, type WorkspaceIdentity } from './WorkspaceIdentity';
@@ -70,13 +69,6 @@ interface SharedDiscussionContext {
 }
 
 /**
- * Why an agent expansion failed (used to surface a useful tree placeholder).
- */
-export type AgentConnectionError =
-  | { kind: 'auth-cancelled' }
-  | { kind: 'connect-failed'; message: string };
-
-/**
  * Manages the lifecycle of ACP agent connections.
  *
  * The "session" concept is hidden from the user — they just see agents.
@@ -119,7 +111,6 @@ export class SessionManager extends EventEmitter {
   constructor(
     private readonly agentManager: AgentManager,
     private readonly connectionManager: ConnectionManager,
-    private readonly sessionUpdateHandler: SessionUpdateHandler,
     private readonly workspaceIdentityProvider: () => WorkspaceIdentity = resolveWorkspaceIdentity,
   ) {
     super();

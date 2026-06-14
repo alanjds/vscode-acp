@@ -174,7 +174,7 @@ The extension follows a modular architecture:
 - **UI**: `SessionTreeProvider`, `ChatWebviewProvider`, `StatusBarManager`, `EditorContext`, `DebugWebviewPanel`
 - **Config**: `AgentConfig`, `RegistryClient`, `PipelineConfig`
 - **Pipeline**: `PipelineService`, `PipelineGraphCompiler`, `AcpAgentRunner`, `ProposedPlan`
-- **Utils**: `Logger`, `StreamAdapter`
+- **Utils**: `Logger`
 
 Communication with agents uses the ACP protocol (JSON-RPC 2.0 over stdio).
 

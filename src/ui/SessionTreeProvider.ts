@@ -235,7 +235,7 @@ export class SessionTreeProvider implements vscode.TreeDataProvider<AgentNode | 
 
       const caps = this.sessionManager.getCachedCapabilities(name);
       const localCount = this.historyStore?.list(name, workspace).length ?? 0;
-      const collapsibleState = this.computeCollapsibleState(name, caps, localCount);
+      const collapsibleState = this.computeCollapsibleState(caps, localCount);
       return new AgentTreeItem(
         name,
         this.sessionManager.isAgentConnected(name),
@@ -246,7 +246,6 @@ export class SessionTreeProvider implements vscode.TreeDataProvider<AgentNode | 
   }
 
   private computeCollapsibleState(
-    agentName: string,
     caps: AgentCapabilitySummary | undefined,
     localCount: number,
   ): vscode.TreeItemCollapsibleState {

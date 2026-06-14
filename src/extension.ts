@@ -39,7 +39,6 @@ export function activate(context: vscode.ExtensionContext): void {
   const sessionManager = new SessionManager(
     agentManager,
     connectionManager,
-    sessionUpdateHandler,
   );
   const workspaceIdentity = () => resolveWorkspaceIdentity();
   const pipelineService = new PipelineService(() => workspaceIdentity().cwd);

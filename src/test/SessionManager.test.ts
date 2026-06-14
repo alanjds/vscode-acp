@@ -44,12 +44,9 @@ function createManager() {
     getConnection: (_agentId: string) => null,
   };
 
-  const sessionUpdateHandler = {};
-
   const manager = new SessionManager(
     agentManager as any,
     connectionManager as any,
-    sessionUpdateHandler as any,
     () => workspaceIdentityFromCwd('/test'),
   );
 
@@ -661,7 +658,7 @@ suite('SessionManager', () => {
     (manager as any).findAgentIdForConnection = () => 'agent-1';
 
     // Override runAuthFlow to avoid VS Code dialog
-    (manager as any).runAuthFlow = async (agentName: string, agentId: string, conn: any) => {
+    (manager as any).runAuthFlow = async (_agentName: string, _agentId: string, conn: any) => {
       await conn.connection.authenticate();
     };
 

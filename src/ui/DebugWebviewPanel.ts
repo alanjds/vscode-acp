@@ -29,7 +29,6 @@ type SessionDebugSnapshot = Omit<SessionInfo, 'initResponse'> & {
 export class DebugWebviewPanel {
   private panel?: vscode.WebviewPanel;
   private lastChatState: unknown = null;
-  private lastSnapshot: DebugSnapshot | null = null;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -77,7 +76,6 @@ export class DebugWebviewPanel {
 
     this.panel.onDidDispose(() => {
       this.panel = undefined;
-      this.lastSnapshot = null;
     });
 
     this.panel.webview.html = await getReactShellHtmlContent(this.extensionUri, this.panel.webview, 'debug');
@@ -88,7 +86,6 @@ export class DebugWebviewPanel {
       return;
     }
     const snapshot = this.buildSnapshot();
-    this.lastSnapshot = snapshot;
     this.panel.webview.postMessage({
       type: 'debugSnapshot',
       snapshot,
@@ -119,7 +116,6 @@ export class DebugWebviewPanel {
 
   private getSnapshotJson(): string {
     const snapshot = this.buildSnapshot();
-    this.lastSnapshot = snapshot;
     return JSON.stringify(snapshot, null, 2);
   }
 
@@ -149,6 +145,5 @@ export class DebugWebviewPanel {
   dispose(): void {
     this.panel?.dispose();
     this.panel = undefined;
-    this.lastSnapshot = null;
   }
 }

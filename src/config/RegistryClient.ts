@@ -57,11 +57,3 @@ export async function fetchRegistry(): Promise<RegistryAgent[]> {
     return cachedRegistry?.agents || [];
   }
 }
-
-/**
- * Clear the registry cache.
- */
-export function clearRegistryCache(): void {
-  cachedRegistry = null;
-  cacheTime = 0;
-}

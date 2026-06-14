@@ -15,4 +15,3 @@ eslint.config.mjs
 .vscode-test.mjs
 vsc-extension-quickstart.md
 CHANGELOG.md
-resources/icon-ext.svg

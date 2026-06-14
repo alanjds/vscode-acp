@@ -51,14 +51,3 @@ export function sendError(
   reporter?.sendTelemetryErrorEvent(eventName, { ...getCommonProperties(), ...properties }, measurements);
 }
 
-/**
- * Report an exception / caught error as an error event.
- */
-export function sendException(error: Error, properties?: Record<string, string>): void {
-  reporter?.sendTelemetryErrorEvent('unhandledException', {
-    ...getCommonProperties(),
-    ...properties,
-    errorName: error.name,
-    errorMessage: error.message,
-  });
-}

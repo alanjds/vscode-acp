@@ -1,0 +1,86 @@
+version: 2
+id: demo-parallel-review
+title: Demo Parallel Review
+
+primitives:
+  scope_request:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Résume la demande utilisateur en trois lignes maximum.
+      Indique aussi les zones du projet qui semblent probablement concernées.
+
+      Demande utilisateur :
+      {{userPrompt}}
+
+  inspect_code:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Analyse uniquement l'impact code probable de cette demande.
+      Ne modifie aucun fichier.
+      Retourne :
+      - fichiers ou dossiers à regarder
+      - risques techniques
+      - questions ouvertes
+
+      Demande utilisateur :
+      {{userPrompt}}
+
+      Résumé initial :
+      {{steps.scope.output}}
+
+  inspect_tests_docs:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Analyse uniquement l'impact tests et documentation de cette demande.
+      Ne modifie aucun fichier.
+      Retourne :
+      - tests à lancer ou à ajouter
+      - documentation à mettre à jour
+      - critères de validation
+
+      Demande utilisateur :
+      {{userPrompt}}
+
+      Résumé initial :
+      {{steps.scope.output}}
+
+  synthesize_review:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Produit une synthèse courte et actionnable à partir des deux analyses parallèles.
+      Structure la réponse avec :
+      - décision recommandée
+      - prochaines actions
+      - validations à faire
+
+      Demande utilisateur :
+      {{userPrompt}}
+
+      Impact code :
+      {{steps.investigation.branches.code.output}}
+
+      Tests et documentation :
+      {{steps.investigation.branches.tests_docs.output}}
+
+steps:
+  - id: scope
+    use: scope_request
+
+  - id: investigation
+    type: parallel
+    branches:
+      - id: code
+        use: inspect_code
+      - id: tests_docs
+        use: inspect_tests_docs
+
+  - id: synthesize
+    use: synthesize_review

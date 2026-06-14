@@ -1,0 +1,37 @@
+version: 2
+id: demo-simple
+title: Demo Simple
+
+primitives:
+  analyze_request:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Analyse la demande utilisateur en trois points courts :
+      - objectif
+      - contexte utile
+      - prochaine action recommandée
+
+      Demande utilisateur :
+      {{userPrompt}}
+
+  write_answer:
+    agent: Codex CLI
+    output: markdown
+    sideEffects: none
+    prompt: |
+      Rédige une réponse courte et actionnable à partir de l'analyse.
+
+      Demande utilisateur :
+      {{userPrompt}}
+
+      Analyse :
+      {{steps.analyze.output}}
+
+steps:
+  - id: analyze
+    use: analyze_request
+
+  - id: answer
+    use: write_answer

@@ -4,7 +4,7 @@ title: Safe Refactor Lane
 
 primitives:
   map_refactor:
-    agent: Codex CLI
+    agent: Gemini CLI
     output: proposed_plan
     sideEffects: none
     prompt: |
@@ -30,7 +30,7 @@ primitives:
       {{steps.approval.output}}
 
   refactor_audit:
-    agent: Codex CLI
+    agent: Gemini CLI
     output: markdown
     sideEffects: none
     prompt: |

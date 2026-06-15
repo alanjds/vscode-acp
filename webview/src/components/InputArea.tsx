@@ -5,7 +5,7 @@ import type {
   MouseEvent as ReactMouseEvent,
   RefObject,
 } from 'react';
-import { memo, useMemo } from 'react';
+import { memo, useMemo, useCallback } from 'react';
 
 import { Picker } from './Picker';
 import type { AppAction, AppState } from '../app/state';
@@ -20,6 +20,7 @@ import type {
   SessionSnapshot,
   SlashCommand,
 } from '../chatTypes';
+import { postMessage } from '../vscode';
 
 interface InputAreaProps {
   state: AppState;
@@ -54,7 +55,6 @@ interface InputAreaProps {
   onPromptInput: (event: FormEvent<HTMLDivElement>) => void;
   onPromptSelect: (input: HTMLDivElement) => void;
   selectedFileMentions: SelectedFileMention[];
-  onOpenSelectedFile: (path: string) => void;
   sendLabel?: string;
 }
 
@@ -87,9 +87,83 @@ function InputArea({
   onPromptInput,
   onPromptSelect,
   selectedFileMentions,
-  onOpenSelectedFile,
   sendLabel = 'Send',
 }: InputAreaProps): JSX.Element {
+  // Handle click on file mention chips
+  const handleFileMentionClick = useCallback((filePath: string) => {
+    postMessage({ type: 'openFile', path: filePath });
+  }, []);
+
+  // Render prompt text with file mentions as interactive chips
+  // Uses selectedFileMentions to find and replace tokens with chips
+  const renderedPromptHtml = useMemo(() => {
+    if (selectedFileMentions.length === 0) {
+      // No mentions, return plain text (escaped for HTML)
+      return escapeHtml(state.promptText);
+    }
+
+    // Build HTML with file mentions as interactive chips
+    // Sort by token length (longest first) to avoid partial replacements
+    let html = escapeHtml(state.promptText);
+    const mentionsSorted = [...selectedFileMentions].sort((a, b) => b.token.length - a.token.length);
+    
+    for (const mention of mentionsSorted) {
+      const escapedToken = escapeHtml(mention.token);
+      const escapedFilePath = escapeHtml(mention.path);
+      const escapedDisplayName = escapeHtml(mention.name);
+      const chipHtml = `
+        <span 
+          class="prompt-file-mention" 
+          data-file-path="${escapedFilePath}"
+          data-file-name="${escapedDisplayName}"
+          title="Click to open ${escapedFilePath}"
+        >
+          @${escapedDisplayName}
+        </span>
+      `;
+      // Replace the escaped token with the chip HTML
+      html = html.split(escapedToken).join(chipHtml);
+    }
+    
+    return html;
+  }, [state.promptText, selectedFileMentions]);
+
+  // Handle click on the prompt input (including file mention chips)
+  const handlePromptClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement;
+    const mentionChip = target.closest('.prompt-file-mention');
+    if (mentionChip) {
+      event.preventDefault();
+      event.stopPropagation();
+      const filePath = mentionChip.getAttribute('data-file-path');
+      if (filePath) {
+        handleFileMentionClick(filePath);
+      }
+      return;
+    }
+    onPromptSelect(event.currentTarget);
+  }, [handleFileMentionClick, onPromptSelect]);
+
+  // Handle key up on the prompt input
+  const handlePromptKeyUp = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
+    onPromptSelect(event.currentTarget);
+  }, [onPromptSelect]);
+
+  // Handle mouse up on the prompt input
+  const handlePromptMouseUp = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement;
+    const mentionChip = target.closest('.prompt-file-mention');
+    if (mentionChip) {
+      event.preventDefault();
+      event.stopPropagation();
+      const filePath = mentionChip.getAttribute('data-file-path');
+      if (filePath) {
+        handleFileMentionClick(filePath);
+      }
+      return;
+    }
+    onPromptSelect(event.currentTarget);
+  }, [handleFileMentionClick, onPromptSelect]);
   const configOptions = useMemo(
     () => (sessionState?.configOptions ?? []).filter(hasSelectableValues),
     [sessionState?.configOptions],
@@ -209,17 +283,16 @@ function InputArea({
           data-placeholder={placeholder ?? ''}
           id="promptInput"
           onInput={onPromptInput}
-          onClick={(event) => onPromptSelect(event.currentTarget)}
+          onClick={handlePromptClick}
           onKeyDown={handlePromptKeyDown}
-          onKeyUp={(event) => onPromptSelect(event.currentTarget)}
-          onMouseUp={(event) => onPromptSelect(event.currentTarget)}
+          onKeyUp={handlePromptKeyUp}
+          onMouseUp={handlePromptMouseUp}
           ref={promptInputRef}
           role="textbox"
           suppressContentEditableWarning
           tabIndex={disabledBySession || state.isProcessing ? -1 : 0}
-        >
-          {renderPromptWithFileLinks(state.promptText, selectedFileMentions, onOpenSelectedFile)}
-        </div>
+          dangerouslySetInnerHTML={{ __html: renderedPromptHtml }}
+        />
       </div>
 
       <div className="input-send-row">
@@ -245,66 +318,40 @@ function InputArea({
 
 export default memo(InputArea);
 
+/**
+ * Escape HTML special characters to prevent XSS
+ */
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+/**
+ * Legacy function for rendering old-style file links
+ * @deprecated Use markdownFileMentions-based rendering instead
+ */
 function renderPromptWithFileLinks(
   text: string,
   mentions: SelectedFileMention[],
-  onOpenSelectedFile: (path: string) => void,
-): React.ReactNode {
+): string {
   if (mentions.length === 0) {
     return text;
   }
 
+  let html = text;
   const orderedMentions = [...mentions].sort((a, b) => b.token.length - a.token.length);
-  const parts: React.ReactNode[] = [];
-  let index = 0;
-
-  while (index < text.length) {
-    const mention = orderedMentions.find((candidate) => text.startsWith(candidate.token, index));
-    if (!mention) {
-      const nextMentionIndex = orderedMentions.reduce((nextIndex, candidate) => {
-        const candidateIndex = text.indexOf(candidate.token, index + 1);
-        if (candidateIndex < 0) {
-          return nextIndex;
-        }
-        return nextIndex < 0 ? candidateIndex : Math.min(nextIndex, candidateIndex);
-      }, -1);
-      const end = nextMentionIndex < 0 ? text.length : nextMentionIndex;
-      if (end > index) {
-        parts.push(text.slice(index, end));
-      }
-      index = end;
-      continue;
-    }
-
-    parts.push(
-      <span
-        className="prompt-inline-file-link"
-        contentEditable={false}
-        key={`file-${index}-${mention.path}`}
-        onClick={(event) => {
-          event.stopPropagation();
-          onOpenSelectedFile(mention.path);
-        }}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault();
-            event.stopPropagation();
-            onOpenSelectedFile(mention.path);
-          }
-        }}
-        onMouseDown={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          onOpenSelectedFile(mention.path);
-        }}
-      >
-        {mention.token}
-      </span>,
-    );
-    index += mention.token.length;
+  
+  for (const mention of orderedMentions) {
+    const escapedToken = mention.token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(escapedToken, 'g');
+    html = html.replace(regex, `<span class="prompt-inline-file-link">${mention.token}</span>`);
   }
-
-  return parts;
+  
+  return html;
 }
 
 function hasSelectableValues(option: SessionConfigOption): boolean {

@@ -48,14 +48,13 @@ import { PlanBlock } from './components/PlanBlock';
 import { PipelinePlanBlock } from './components/PipelinePlanBlock';
 import { TurnBlock } from './components/TurnBlock';
 import { getState, onMessage, postMessage, setState } from './vscode';
+import { useFileMentions } from './app/useFileMentions';
+import { useSessionDisplay } from './app/useSessionDisplay';
 
 export function App(): JSX.Element {
   const [state, dispatch] = useReducer(appReducer, getState<PersistedWebviewState>(), createInitialState);
   const [cursorPosition, setCursorPosition] = useState(0);
-  const [fileResults, setFileResults] = useState<FileSearchResult[]>([]);
-  const [fileSelectedIdx, setFileSelectedIdx] = useState(0);
-  const [suppressedFileMention, setSuppressedFileMention] = useState<string | null>(null);
-  const [selectedFileMentions, setSelectedFileMentions] = useState<SelectedFileMention[]>([]);
+  
   const stateRef = useRef(state);
   const restoreMarkdownItemsRef = useRef(getRestoreMarkdownItems(state.persisted.chatHistory));
   const turnCounterRef = useRef(0);
@@ -64,39 +63,46 @@ export function App(): JSX.Element {
   const promptInputRef = useRef<HTMLDivElement | null>(null);
   const slashPopupRef = useRef<HTMLDivElement | null>(null);
   const filePopupRef = useRef<HTMLDivElement | null>(null);
-  const fileSearchRequestIdRef = useRef(0);
   const pendingCursorPositionRef = useRef<number | null>(null);
 
   stateRef.current = state;
 
   const sessionState = state.persisted.sessionState;
   const availableCommands = sessionState?.availableCommands ?? [];
-  const basePlaceholder = useMemo(() => getBasePlaceholder(availableCommands), [availableCommands]);
-  const slashFilteredCommands = useMemo(
-    () => getSlashFilteredCommands(state.promptText, availableCommands),
-    [availableCommands, state.promptText],
-  );
-  const activeFileMention = useMemo(
-    () => getActiveFileMention(state.promptText, cursorPosition),
-    [cursorPosition, state.promptText],
-  );
-  const fileMentionKey = activeFileMention
-    ? `${activeFileMention.start}:${activeFileMention.end}:${activeFileMention.query}:${cursorPosition}`
-    : null;
-  const fileSearchKey = activeFileMention
-    ? `${activeFileMention.start}:${activeFileMention.end}:${activeFileMention.query}`
-    : null;
-  const isSlashPopupOpen =
-    slashFilteredCommands.length > 0 &&
-    state.slashPopupSuppressedFor !== state.promptText;
-  const isFilePopupOpen =
-    Boolean(activeFileMention) &&
-    suppressedFileMention !== fileMentionKey &&
-    fileResults.length > 0;
-  const placeholder =
-    state.promptText.startsWith('/') && state.placeholderOverride
-      ? state.placeholderOverride
-      : basePlaceholder;
+
+  // Use custom hooks for extracted logic
+  const {
+    activeFileMention,
+    fileMentionKey,
+    fileSearchKey,
+    fileResults,
+    fileSelectedIdx,
+    suppressedFileMention,
+    selectedFileMentions,
+    isFilePopupOpen,
+    fileSearchRequestIdRef,
+    setFileResults,
+    setFileSelectedIdx,
+    setSuppressedFileMention,
+    setSelectedFileMentions,
+    selectFileResult,
+  } = useFileMentions({ promptText: state.promptText, cursorPosition });
+
+  const {
+    basePlaceholder,
+    slashFilteredCommands,
+    currentMode,
+    currentModel,
+    placeholder,
+    isSlashPopupOpen,
+  } = useSessionDisplay({
+    sessionState,
+    availableCommands,
+    promptText: state.promptText,
+    placeholderOverride: state.placeholderOverride,
+    slashPopupSuppressedFor: state.slashPopupSuppressedFor,
+  });
+
   const disabledBySession =
     state.isLoadingSession || (!state.persisted.hasActiveSession && !state.composerUnlocked);
   const excludedToolIndexes = useMemo(
@@ -107,19 +113,13 @@ export function App(): JSX.Element {
     () => buildHistoryBlocks(state.persisted.chatHistory, excludedToolIndexes),
     [excludedToolIndexes, state.persisted.chatHistory],
   );
-  const currentMode = useMemo(
-    () => sessionState?.modes?.availableModes.find((mode) => mode.id === sessionState.modes?.currentModeId),
-    [sessionState?.modes?.availableModes, sessionState?.modes?.currentModeId],
-  );
-  const currentModel = useMemo(
-    () => sessionState?.models?.availableModels.find((model) => model.modelId === sessionState.models?.currentModelId),
-    [sessionState?.models?.availableModels, sessionState?.models?.currentModelId],
-  );
 
+  // Sync state to extension
   useEffect(() => {
     setState(state.persisted);
   }, [state.persisted]);
 
+  // Handle markdown rendering
   useEffect(() => {
     if (!loadMarkdownRequestedRef.current || state.isLoadingSession) {
       return;
@@ -132,6 +132,7 @@ export function App(): JSX.Element {
     loadMarkdownRequestedRef.current = false;
   }, [state.isLoadingSession, state.persisted.chatHistory]);
 
+  // Handle restored markdown items
   useEffect(() => {
     if (restoreMarkdownItemsRef.current.length > 0) {
       postMessage({ type: 'renderMarkdown', items: restoreMarkdownItemsRef.current });
@@ -285,41 +286,7 @@ export function App(): JSX.Element {
     });
   }, []);
 
-  useEffect(() => {
-    if (pendingCursorPositionRef.current === null) {
-      return;
-    }
-
-    const nextCursorPosition = pendingCursorPositionRef.current;
-    pendingCursorPositionRef.current = null;
-    requestAnimationFrame(() => {
-      const input = promptInputRef.current;
-      if (!input || document.activeElement !== input) {
-        return;
-      }
-      setEditableCursorPosition(input, nextCursorPosition);
-    });
-  }, [state.promptText, cursorPosition]);
-
-  useEffect(() => {
-    if (!state.promptText.startsWith('/')) {
-      if (state.placeholderOverride !== null) {
-        dispatch({ type: 'setPlaceholderOverride', placeholder: null });
-      }
-      if (state.slashPopupSuppressedFor !== null) {
-        dispatch({ type: 'suppressSlashPopup', promptText: null });
-      }
-    }
-  }, [state.placeholderOverride, state.promptText, state.slashPopupSuppressedFor]);
-
-  useEffect(() => {
-    const maxIndex = Math.max(slashFilteredCommands.length - 1, 0);
-    const nextIndex = slashFilteredCommands.length === 0 ? 0 : Math.min(state.slashSelectedIdx, maxIndex);
-    if (nextIndex !== state.slashSelectedIdx) {
-      dispatch({ type: 'setSlashSelectedIdx', index: nextIndex });
-    }
-  }, [slashFilteredCommands.length, state.slashSelectedIdx]);
-
+  // Handle file mention changes
   useEffect(() => {
     if (!activeFileMention) {
       setFileResults([]);
@@ -343,15 +310,9 @@ export function App(): JSX.Element {
     const requestId = fileSearchRequestIdRef.current + 1;
     fileSearchRequestIdRef.current = requestId;
     postMessage({ type: 'searchFiles', query: activeFileMention.query, requestId });
-  }, [fileSearchKey]);
+  }, [fileSearchKey, activeFileMention, suppressedFileMention, fileMentionKey]);
 
-  useEffect(() => {
-    const selectedItem = slashPopupRef.current?.querySelector<HTMLElement>(
-      `.slash-popup-item[data-index="${state.slashSelectedIdx}"]`,
-    );
-    selectedItem?.scrollIntoView({ block: 'nearest' });
-  }, [state.slashSelectedIdx, isSlashPopupOpen]);
-
+  // Scroll selected file item into view
   useEffect(() => {
     const selectedItem = filePopupRef.current?.querySelector<HTMLElement>(
       `.file-popup-item[data-index="${fileSelectedIdx}"]`,
@@ -359,6 +320,15 @@ export function App(): JSX.Element {
     selectedItem?.scrollIntoView({ block: 'nearest' });
   }, [fileSelectedIdx, isFilePopupOpen]);
 
+  // Scroll selected slash command into view
+  useEffect(() => {
+    const selectedItem = slashPopupRef.current?.querySelector<HTMLElement>(
+      `.slash-popup-item[data-index="${state.slashSelectedIdx}"]`,
+    );
+    selectedItem?.scrollIntoView({ block: 'nearest' });
+  }, [state.slashSelectedIdx, isSlashPopupOpen]);
+
+  // Scroll messages to bottom
   useEffect(() => {
     const container = messagesRef.current;
     if (!container) {
@@ -368,6 +338,7 @@ export function App(): JSX.Element {
     container.scrollTop = container.scrollHeight;
   }, [historyBlocks, state.currentTurn, state.renderedMarkdown]);
 
+  // Close pickers on document click
   useEffect(() => {
     const closePickers = () => {
       dispatch({ type: 'closePickers' });
@@ -379,18 +350,59 @@ export function App(): JSX.Element {
     };
   }, []);
 
+  // Handle pending cursor position
+  useEffect(() => {
+    if (pendingCursorPositionRef.current === null) {
+      return;
+    }
+
+    const nextCursorPosition = pendingCursorPositionRef.current;
+    pendingCursorPositionRef.current = null;
+    requestAnimationFrame(() => {
+      const input = promptInputRef.current;
+      if (!input || document.activeElement !== input) {
+        return;
+      }
+      setEditableCursorPosition(input, nextCursorPosition);
+    });
+  }, [state.promptText, cursorPosition]);
+
+  // Reset slash popup state when prompt text changes
+  useEffect(() => {
+    if (!state.promptText.startsWith('/')) {
+      if (state.placeholderOverride !== null) {
+        dispatch({ type: 'setPlaceholderOverride', placeholder: null });
+      }
+      if (state.slashPopupSuppressedFor !== null) {
+        dispatch({ type: 'suppressSlashPopup', promptText: null });
+      }
+    }
+  }, [state.placeholderOverride, state.promptText, state.slashPopupSuppressedFor]);
+
+  // Adjust slash selected index
+  useEffect(() => {
+    const maxIndex = Math.max(slashFilteredCommands.length - 1, 0);
+    const nextIndex = slashFilteredCommands.length === 0 ? 0 : Math.min(state.slashSelectedIdx, maxIndex);
+    if (nextIndex !== state.slashSelectedIdx) {
+      dispatch({ type: 'setSlashSelectedIdx', index: nextIndex });
+    }
+  }, [slashFilteredCommands.length, state.slashSelectedIdx]);
+
+  // Focus prompt input
   const focusPromptInput = useCallback((): void => {
     requestAnimationFrame(() => {
       promptInputRef.current?.focus();
     });
   }, []);
 
+  // Update cursor from input
   const updateCursorFromInput = useCallback((input: HTMLDivElement): void => {
     const newPos = getEditableCursorPosition(input);
     pendingCursorPositionRef.current = newPos;
     setCursorPosition(newPos);
   }, []);
 
+  // Handle prompt input
   const handlePromptInput = useCallback((event: FormEvent<HTMLDivElement>): void => {
     const input = event.currentTarget;
     const nextPromptText = getEditableText(input);
@@ -403,32 +415,26 @@ export function App(): JSX.Element {
     if (state.slashPopupSuppressedFor && state.slashPopupSuppressedFor !== nextPromptText) {
       dispatch({ type: 'suppressSlashPopup', promptText: null });
     }
-    setSelectedFileMentions((prevMentions) => {
-      const nextMentions = prevMentions.filter((mention) => nextPromptText.includes(mention.token));
-      return nextMentions.length === prevMentions.length ? prevMentions : nextMentions;
-    });
-  }, [state.slashPopupSuppressedFor]);
-
-  const selectFileResult = useCallback((result: FileSearchResult | undefined, mention: ActiveFileMention | null = activeFileMention): void => {
-    if (!result || !mention) {
-      return;
+    // Filter mentions based on new text
+    const filteredMentions = selectedFileMentions.filter((mention: SelectedFileMention) => 
+      nextPromptText.includes(mention.token)
+    );
+    if (filteredMentions.length !== selectedFileMentions.length) {
+      setSelectedFileMentions(filteredMentions);
     }
+  }, [state.slashPopupSuppressedFor, selectedFileMentions]);
 
-    const next = replaceActiveFileMention(stateRef.current.promptText, mention, result.name);
-    const token = `@${result.name}`;
-    const nextSuppressedKey = `${mention.start}:${mention.start + token.length}:${result.name}:${mention.start + token.length}`;
-    pendingCursorPositionRef.current = next.cursorPosition;
-    fileSearchRequestIdRef.current += 1;
-    setSuppressedFileMention(nextSuppressedKey);
-    setFileResults([]);
-    setFileSelectedIdx(0);
-    setSelectedFileMentions((mentions) => [
-      ...mentions.filter((candidate) => candidate.token !== token),
-      { ...result, token },
-    ]);
-    dispatch({ type: 'setPromptText', text: next.text });
-  }, [activeFileMention]);
+  // Handle file select - wrapper that updates prompt text
+  const handleFileSelect = useCallback((result: FileSearchResult | undefined): void => {
+    selectFileResult(result);
+    if (result && activeFileMention) {
+      const next = replaceActiveFileMention(state.promptText, activeFileMention, result.name);
+      pendingCursorPositionRef.current = next.cursorPosition;
+      dispatch({ type: 'setPromptText', text: next.text });
+    }
+  }, [activeFileMention, selectFileResult, state.promptText]);
 
+  // Handle send
   const handleSend = useCallback((explicitText?: string): void => {
     const text = (explicitText ?? state.promptText).trim();
     if (!text || state.isProcessing) {
@@ -443,18 +449,17 @@ export function App(): JSX.Element {
     postMessage({ type: 'sendPrompt', text: expandFileMentionsForPrompt(text, selectedFileMentions) });
   }, [selectedFileMentions, state.isProcessing, state.promptText]);
 
-  const handleOpenSelectedFile = useCallback((path: string): void => {
-    postMessage({ type: 'openFile', path });
-  }, []);
-
+  // Handle cancel
   const handleCancel = useCallback((): void => {
     postMessage({ type: 'cancelTurn' });
   }, []);
 
+  // Handle welcome command
   const handleWelcomeCommand = useCallback((command: string): void => {
     postMessage({ type: 'executeCommand', command });
   }, []);
 
+  // Handle open debug snapshot
   const handleOpenDebugSnapshot = useCallback((): void => {
     const currentState = stateRef.current;
     postMessage({
@@ -470,6 +475,7 @@ export function App(): JSX.Element {
     });
   }, []);
 
+  // Handle pipeline plan actions
   const handleApprovePipelinePlan = useCallback((plan: string): void => {
     dispatch({
       type: 'updatePipelinePlanStatus',
@@ -488,6 +494,7 @@ export function App(): JSX.Element {
     postMessage({ type: 'rejectPipelinePlan' });
   }, []);
 
+  // Handle resize
   const handleResizeStart = useCallback((event: ReactMouseEvent<HTMLDivElement>): void => {
     event.preventDefault();
     const startY = event.clientY;
@@ -507,6 +514,53 @@ export function App(): JSX.Element {
     document.addEventListener('mouseup', onMouseUp);
   }, []);
 
+  // Handle mode select
+  const handleModeSelect = useCallback((mode: ModeOption, event: ReactMouseEvent<HTMLDivElement>): void => {
+    event.stopPropagation();
+    dispatch({ type: 'closePickers' });
+    if (sessionState?.modes?.currentModeId === mode.id) {
+      return;
+    }
+    dispatch({ type: 'updateCurrentMode', modeId: mode.id });
+    postMessage({ type: 'setMode', modeId: mode.id });
+  }, [sessionState?.modes?.currentModeId]);
+
+  // Handle model select
+  const handleModelSelect = useCallback((model: ModelOption, event: ReactMouseEvent<HTMLDivElement>): void => {
+    event.stopPropagation();
+    dispatch({ type: 'closePickers' });
+    if (sessionState?.models?.currentModelId === model.modelId) {
+      return;
+    }
+    dispatch({ type: 'updateCurrentModel', modelId: model.modelId });
+    postMessage({ type: 'setModel', modelId: model.modelId });
+  }, [sessionState?.models?.currentModelId]);
+
+  // Handle config option select
+  const handleConfigOptionSelect = useCallback((
+    option: SessionConfigOption,
+    value: ConfigOptionValue,
+    event: ReactMouseEvent<HTMLDivElement>,
+  ): void => {
+    event.stopPropagation();
+    dispatch({ type: 'closePickers' });
+    if (option.currentValue === value.value) {
+      return;
+    }
+
+    const configOptions = (sessionState?.configOptions ?? []).map((candidate) =>
+      candidate.id === option.id
+        ? {
+            ...candidate,
+            currentValue: value.value,
+          }
+        : candidate,
+    );
+    dispatch({ type: 'updateConfigOptions', configOptions });
+    postMessage({ type: 'setConfigOption', configId: option.id, value: value.value });
+  }, [sessionState?.configOptions]);
+
+  // Select slash command
   const selectSlashCommand = useCallback((command: SlashCommand | undefined): void => {
     if (!command) {
       return;
@@ -530,29 +584,30 @@ export function App(): JSX.Element {
     handleSend(`/${command.name}`);
   }, [focusPromptInput, handleSend, state.promptText]);
 
+  // Handle prompt key down
   const handlePromptKeyDown = useCallback((event: ReactKeyboardEvent<HTMLDivElement>): void => {
     if (isFilePopupOpen) {
       if (event.key === 'ArrowDown') {
         event.preventDefault();
-        setFileSelectedIdx(index => Math.min(index + 1, fileResults.length - 1));
+        setFileSelectedIdx(Math.min(fileSelectedIdx + 1, fileResults.length - 1));
         return;
       }
 
       if (event.key === 'ArrowUp') {
         event.preventDefault();
-        setFileSelectedIdx(index => Math.max(index - 1, 0));
+        setFileSelectedIdx(Math.max(fileSelectedIdx - 1, 0));
         return;
       }
 
       if (event.key === 'Tab') {
         event.preventDefault();
-        selectFileResult(fileResults[fileSelectedIdx]);
+        handleFileSelect(fileResults[fileSelectedIdx]);
         return;
       }
 
       if (event.key === 'Enter' && !event.shiftKey) {
         event.preventDefault();
-        selectFileResult(fileResults[fileSelectedIdx]);
+        handleFileSelect(fileResults[fileSelectedIdx]);
         return;
       }
 
@@ -616,58 +671,15 @@ export function App(): JSX.Element {
     fileSelectedIdx,
     handleCancel,
     handleSend,
+    handleFileSelect,
     isFilePopupOpen,
     isSlashPopupOpen,
-    selectFileResult,
     selectSlashCommand,
     slashFilteredCommands,
     state.isProcessing,
     state.promptText,
     state.slashSelectedIdx,
   ]);
-
-  const handleModeSelect = useCallback((mode: ModeOption, event: ReactMouseEvent<HTMLDivElement>): void => {
-    event.stopPropagation();
-    dispatch({ type: 'closePickers' });
-    if (sessionState?.modes?.currentModeId === mode.id) {
-      return;
-    }
-    dispatch({ type: 'updateCurrentMode', modeId: mode.id });
-    postMessage({ type: 'setMode', modeId: mode.id });
-  }, [sessionState?.modes?.currentModeId]);
-
-  const handleModelSelect = useCallback((model: ModelOption, event: ReactMouseEvent<HTMLDivElement>): void => {
-    event.stopPropagation();
-    dispatch({ type: 'closePickers' });
-    if (sessionState?.models?.currentModelId === model.modelId) {
-      return;
-    }
-    dispatch({ type: 'updateCurrentModel', modelId: model.modelId });
-    postMessage({ type: 'setModel', modelId: model.modelId });
-  }, [sessionState?.models?.currentModelId]);
-
-  const handleConfigOptionSelect = useCallback((
-    option: SessionConfigOption,
-    value: ConfigOptionValue,
-    event: ReactMouseEvent<HTMLDivElement>,
-  ): void => {
-    event.stopPropagation();
-    dispatch({ type: 'closePickers' });
-    if (option.currentValue === value.value) {
-      return;
-    }
-
-    const configOptions = (sessionState?.configOptions ?? []).map((candidate) =>
-      candidate.id === option.id
-        ? {
-            ...candidate,
-            currentValue: value.value,
-          }
-        : candidate,
-    );
-    dispatch({ type: 'updateConfigOptions', configOptions });
-    postMessage({ type: 'setConfigOption', configId: option.id, value: value.value });
-  }, [sessionState?.configOptions]);
 
   const emptyStateVisible =
     !state.persisted.hasActiveSession &&
@@ -852,12 +864,11 @@ export function App(): JSX.Element {
         fileSelectedIdx={fileSelectedIdx}
         filePopupRef={filePopupRef}
         isFilePopupOpen={isFilePopupOpen}
-        onFileSelect={selectFileResult}
+        onFileSelect={handleFileSelect}
         onFileHover={setFileSelectedIdx}
         onPromptInput={handlePromptInput}
         onPromptSelect={updateCursorFromInput}
         selectedFileMentions={selectedFileMentions}
-        onOpenSelectedFile={handleOpenSelectedFile}
       />
     </>
   );
@@ -865,25 +876,6 @@ export function App(): JSX.Element {
 
 function getEditableText(input: HTMLDivElement): string {
   return input.textContent ?? '';
-}
-
-function normalizePipelineStatus(status: unknown): PipelinePlanStatus | null {
-  switch (status) {
-    case 'awaiting_approval':
-      return 'pending';
-    case 'implementing':
-    case 'completed':
-    case 'rejected':
-    case 'error':
-    case 'cancelled':
-      return status;
-    default:
-      return null;
-  }
-}
-
-function normalizePipelinePhase(phase: unknown): PipelinePhase | undefined {
-  return phase === 'planner' || phase === 'implementer' ? phase : undefined;
 }
 
 function getEditableCursorPosition(input: HTMLDivElement): number {
@@ -930,4 +922,24 @@ function setEditableCursorPosition(input: HTMLDivElement, cursorPosition: number
   range.collapse(false);
   selection?.removeAllRanges();
   selection?.addRange(range);
+}
+
+// Local normalization functions (not in normalizers.ts)
+function normalizePipelineStatus(status: unknown): PipelinePlanStatus | null {
+  switch (status) {
+    case 'awaiting_approval':
+      return 'pending';
+    case 'implementing':
+    case 'completed':
+    case 'rejected':
+    case 'error':
+    case 'cancelled':
+      return status;
+    default:
+      return null;
+  }
+}
+
+function normalizePipelinePhase(phase: unknown): PipelinePhase | undefined {
+  return phase === 'planner' || phase === 'implementer' ? phase : undefined;
 }

@@ -1084,6 +1084,38 @@ body {
   color: var(--vscode-textLink-activeForeground, var(--vscode-textLink-foreground));
 }
 
+/* File mention chips for Markdown-style mentions */
+.prompt-file-mention {
+  display: inline-flex;
+  align-items: center;
+  background: var(--vscode-badge-background);
+  color: var(--vscode-badge-foreground);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 0.9em;
+  cursor: pointer;
+  white-space: nowrap;
+  border: 1px solid var(--vscode-badge-border, rgba(0, 0, 0, 0.2));
+  user-select: none;
+}
+
+.prompt-file-mention:hover {
+  background: var(--vscode-badge-hoverBackground, var(--vscode-hoverBackground));
+  opacity: 0.9;
+}
+
+.prompt-file-mention::before {
+  content: "@";
+  margin-right: 2px;
+  opacity: 0.7;
+  font-size: 0.9em;
+}
+
+.prompt-file-mention[data-file-path]:hover {
+  transform: scale(1.02);
+  transition: transform 0.15s ease;
+}
+
 .prompt-input:focus {
   border-color: var(--vscode-focusBorder);
 }

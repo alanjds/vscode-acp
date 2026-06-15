@@ -1,4 +1,3 @@
-import * as vscode from 'vscode';
 import { EventEmitter } from 'node:events';
 
 import type {
@@ -11,9 +10,8 @@ import type {
   AvailableCommand,
   SessionConfigOption,
   SessionInfo as ProtocolSessionInfo,
-  AgentCapabilities,
 } from '@agentclientprotocol/sdk';
-import { PROTOCOL_VERSION, RequestError } from '@agentclientprotocol/sdk';
+import { PROTOCOL_VERSION } from '@agentclientprotocol/sdk';
 
 import { AgentManager } from './AgentManager';
 import { ConnectionManager, ConnectionInfo } from './ConnectionManager';
@@ -23,8 +21,15 @@ import { resolveWorkspaceIdentity, type WorkspaceIdentity } from './WorkspaceIde
 import { getAgentConfigs } from '../config/AgentConfig';
 import { getPipelineDefinitionForAgent, isPipelineVirtualAgentName } from '../config/PipelineCatalog';
 import { PipelineService } from '../pipeline/PipelineService';
+import { SessionState } from './SessionState';
+import { SessionUpdateBuffer } from './SessionUpdateBuffer';
+import { SessionAuthHandler } from './SessionAuthHandler';
+import { DiscussionContextHandler } from './DiscussionContextHandler';
 import { log, logError } from '../utils/Logger';
 import { sendEvent, sendError } from '../utils/TelemetryManager';
+
+export type { AgentCapabilitySummary } from './SessionState';
+export type { SharedDiscussionContext } from './DiscussionContextHandler';
 
 export interface SessionInfo {
   sessionId: string;
@@ -48,24 +53,8 @@ export interface SessionInfo {
   title?: string;
 }
 
-/**
- * Discovery flags for an agent, derived from `initialize.agentCapabilities`.
- * Populated lazily when {@link SessionManager.ensureConnected} runs.
- */
-export interface AgentCapabilitySummary {
-  list: boolean;
-  load: boolean;
-  resume: boolean;
-}
-
 export interface OpenSessionOptions {
   shareCurrentContext?: boolean;
-}
-
-interface SharedDiscussionContext {
-  text: string;
-  sourceAgentName: string;
-  sourceSessionId: string;
 }
 
 /**
@@ -76,37 +65,13 @@ interface SharedDiscussionContext {
  * user-facing model is: pick an agent → chat.
  */
 export class SessionManager extends EventEmitter {
-  private sessions: Map<string, SessionInfo> = new Map();
-  private activeSessionId: string | null = null;
+  private readonly sessionState: SessionState;
+  private readonly updateBuffer: SessionUpdateBuffer;
+  private readonly authHandler: SessionAuthHandler;
+  private readonly discussionContextHandler: DiscussionContextHandler;
   private pipelineService: PipelineService | null = null;
 
-  /** Maps agentName → activeSessionId for the one-session-per-agent model. */
-  private agentSessions: Map<string, string> = new Map();
-
-  /**
-   * Buffers session/update payloads that arrive before the corresponding
-   * session is registered in `this.sessions`. Drained by createAcpSession
-   * once the session is set up. This closes a microtask race between the
-   * resolution of `newSession` and the SDK's async notification dispatch.
-   */
-  private pendingAvailableCommands: Map<string, AvailableCommand[]> = new Map();
-  private pendingConfigOptions: Map<string, SessionConfigOption[]> = new Map();
-  private pendingTitles: Map<string, string> = new Map();
-
-  /**
-   * Cache of `initialize.agentCapabilities` per agent so the tree can render
-   * without paying the connect cost on every render.
-   */
-  private capabilities: Map<string, AgentCapabilitySummary> = new Map();
-
-  /** Set of session IDs that are currently being replayed via `session/load`. */
-  private loadingSessionIds: Set<string> = new Set();
-
-  /** One-shot discussion context copied from the previous agent session. */
-  private pendingSharedDiscussionContext: Map<string, string> = new Map();
-
-  /** Client-side session history (optional — only used for tier-2 tree). */
-  private historyStore: SessionHistoryStore | null = null;
+  private testConfigs: Record<string, any> | null = null;
 
   constructor(
     private readonly agentManager: AgentManager,
@@ -114,11 +79,15 @@ export class SessionManager extends EventEmitter {
     private readonly workspaceIdentityProvider: () => WorkspaceIdentity = resolveWorkspaceIdentity,
   ) {
     super();
+    this.sessionState = new SessionState();
+    this.updateBuffer = new SessionUpdateBuffer();
+    this.authHandler = new SessionAuthHandler(agentManager);
+    this.discussionContextHandler = new DiscussionContextHandler(null);
   }
 
   /** Wire in the persistent session-history store (called once at startup). */
   setHistoryStore(store: SessionHistoryStore): void {
-    this.historyStore = store;
+    this.discussionContextHandler.setHistoryStore(store);
   }
 
   setPipelineService(service: PipelineService): void {
@@ -127,27 +96,32 @@ export class SessionManager extends EventEmitter {
 
   /** Public accessor for downstream UI. */
   getHistoryStore(): SessionHistoryStore | null {
-    return this.historyStore;
+    return this.discussionContextHandler.getHistoryStore();
   }
 
   /** Return true when the active session has discussion context worth sharing to the target. */
   hasShareableDiscussionContext(targetAgentName: string, targetSessionId?: string): boolean {
-    return this.buildSharedDiscussionContextForTarget(targetAgentName, targetSessionId) !== null;
+    return this.discussionContextHandler.hasShareableDiscussionContext(
+      targetAgentName,
+      this.sessionState.getActiveSession(),
+      targetSessionId,
+    );
   }
 
   /** Return context-family metadata for a live session, if available. */
   getSessionContextFamily(sessionId: string): ContextFamilyInfo | null {
-    const session = this.sessions.get(sessionId);
-    if (!session || !this.historyStore) {
-      return null;
-    }
-    return this.historyStore.getContextFamily(session.agentName, sessionId, session.cwd);
+    return this.discussionContextHandler.getSessionContextFamily(
+      this.sessionState.getSession(sessionId),
+      sessionId,
+    );
   }
 
   /** Return the active session's context-family id, used by the tree view. */
   getActiveContextFamilyId(): string | null {
-    const activeId = this.getActiveSessionId();
-    return activeId ? this.getSessionContextFamily(activeId)?.contextFamilyId ?? null : null;
+    return this.discussionContextHandler.getActiveContextFamilyId(
+      this.sessionState.getActiveSession(),
+      this.sessionState.getActiveSessionId(),
+    );
   }
 
   /**
@@ -155,28 +129,9 @@ export class SessionManager extends EventEmitter {
    * has never been initialized — callers can call {@link ensureConnected}
    * first to populate.
    */
-  getCachedCapabilities(agentName: string): AgentCapabilitySummary | undefined {
-    return this.capabilities.get(agentName);
+  getCachedCapabilities(agentName: string): import('./SessionState').AgentCapabilitySummary | undefined {
+    return this.sessionState.getCachedCapabilities(agentName);
   }
-
-  private getWorkspaceIdentity(): WorkspaceIdentity {
-    return this.workspaceIdentityProvider();
-  }
-
-  private getWorkspaceCwd(): string {
-    return this.getWorkspaceIdentity().cwd;
-  }
-
-  private summarizeCapabilities(caps: AgentCapabilities | undefined | null): AgentCapabilitySummary {
-    const sc: any = (caps as any)?.sessionCapabilities;
-    return {
-      list: !!sc?.list,
-      load: !!(caps as any)?.loadSession,
-      resume: !!sc?.resume,
-    };
-  }
-
-  private testConfigs: Record<string, any> | null = null;
 
   /** @internal Used for testing to inject agent configurations. */
   setTestConfigs(configs: Record<string, any>): void {
@@ -185,6 +140,14 @@ export class SessionManager extends EventEmitter {
 
   private getConfigs(): Record<string, any> {
     return this.testConfigs || getAgentConfigs();
+  }
+
+  private getWorkspaceIdentity(): WorkspaceIdentity {
+    return this.workspaceIdentityProvider();
+  }
+
+  private getWorkspaceCwd(): string {
+    return this.getWorkspaceIdentity().cwd;
   }
 
   /**
@@ -199,18 +162,23 @@ export class SessionManager extends EventEmitter {
     }
 
     // If we already have a live session with this agent, reuse it
-    const existingSessionId = this.agentSessions.get(agentName);
-    if (existingSessionId && this.sessions.has(existingSessionId)) {
-      this.activeSessionId = existingSessionId;
+    const existingSessionId = this.sessionState.getAgentSession(agentName);
+    if (existingSessionId && this.sessionState.getSession(existingSessionId)) {
+      this.sessionState.setActiveSessionId(existingSessionId);
       this.emit('active-session-changed', existingSessionId);
-      return this.sessions.get(existingSessionId)!;
+      return this.sessionState.getSession(existingSessionId)!;
     }
 
     // Disconnect any currently connected agent first (single-agent model)
-    const currentAgent = this.getActiveAgentName();
+    const currentAgent = this.sessionState.getActiveAgentName();
     const sharedDiscussionContext = options.shareCurrentContext && currentAgent !== agentName
-      ? this.buildSharedDiscussionContextForTarget(agentName)
+      ? this.discussionContextHandler.buildSharedDiscussionContextForTarget(
+          agentName,
+          this.sessionState.getActiveSession(),
+          undefined,
+        )
       : null;
+
     if (currentAgent) {
       await this.disconnectAgent(currentAgent);
     }
@@ -245,12 +213,12 @@ export class SessionManager extends EventEmitter {
         if (evt.agentId === agentId) {
           log(`Agent ${agentName} closed with code ${evt.code}`);
           // Clean up the session for this agent
-          const sessionId = this.agentSessions.get(agentName);
+          const sessionId = this.sessionState.getAgentSession(agentName);
           if (sessionId) {
-            this.sessions.delete(sessionId);
-            this.agentSessions.delete(agentName);
-            if (this.activeSessionId === sessionId) {
-              this.activeSessionId = null;
+            this.sessionState.deleteSession(sessionId);
+            this.sessionState.deleteAgentSession(agentName);
+            if (this.sessionState.getActiveSessionId() === sessionId) {
+              this.sessionState.setActiveSessionId(null);
             }
             this.emit('agent-disconnected', agentName);
             this.emit('active-session-changed', null);
@@ -274,23 +242,29 @@ export class SessionManager extends EventEmitter {
       }
 
       // Create ACP session (with auth handling). The session is already
-      // registered in `this.sessions` by createAcpSession so that any
+      // registered in `this.sessionState` by createAcpSession so that any
       // notifications arriving during/after newSession can be persisted.
       const sessionInfo = await this.createAcpSession(
         agentName,
         agentId,
         connInfo,
         workspace,
-        fingerprintAgentConfig(config),
+        this.fingerprintAgentConfig(config),
       );
+
       if (sharedDiscussionContext) {
-        this.pendingSharedDiscussionContext.set(sessionInfo.sessionId, sharedDiscussionContext.text);
-        this.linkContextFamily(sharedDiscussionContext, agentName, sessionInfo.sessionId, workspace);
+        this.discussionContextHandler.setPending(sessionInfo.sessionId, sharedDiscussionContext.text);
+        this.discussionContextHandler.linkContextFamily(
+          sharedDiscussionContext,
+          agentName,
+          sessionInfo.sessionId,
+          workspace,
+        );
         this.emit('pending-shared-context-changed', sessionInfo.sessionId);
       }
 
-      this.agentSessions.set(agentName, sessionInfo.sessionId);
-      this.activeSessionId = sessionInfo.sessionId;
+      this.sessionState.setAgentSession(agentName, sessionInfo.sessionId);
+      this.sessionState.setActiveSessionId(sessionInfo.sessionId);
 
       this.emit('agent-connected', agentName);
       this.emit('active-session-changed', sessionInfo.sessionId);
@@ -306,17 +280,22 @@ export class SessionManager extends EventEmitter {
   }
 
   private async connectToPipelineAgent(agentName: string, options: OpenSessionOptions = {}): Promise<SessionInfo> {
-    const existingSessionId = this.agentSessions.get(agentName);
-    if (existingSessionId && this.sessions.has(existingSessionId)) {
-      this.activeSessionId = existingSessionId;
+    const existingSessionId = this.sessionState.getAgentSession(agentName);
+    if (existingSessionId && this.sessionState.getSession(existingSessionId)) {
+      this.sessionState.setActiveSessionId(existingSessionId);
       this.emit('active-session-changed', existingSessionId);
-      return this.sessions.get(existingSessionId)!;
+      return this.sessionState.getSession(existingSessionId)!;
     }
 
-    const currentAgent = this.getActiveAgentName();
+    const currentAgent = this.sessionState.getActiveAgentName();
     const sharedDiscussionContext = options.shareCurrentContext && currentAgent !== agentName
-      ? this.buildSharedDiscussionContextForTarget(agentName)
+      ? this.discussionContextHandler.buildSharedDiscussionContextForTarget(
+          agentName,
+          this.sessionState.getActiveSession(),
+          undefined,
+        )
       : null;
+
     if (currentAgent) {
       await this.disconnectAgent(currentAgent);
     }
@@ -348,14 +327,19 @@ export class SessionManager extends EventEmitter {
       title: displayName,
     };
 
-    this.sessions.set(sessionId, sessionInfo);
+    this.sessionState.addSession(sessionInfo);
     if (sharedDiscussionContext) {
-      this.pendingSharedDiscussionContext.set(sessionId, sharedDiscussionContext.text);
-      this.linkContextFamily(sharedDiscussionContext, agentName, sessionId, cwd);
+      this.discussionContextHandler.setPending(sessionId, sharedDiscussionContext.text);
+      this.discussionContextHandler.linkContextFamily(
+        sharedDiscussionContext,
+        agentName,
+        sessionId,
+        cwd,
+      );
       this.emit('pending-shared-context-changed', sessionId);
     }
-    this.agentSessions.set(agentName, sessionId);
-    this.activeSessionId = sessionId;
+    this.sessionState.setAgentSession(agentName, sessionId);
+    this.sessionState.setActiveSessionId(sessionId);
     this.emit('agent-connected', agentName);
     this.emit('active-session-changed', sessionId);
     return sessionInfo;
@@ -366,7 +350,7 @@ export class SessionManager extends EventEmitter {
    * Disconnects current session, reconnects, and signals chat to clear.
    */
   async newConversation(): Promise<SessionInfo | null> {
-    const activeSession = this.getActiveSession();
+    const activeSession = this.sessionState.getActiveSession();
     if (!activeSession) {
       return null;
     }
@@ -381,26 +365,26 @@ export class SessionManager extends EventEmitter {
    * Disconnect from an agent: kill process and clean up.
    */
   async disconnectAgent(agentName: string): Promise<void> {
-    const sessionId = this.agentSessions.get(agentName);
+    const sessionId = this.sessionState.getAgentSession(agentName);
     if (!sessionId) { return; }
 
-    const session = this.sessions.get(sessionId);
+    const session = this.sessionState.getSession(sessionId);
     if (!session) { return; }
 
     log(`Disconnecting agent ${agentName}`);
     sendEvent('agent/disconnect', { agentName });
 
-    if (this.isPipelineSession(session.sessionId)) {
+    if (this.sessionState.isPipelineSession(session.sessionId)) {
       this.pipelineService?.cancel(session.sessionId);
     } else {
       this.agentManager.killAgent(session.agentId);
       this.connectionManager.removeConnection(session.agentId);
     }
-    this.sessions.delete(sessionId);
-    this.agentSessions.delete(agentName);
+    this.sessionState.deleteSession(sessionId);
+    this.sessionState.deleteAgentSession(agentName);
 
-    if (this.activeSessionId === sessionId) {
-      this.activeSessionId = null;
+    if (this.sessionState.getActiveSessionId() === sessionId) {
+      this.sessionState.setActiveSessionId(null);
     }
 
     this.emit('agent-disconnected', agentName);
@@ -425,13 +409,13 @@ export class SessionManager extends EventEmitter {
         mcpServers: [],
       });
     } catch (e: any) {
-      if (!this.isAuthRequiredError(e)) {
+      if (!this.authHandler.isAuthRequiredError(e)) {
         logError('Failed to create session', e);
         this.agentManager.killAgent(agentId);
         throw e;
       }
       // Auth required — interactively authenticate, then retry.
-      await this.runAuthFlow(agentName, agentId, connInfo);
+      await this.authHandler.runAuthFlow(agentName, agentId, connInfo);
       try {
         sessionResponse = await connInfo.connection.newSession({
           cwd,
@@ -462,171 +446,553 @@ export class SessionManager extends EventEmitter {
 
     // Register the session into the map *synchronously* with newSession's
     // resolution so that any session/update notifications dispatched by the
-    // agent (e.g. available_commands_update) can be persisted onto it. If
-    // we waited until connectToAgent's continuation, notifications would
-    // race and be dropped by handleSessionUpdate.
-    this.sessions.set(sessionInfo.sessionId, sessionInfo);
-    this.drainPending(sessionInfo);
+    // agent (e.g. available_commands_update) can be persisted onto it.
+    this.sessionState.addSession(sessionInfo);
+    this.updateBuffer.drainInto(sessionInfo);
 
     // Capture in the local history store so it appears in the tree.
-    this.historyStore?.upsertNew(agentName, workspace, sessionInfo.sessionId, agentFingerprint);
+    this.discussionContextHandler.getHistoryStore()?.upsertNew(
+      agentName,
+      workspace,
+      sessionInfo.sessionId,
+      agentFingerprint,
+    );
 
     return sessionInfo;
   }
 
   /** Returns true if a thrown error denotes ACP "auth required" (-32000). */
   private isAuthRequiredError(e: any): boolean {
-    return (e instanceof RequestError && e.code === -32000)
-      || (e?.code === -32000)
-      || (typeof e?.message === 'string' && /auth.?required/i.test(e.message));
+    return this.authHandler.isAuthRequiredError(e);
   }
 
-  private buildSharedDiscussionContextForTarget(targetAgentName: string, targetSessionId?: string): SharedDiscussionContext | null {
-    const currentSession = this.getActiveSession();
-    if (!currentSession || !this.historyStore) {
-      return null;
+  private fingerprintAgentConfig(config: unknown): string | undefined {
+    try {
+      return JSON.stringify(config);
+    } catch {
+      return undefined;
     }
-    if (currentSession.agentName === targetAgentName && currentSession.sessionId === targetSessionId) {
-      return null;
-    }
-    const text = this.historyStore.buildDiscussionContext(currentSession.agentName, currentSession.sessionId);
-    return text
-      ? {
-          text,
-          sourceAgentName: currentSession.agentName,
-          sourceSessionId: currentSession.sessionId,
-        }
-      : null;
   }
 
-  private linkContextFamily(
-    sharedDiscussionContext: SharedDiscussionContext,
-    targetAgentName: string,
-    targetSessionId: string,
-    workspace: string | WorkspaceIdentity,
-  ): void {
-    if (!this.historyStore) {
+  // --- Session Updates ---
+
+  /**
+   * Replace a session's configOptions in place and notify listeners.
+   * Used by both the setter response and the `config_option_update`
+   * push-notification handler.
+   */
+  applyConfigOptions(sessionId: string, options: SessionConfigOption[] | null): void {
+    const session = this.sessionState.getSession(sessionId);
+    if (!session) {
+      // Buffer until the session is registered
+      this.updateBuffer.bufferConfigOptions(sessionId, options ?? []);
       return;
     }
-    this.historyStore.upsertNew(targetAgentName, workspace, targetSessionId);
-    const contextFamily = this.historyStore.linkContextFamily(
-      sharedDiscussionContext.sourceAgentName,
-      sharedDiscussionContext.sourceSessionId,
-      targetAgentName,
-      targetSessionId,
-      workspace,
-    );
-    if (contextFamily) {
-      this.emit('context-family-changed', targetSessionId, contextFamily);
-    }
-  }
-
-  private consumePendingSharedDiscussionContext(sessionId: string, text: string): string {
-    const sharedContext = this.pendingSharedDiscussionContext.get(sessionId);
-    if (sharedContext) {
-      this.pendingSharedDiscussionContext.delete(sessionId);
-      this.emit('pending-shared-context-changed', sessionId);
-    }
-    return sharedContext
-      ? `${sharedContext}\n\nCurrent user prompt:\n${text}`
-      : text;
+    session.configOptions = options ?? null;
+    this.emit('config-options-changed', sessionId, session.configOptions);
   }
 
   /**
-   * Run the interactive auth flow against an already-initialized connection.
-   * Throws if the user cancels or auth fails — caller is expected to clean
-   * up the agent process.
+   * Replace a session's availableCommands and notify listeners. Buffers
+   * the value if the session isn't registered yet (race during creation).
    */
-  private async runAuthFlow(
-    agentName: string,
-    agentId: string,
-    connInfo: ConnectionInfo,
-  ): Promise<void> {
-    const authMethods = connInfo.initResponse.authMethods;
-    if (!authMethods || authMethods.length === 0) {
+  applyAvailableCommands(sessionId: string, commands: AvailableCommand[]): void {
+    const session = this.sessionState.getSession(sessionId);
+    if (!session) {
+      this.updateBuffer.bufferAvailableCommands(sessionId, commands);
+      return;
+    }
+    session.availableCommands = commands;
+    this.emit('available-commands-changed', sessionId, commands);
+  }
+
+  /**
+   * Apply a `session_info_update` notification: patches title / updatedAt on
+   * the in-memory session and on the persistent history store.
+   */
+  applySessionInfoUpdate(sessionId: string, update: { title?: string | null; updatedAt?: string | null }): void {
+    const session = this.sessionState.getSession(sessionId);
+    if (session) {
+      if (update.title === null) {
+        delete session.title;
+      } else if (typeof update.title === 'string') {
+        session.title = update.title;
+      }
+    } else if (typeof update.title === 'string') {
+      // Session not registered yet — buffer for drain.
+      this.updateBuffer.bufferTitle(sessionId, update.title);
+    }
+    // Mirror onto the history store regardless of whether session is live.
+    const storedSession = this.sessionState.getSession(sessionId);
+    if (this.discussionContextHandler.getHistoryStore() && storedSession) {
+      this.discussionContextHandler.getHistoryStore()!.setTitle(
+        storedSession.agentName,
+        sessionId,
+        update.title,
+      );
+    }
+    this.emit('session-info-changed', sessionId, update);
+  }
+
+  /**
+   * Record the first user prompt of a session so the history-store tree can
+   * use it as a label fallback when no title arrives.
+   */
+  recordFirstPrompt(sessionId: string, prompt: string): void {
+    this.discussionContextHandler.recordFirstPrompt(
+      this.sessionState.getSession(sessionId),
+      sessionId,
+      prompt,
+    );
+  }
+
+  /** Persist a raw user message in the discussion transcript. */
+  recordUserMessage(sessionId: string, text: string): void {
+    this.discussionContextHandler.recordUserMessage(
+      this.sessionState.getSession(sessionId),
+      sessionId,
+      text,
+    );
+  }
+
+  /** Persist a replayed user-message chunk in the discussion transcript. */
+  recordUserMessageChunk(sessionId: string, text: string): void {
+    this.discussionContextHandler.recordUserMessageChunk(
+      this.sessionState.getSession(sessionId),
+      sessionId,
+      text,
+    );
+  }
+
+  /** Persist an assistant-message chunk in the discussion transcript. */
+  recordAssistantMessageChunk(sessionId: string, text: string): void {
+    this.discussionContextHandler.recordAssistantMessageChunk(
+      this.sessionState.getSession(sessionId),
+      sessionId,
+      text,
+    );
+  }
+
+  /** Bump a session's `lastActiveAt` in the history store. */
+  touchHistory(sessionId: string): void {
+    this.discussionContextHandler.touchHistory(
+      this.sessionState.getSession(sessionId),
+      sessionId,
+    );
+  }
+
+  // --- Connection lifecycle (no session) ---
+
+  /**
+   * Spawn + initialize + (optionally authenticate) an agent without creating
+   * a session. Caches the capability summary. Idempotent.
+   *
+   * NOTE: this never disconnects the currently-active agent — it is safe to
+   * call from the tree view to probe capabilities or list sessions while
+   * the user is chatting with a different agent. Callers that want to
+   * switch the active session (e.g. loadSession) handle the active-agent
+   * teardown themselves.
+   */
+  async ensureConnected(agentName: string): Promise<ConnectionInfo> {
+    // If we already have a live session with this agent, reuse its connection.
+    const existingSessionId = this.sessionState.getAgentSession(agentName);
+    if (existingSessionId) {
+      const existing = this.sessionState.getSession(existingSessionId);
+      if (existing) {
+        const conn = this.connectionManager.getConnection(existing.agentId);
+        if (conn) {
+          const caps = this.sessionState.summarizeCapabilities(conn.initResponse.agentCapabilities);
+          this.sessionState.setCapabilities(agentName, caps);
+          return conn;
+        }
+      }
+    }
+
+    // If the agent process is already spawned (e.g. from a previous probe),
+    // reuse it instead of spawning a new one.
+    for (const instance of this.agentManager.getRunningAgents()) {
+      if (instance.name === agentName) {
+        const conn = this.connectionManager.getConnection(instance.id);
+        if (conn) {
+          const caps = this.sessionState.summarizeCapabilities(conn.initResponse.agentCapabilities);
+          this.sessionState.setCapabilities(agentName, caps);
+          return conn;
+        }
+      }
+    }
+
+    const configs = this.getConfigs();
+    const config = configs[agentName];
+    if (!config) {
+      this.discussionContextHandler.getHistoryStore()?.markAgentStatus(agentName, 'agentRemoved');
+      throw new Error(`Unknown agent: ${agentName}.`);
+    }
+
+    const workspaceCwd = this.getWorkspaceCwd();
+    const agentInstance = this.agentManager.spawnAgent(agentName, config, workspaceCwd);
+    const agentId = agentInstance.id;
+
+    const agentProcess = this.agentManager.getAgent(agentId);
+    if (!agentProcess) {
+      throw new Error('Agent process not found after spawn');
+    }
+
+    let connInfo: ConnectionInfo;
+    try {
+      connInfo = await this.connectionManager.connect(agentId, agentProcess.process, workspaceCwd);
+    } catch (e) {
       this.agentManager.killAgent(agentId);
-      throw new Error(
-        `Agent "${agentName}" requires authentication but did not advertise any auth methods.`,
-      );
+      this.recordAgentConnectionFailure(agentName, e);
+      throw e;
     }
 
-    log(`Agent requires authentication. Methods: ${authMethods.map(m => m.name).join(', ')}`);
+    const caps = this.sessionState.summarizeCapabilities(connInfo.initResponse.agentCapabilities);
+    this.sessionState.setCapabilities(agentName, caps);
+    return connInfo;
+  }
 
-    let selectedMethod = authMethods[0];
-    if (authMethods.length > 1) {
-      const picked = await vscode.window.showQuickPick(
-        authMethods.map(m => ({
-          label: m.name,
-          description: m.description || '',
-          detail: `ID: ${m.id}`,
-          method: m,
-        })),
-        {
-          placeHolder: 'Select an authentication method',
-          title: `${agentName} requires authentication`,
-        },
-      );
-      if (!picked) {
-        this.agentManager.killAgent(agentId);
-        throw new Error('Authentication cancelled by user.');
-      }
-      selectedMethod = picked.method;
-    } else {
-      const confirm = await vscode.window.showInformationMessage(
-        `${agentName} requires authentication via "${selectedMethod.name}".`,
-        { modal: true, detail: selectedMethod.description || undefined },
-        'Authenticate',
-      );
-      if (confirm !== 'Authenticate') {
-        this.agentManager.killAgent(agentId);
-        throw new Error('Authentication cancelled by user.');
+  /**
+   * List sessions known to an agent (ACP `session/list`).
+   * Throws if the agent doesn't advertise the capability.
+   */
+  async listSessions(agentName: string, opts: { cwd?: string; cursor?: string } = {}): Promise<{ sessions: ProtocolSessionInfo[]; nextCursor?: string }> {
+    const conn = await this.ensureConnected(agentName);
+    const caps = this.sessionState.getCachedCapabilities(agentName);
+    if (!caps?.list) {
+      throw new Error(`Agent "${agentName}" does not support session/list.`);
+    }
+
+    const params: any = {};
+    if (opts.cwd) { params.cwd = opts.cwd; }
+    if (opts.cursor) { params.cursor = opts.cursor; }
+
+    let response: any;
+    try {
+      response = await conn.connection.listSessions(params);
+    } catch (e: any) {
+      if (this.authHandler.isAuthRequiredError(e)) {
+        // Auth then retry.
+        const agentInfo = this.findAgentIdForConnection(conn);
+        if (agentInfo) {
+          await this.authHandler.runAuthFlow(agentName, agentInfo, conn);
+          response = await conn.connection.listSessions(params);
+        } else {
+          throw e;
+        }
+      } else {
+        throw e;
       }
     }
+
+    const sessions: ProtocolSessionInfo[] = response?.sessions ?? [];
+    // Reconcile the history store without deleting missing sessions silently.
+    if (this.discussionContextHandler.getHistoryStore() && !opts.cursor) {
+      this.discussionContextHandler.getHistoryStore()!.reconcileFromAgent(
+        agentName,
+        new Set(sessions.map(s => s.sessionId)),
+        opts.cwd,
+      );
+    }
+    return { sessions, nextCursor: response?.nextCursor ?? undefined };
+  }
+
+  /**
+   * Load an existing session, replaying the entire conversation history via
+   * `session/update` notifications. Heavyweight. Active session is switched
+   * to the loaded session on success.
+   */
+  async loadSession(agentName: string, sessionId: string, options: OpenSessionOptions = {}): Promise<SessionInfo> {
+    // Capture before disconnecting or replacing the active session
+    const sharedDiscussionContext = options.shareCurrentContext
+      ? this.discussionContextHandler.buildSharedDiscussionContextForTarget(
+          agentName,
+          this.sessionState.getActiveSession(),
+          sessionId,
+        )
+      : null;
+
+    // Honor the single-active-session model
+    const currentAgent = this.sessionState.getActiveAgentName();
+    if (currentAgent && currentAgent !== agentName) {
+      await this.disconnectAgent(currentAgent);
+    }
+
+    const conn = await this.ensureConnected(agentName);
+    const caps = this.sessionState.getCachedCapabilities(agentName);
+    if (!caps?.load) {
+      throw new Error(`Agent "${agentName}" does not support session/load.`);
+    }
+
+    // If the same agent has a different active session, clear it
+    const previouslyActive = this.sessionState.getActiveSessionId();
+    if (previouslyActive && previouslyActive !== sessionId) {
+      const prevSession = this.sessionState.getSession(previouslyActive);
+      if (prevSession) {
+        this.sessionState.deleteAgentSession(prevSession.agentName);
+      }
+      this.sessionState.deleteSession(previouslyActive);
+      this.sessionState.setActiveSessionId(null);
+    }
+
+    const cwd = this.getWorkspaceCwd();
+    const agentId = this.findAgentIdForConnection(conn);
+    if (!agentId) {
+      throw new Error(`Unable to locate agent process for "${agentName}".`);
+    }
+    this.discussionContextHandler.getHistoryStore()?.upsertNew(agentName, cwd, sessionId);
+
+    // Pre-register a placeholder so notifications during replay can be associated
+    const placeholder: SessionInfo = {
+      sessionId,
+      agentId,
+      agentName,
+      agentDisplayName: conn.initResponse.agentInfo?.title
+        || conn.initResponse.agentInfo?.name
+        || agentName,
+      cwd,
+      createdAt: new Date().toISOString(),
+      initResponse: conn.initResponse,
+      modes: null,
+      models: null,
+      configOptions: null,
+      availableCommands: [],
+    };
+    this.sessionState.addSession(placeholder);
+    this.updateBuffer.drainInto(placeholder);
+    this.sessionState.markLoading(sessionId);
+    this.discussionContextHandler.getHistoryStore()?.clearDiscussion(agentName, sessionId);
+
+    this.sessionState.setAgentSession(agentName, sessionId);
+    this.sessionState.setActiveSessionId(sessionId);
+
+    this.emit('agent-connected', agentName);
+    this.emit('active-session-changed', sessionId);
+    this.emit('session-load-start', sessionId, agentName);
 
     try {
-      log(`Authenticating with method: ${selectedMethod.name} (${selectedMethod.id})`);
-      await connInfo.connection.authenticate({ methodId: selectedMethod.id });
-      log('Authentication successful');
-    } catch (authErr: any) {
-      logError('Authentication failed', authErr);
-      this.agentManager.killAgent(agentId);
-      throw new Error(`Authentication failed: ${authErr.message}`);
+      const response = await conn.connection.loadSession({
+        sessionId,
+        cwd,
+        mcpServers: [],
+      });
+      placeholder.modes = (response as any).modes ?? null;
+      placeholder.models = (response as any).models ?? null;
+      placeholder.configOptions = (response as any).configOptions ?? null;
+    } catch (e: any) {
+      this.sessionState.unmarkLoading(sessionId);
+      this.sessionState.deleteSession(sessionId);
+      this.sessionState.deleteAgentSession(agentName);
+      if (this.sessionState.getActiveSessionId() === sessionId) {
+        this.sessionState.setActiveSessionId(null);
+      }
+      this.emit('session-load-end', sessionId, agentName, false);
+      this.emit('active-session-changed', null);
+
+      const msg = String(e?.message || '');
+      if (/not found|no such|unknown session/i.test(msg)) {
+        this.discussionContextHandler.getHistoryStore()?.markStatus(agentName, sessionId, 'missing');
+      }
+      throw e;
     }
+
+    this.sessionState.unmarkLoading(sessionId);
+    if (sharedDiscussionContext) {
+      this.discussionContextHandler.setPending(sessionId, sharedDiscussionContext.text);
+      this.discussionContextHandler.linkContextFamily(
+        sharedDiscussionContext,
+        agentName,
+        sessionId,
+        cwd,
+      );
+      this.emit('pending-shared-context-changed', sessionId);
+    }
+    this.emit('session-load-end', sessionId, agentName, true);
+
+    this.discussionContextHandler.touchHistory(
+      this.sessionState.getSession(sessionId),
+      sessionId,
+    );
+    return placeholder;
   }
 
   /**
-   * Drain any buffered state captured before the session was registered.
-   * Used by all session-registration paths (new / load / resume).
+   * Resume an existing session without replaying history (light path).
    */
-  private drainPending(sessionInfo: SessionInfo): void {
-    const pendingCmds = this.pendingAvailableCommands.get(sessionInfo.sessionId);
-    if (pendingCmds) {
-      sessionInfo.availableCommands = pendingCmds;
-      this.pendingAvailableCommands.delete(sessionInfo.sessionId);
+  async resumeSession(agentName: string, sessionId: string, options: OpenSessionOptions = {}): Promise<SessionInfo> {
+    const sharedDiscussionContext = options.shareCurrentContext
+      ? this.discussionContextHandler.buildSharedDiscussionContextForTarget(
+          agentName,
+          this.sessionState.getActiveSession(),
+          sessionId,
+        )
+      : null;
+
+    const currentAgent = this.sessionState.getActiveAgentName();
+    if (currentAgent && currentAgent !== agentName) {
+      await this.disconnectAgent(currentAgent);
     }
-    const pendingCfg = this.pendingConfigOptions.get(sessionInfo.sessionId);
-    if (pendingCfg !== undefined) {
-      sessionInfo.configOptions = pendingCfg;
-      this.pendingConfigOptions.delete(sessionInfo.sessionId);
+
+    const conn = await this.ensureConnected(agentName);
+    const caps = this.sessionState.getCachedCapabilities(agentName);
+    if (!caps?.resume) {
+      throw new Error(`Agent "${agentName}" does not support session/resume.`);
     }
-    const pendingTitle = this.pendingTitles.get(sessionInfo.sessionId);
-    if (pendingTitle !== undefined) {
-      sessionInfo.title = pendingTitle;
-      this.pendingTitles.delete(sessionInfo.sessionId);
+
+    // If the same agent has a different active session, clear it.
+    const previouslyActive = this.sessionState.getActiveSessionId();
+    if (previouslyActive && previouslyActive !== sessionId) {
+      const prevSession = this.sessionState.getSession(previouslyActive);
+      if (prevSession) {
+        this.sessionState.deleteAgentSession(prevSession.agentName);
+      }
+      this.sessionState.deleteSession(previouslyActive);
+      this.sessionState.setActiveSessionId(null);
     }
+
+    const cwd = this.getWorkspaceCwd();
+    const agentId = this.findAgentIdForConnection(conn);
+    if (!agentId) {
+      throw new Error(`Unable to locate agent process for "${agentName}".`);
+    }
+
+    let response: any;
+    try {
+      response = await conn.connection.resumeSession({
+        sessionId,
+        cwd,
+        mcpServers: [],
+      });
+    } catch (e: any) {
+      const msg = String(e?.message || '');
+      if (/not found|no such|unknown session/i.test(msg)) {
+        this.discussionContextHandler.getHistoryStore()?.markStatus(agentName, sessionId, 'missing');
+      }
+      throw e;
+    }
+
+    const sessionInfo: SessionInfo = {
+      sessionId,
+      agentId,
+      agentName,
+      agentDisplayName: conn.initResponse.agentInfo?.title
+        || conn.initResponse.agentInfo?.name
+        || agentName,
+      cwd,
+      createdAt: new Date().toISOString(),
+      initResponse: conn.initResponse,
+      modes: response?.modes ?? null,
+      models: response?.models ?? null,
+      configOptions: response?.configOptions ?? null,
+      availableCommands: [],
+    };
+    this.sessionState.addSession(sessionInfo);
+    if (sharedDiscussionContext) {
+      this.discussionContextHandler.setPending(sessionId, sharedDiscussionContext.text);
+      this.discussionContextHandler.linkContextFamily(
+        sharedDiscussionContext,
+        agentName,
+        sessionId,
+        cwd,
+      );
+      this.emit('pending-shared-context-changed', sessionId);
+    }
+    this.updateBuffer.drainInto(sessionInfo);
+    this.sessionState.setAgentSession(agentName, sessionId);
+    this.sessionState.setActiveSessionId(sessionId);
+    this.emit('agent-connected', agentName);
+    this.emit('active-session-changed', sessionId);
+
+    this.discussionContextHandler.touchHistory(
+      this.sessionState.getSession(sessionId),
+      sessionId,
+    );
+    return sessionInfo;
   }
+
+  isLoading(sessionId: string): boolean {
+    return this.sessionState.isLoading(sessionId);
+  }
+
+  hasPendingSharedDiscussionContext(sessionId: string): boolean {
+    return this.discussionContextHandler.hasPending(sessionId);
+  }
+
+  /** Helper: reverse-lookup agentId for a known ConnectionInfo. */
+  private findAgentIdForConnection(conn: ConnectionInfo): string | undefined {
+    for (const session of this.sessionState.getAllSessions().values()) {
+      const c = this.connectionManager.getConnection(session.agentId);
+      if (c === conn) { return session.agentId; }
+    }
+    for (const instance of this.agentManager.getRunningAgents()) {
+      if (this.connectionManager.getConnection(instance.id) === conn) {
+        return instance.id;
+      }
+    }
+    return undefined;
+  }
+
+  // --- Getters ---
+
+  getSession(sessionId: string): SessionInfo | undefined {
+    return this.sessionState.getSession(sessionId);
+  }
+
+  getActiveSession(): SessionInfo | undefined {
+    return this.sessionState.getActiveSession();
+  }
+
+  getActiveSessionId(): string | null {
+    return this.sessionState.getActiveSessionId();
+  }
+
+  /** Get the agent name for the current active session. */
+  getActiveAgentName(): string | null {
+    return this.sessionState.getActiveAgentName();
+  }
+
+  /** Check if a specific agent is currently connected. */
+  isAgentConnected(agentName: string): boolean {
+    return this.sessionState.isAgentConnected(agentName);
+  }
+
+  /** Get all connected agent names. */
+  getConnectedAgentNames(): string[] {
+    return this.sessionState.getConnectedAgentNames();
+  }
+
+  getConnectionForSession(sessionId: string): ConnectionInfo | undefined {
+    const session = this.sessionState.getSession(sessionId);
+    if (!session) { return undefined; }
+    return this.connectionManager.getConnection(session.agentId);
+  }
+
+  isPipelineSession(sessionId: string | null | undefined): boolean {
+    return this.sessionState.isPipelineSession(sessionId);
+  }
+
+  private recordAgentConnectionFailure(agentName: string, error: unknown): void {
+    const classified = classifyAgentError(error);
+    if (classified.kind === 'missing-pipeline-agent') {
+      this.discussionContextHandler.getHistoryStore()?.markAgentStatus(agentName, 'agentRemoved');
+    } else if (classified.kind !== 'auth-cancelled') {
+      this.discussionContextHandler.getHistoryStore()?.markAgentStatus(agentName, 'agentUnavailable');
+    }
+    this.emit('agent-error', agentName, error);
+  }
+
+  // --- Prompt & Config ---
 
   /**
    * Send a prompt to the active session.
    */
   async sendPrompt(sessionId: string, text: string): Promise<PromptResponse> {
-    const textWithSharedContext = this.consumePendingSharedDiscussionContext(sessionId, text);
-    const session = this.sessions.get(sessionId);
+    const textWithSharedContext = this.discussionContextHandler.consumePending(sessionId, text);
+    const session = this.sessionState.getSession(sessionId);
     if (!session) {
       throw new Error(`Session not found: ${sessionId}`);
     }
 
-    if (this.isPipelineSession(sessionId)) {
+    if (this.sessionState.isPipelineSession(session.sessionId)) {
       if (!this.pipelineService) {
         throw new Error('Pipeline service is not available.');
       }
@@ -658,12 +1024,12 @@ export class SessionManager extends EventEmitter {
    * Cancel an active prompt turn.
    */
   async cancelTurn(sessionId: string): Promise<void> {
-    if (this.isPipelineSession(sessionId)) {
+    if (this.sessionState.isPipelineSession(sessionId)) {
       this.pipelineService?.cancel(sessionId);
       return;
     }
 
-    const session = this.sessions.get(sessionId);
+    const session = this.sessionState.getSession(sessionId);
     if (!session) { return; }
 
     const connInfo = this.connectionManager.getConnection(session.agentId);
@@ -682,11 +1048,10 @@ export class SessionManager extends EventEmitter {
    * migrated to the new API.
    */
   async setMode(sessionId: string, modeId: string): Promise<void> {
-    const session = this.sessions.get(sessionId);
+    const session = this.sessionState.getSession(sessionId);
     if (!session) { return; }
 
-    // Prefer configOptions if available (spec: clients that support
-    // configOptions MUST use it exclusively when both are present)
+    // Prefer configOptions if available
     if (session.configOptions && session.configOptions.length > 0) {
       const modeOpt = session.configOptions.find(o => o.category === 'mode');
       if (modeOpt) {
@@ -715,7 +1080,7 @@ export class SessionManager extends EventEmitter {
    * `model`.
    */
   async setModel(sessionId: string, modelId: string): Promise<void> {
-    const session = this.sessions.get(sessionId);
+    const session = this.sessionState.getSession(sessionId);
     if (!session) { return; }
 
     if (session.configOptions && session.configOptions.length > 0) {
@@ -745,7 +1110,7 @@ export class SessionManager extends EventEmitter {
    * model adjusts thought-level options) are reflected.
    */
   async setConfigOption(sessionId: string, configId: string, value: string): Promise<SessionConfigOption[] | null> {
-    const session = this.sessions.get(sessionId);
+    const session = this.sessionState.getSession(sessionId);
     if (!session) { return null; }
 
     const connInfo = this.connectionManager.getConnection(session.agentId);
@@ -762,507 +1127,13 @@ export class SessionManager extends EventEmitter {
     return options;
   }
 
-  /**
-   * Replace a session's configOptions in place and notify listeners.
-   * Used by both the setter response and the `config_option_update`
-   * push-notification handler.
-   */
-  applyConfigOptions(sessionId: string, options: SessionConfigOption[] | null): void {
-    const session = this.sessions.get(sessionId);
-    if (!session) {
-      // Buffer until the session is registered (handles the race where a
-      // notification is dispatched before createAcpSession finishes).
-      this.pendingConfigOptions.set(sessionId, options ?? []);
-      return;
-    }
-    session.configOptions = options ?? null;
-    this.emit('config-options-changed', sessionId, session.configOptions);
-  }
-
-  /**
-   * Replace a session's availableCommands and notify listeners. Buffers
-   * the value if the session isn't registered yet (race during creation).
-   */
-  applyAvailableCommands(sessionId: string, commands: AvailableCommand[]): void {
-    const session = this.sessions.get(sessionId);
-    if (!session) {
-      this.pendingAvailableCommands.set(sessionId, commands);
-      return;
-    }
-    session.availableCommands = commands;
-    this.emit('available-commands-changed', sessionId, commands);
-  }
-
-  /**
-   * Apply a `session_info_update` notification: patches title / updatedAt on
-   * the in-memory session and on the persistent history store.
-   */
-  applySessionInfoUpdate(sessionId: string, update: { title?: string | null; updatedAt?: string | null }): void {
-    const session = this.sessions.get(sessionId);
-    if (session) {
-      if (update.title === null) {
-        delete session.title;
-      } else if (typeof update.title === 'string') {
-        session.title = update.title;
-      }
-    } else if (typeof update.title === 'string') {
-      // Session not registered yet — buffer for drain.
-      this.pendingTitles.set(sessionId, update.title);
-    }
-    // Mirror onto the history store regardless of whether session is live.
-    if (this.historyStore && session) {
-      this.historyStore.setTitle(session.agentName, sessionId, update.title);
-    }
-    this.emit('session-info-changed', sessionId, update);
-  }
-
-  /**
-   * Record the first user prompt of a session so the history-store tree can
-   * use it as a label fallback when no title arrives.
-   */
-  recordFirstPrompt(sessionId: string, prompt: string): void {
-    const session = this.sessions.get(sessionId);
-    if (!session || !this.historyStore) { return; }
-    this.historyStore.setFirstPromptIfMissing(session.agentName, sessionId, prompt);
-  }
-
-  /** Persist a raw user message in the discussion transcript. */
-  recordUserMessage(sessionId: string, text: string): void {
-    const session = this.sessions.get(sessionId);
-    if (!session || !this.historyStore) { return; }
-    this.historyStore.appendUserMessage(session.agentName, sessionId, text);
-  }
-
-  /** Persist a replayed user-message chunk in the discussion transcript. */
-  recordUserMessageChunk(sessionId: string, text: string): void {
-    const session = this.sessions.get(sessionId);
-    if (!session || !this.historyStore) { return; }
-    this.historyStore.appendUserMessageChunk(session.agentName, sessionId, text);
-  }
-
-  /** Persist an assistant-message chunk in the discussion transcript. */
-  recordAssistantMessageChunk(sessionId: string, text: string): void {
-    const session = this.sessions.get(sessionId);
-    if (!session || !this.historyStore) { return; }
-    this.historyStore.appendAssistantMessageChunk(session.agentName, sessionId, text);
-  }
-
-  /** Bump a session's `lastActiveAt` in the history store. */
-  touchHistory(sessionId: string): void {
-    const session = this.sessions.get(sessionId);
-    if (!session) { return; }
-    this.historyStore?.touch(session.agentName, sessionId);
-  }
-
-  // --- Connection lifecycle (no session) ---
-
-  /**
-   * Spawn + initialize + (optionally authenticate) an agent without creating
-   * a session. Caches the capability summary. Idempotent.
-   *
-   * NOTE: this never disconnects the currently-active agent — it is safe to
-   * call from the tree view to probe capabilities or list sessions while
-   * the user is chatting with a different agent. Callers that want to
-   * switch the active session (e.g. loadSession) handle the active-agent
-   * teardown themselves.
-   */
-  async ensureConnected(agentName: string): Promise<ConnectionInfo> {
-    // If we already have a live session with this agent, reuse its connection.
-    const existingSessionId = this.agentSessions.get(agentName);
-    if (existingSessionId) {
-      const existing = this.sessions.get(existingSessionId);
-      if (existing) {
-        const conn = this.connectionManager.getConnection(existing.agentId);
-        if (conn) {
-          this.capabilities.set(agentName, this.summarizeCapabilities(conn.initResponse.agentCapabilities));
-          return conn;
-        }
-      }
-    }
-
-    // If the agent process is already spawned (e.g. from a previous probe),
-    // reuse it instead of spawning a new one.
-    for (const instance of this.agentManager.getRunningAgents()) {
-      if (instance.name === agentName) {
-        const conn = this.connectionManager.getConnection(instance.id);
-        if (conn) {
-          this.capabilities.set(agentName, this.summarizeCapabilities(conn.initResponse.agentCapabilities));
-          return conn;
-        }
-      }
-    }
-
-    const configs = this.getConfigs();
-    const config = configs[agentName];
-    if (!config) {
-      this.historyStore?.markAgentStatus(agentName, 'agentRemoved');
-      throw new Error(`Unknown agent: ${agentName}.`);
-    }
-
-    const workspaceCwd = this.getWorkspaceCwd();
-    const agentInstance = this.agentManager.spawnAgent(agentName, config, workspaceCwd);
-    const agentId = agentInstance.id;
-
-    const agentProcess = this.agentManager.getAgent(agentId);
-    if (!agentProcess) {
-      throw new Error('Agent process not found after spawn');
-    }
-
-    let connInfo: ConnectionInfo;
-    try {
-      connInfo = await this.connectionManager.connect(agentId, agentProcess.process, workspaceCwd);
-    } catch (e) {
-      this.agentManager.killAgent(agentId);
-      this.recordAgentConnectionFailure(agentName, e);
-      throw e;
-    }
-
-    this.capabilities.set(agentName, this.summarizeCapabilities(connInfo.initResponse.agentCapabilities));
-    return connInfo;
-  }
-
-  /**
-   * List sessions known to an agent (ACP `session/list`).
-   * Throws if the agent doesn't advertise the capability.
-   */
-  async listSessions(agentName: string, opts: { cwd?: string; cursor?: string } = {}): Promise<{ sessions: ProtocolSessionInfo[]; nextCursor?: string }> {
-    const conn = await this.ensureConnected(agentName);
-    const caps = this.capabilities.get(agentName);
-    if (!caps?.list) {
-      throw new Error(`Agent "${agentName}" does not support session/list.`);
-    }
-
-    const params: any = {};
-    if (opts.cwd) { params.cwd = opts.cwd; }
-    if (opts.cursor) { params.cursor = opts.cursor; }
-
-    let response: any;
-    try {
-      response = await conn.connection.listSessions(params);
-    } catch (e: any) {
-      if (this.isAuthRequiredError(e)) {
-        // Auth then retry.
-        const agentInfo = this.findAgentIdForConnection(conn);
-        if (agentInfo) {
-          await this.runAuthFlow(agentName, agentInfo, conn);
-          response = await conn.connection.listSessions(params);
-        } else {
-          throw e;
-        }
-      } else {
-        throw e;
-      }
-    }
-
-    const sessions: ProtocolSessionInfo[] = response?.sessions ?? [];
-    // Reconcile the history store without deleting missing sessions silently.
-    if (this.historyStore && !opts.cursor) {
-      this.historyStore.reconcileFromAgent(
-        agentName,
-        new Set(sessions.map(s => s.sessionId)),
-        opts.cwd,
-      );
-    }
-    return { sessions, nextCursor: response?.nextCursor ?? undefined };
-  }
-
-  /**
-   * Load an existing session, replaying the entire conversation history via
-   * `session/update` notifications. Heavyweight. Active session is switched
-   * to the loaded session on success.
-   */
-  async loadSession(agentName: string, sessionId: string, options: OpenSessionOptions = {}): Promise<SessionInfo> {
-    // Capture before disconnecting or replacing the active session; after that
-    // point the source session may no longer be available in the in-memory map.
-    const sharedDiscussionContext = options.shareCurrentContext
-      ? this.buildSharedDiscussionContextForTarget(agentName, sessionId)
-      : null;
-
-    // Honor the single-active-session model: if a different agent currently
-    // owns the active session, disconnect it before opening this one.
-    const currentAgent = this.getActiveAgentName();
-    if (currentAgent && currentAgent !== agentName) {
-      await this.disconnectAgent(currentAgent);
-    }
-
-    const conn = await this.ensureConnected(agentName);
-    const caps = this.capabilities.get(agentName);
-    if (!caps?.load) {
-      throw new Error(`Agent "${agentName}" does not support session/load.`);
-    }
-
-    // If the same agent has a different active session, clear it so the
-    // load can take over as the new active session.
-    const previouslyActive = this.activeSessionId;
-    if (previouslyActive && previouslyActive !== sessionId) {
-      const prevSession = this.sessions.get(previouslyActive);
-      if (prevSession) {
-        this.agentSessions.delete(prevSession.agentName);
-      }
-      this.sessions.delete(previouslyActive);
-      this.activeSessionId = null;
-    }
-
-    const cwd = this.getWorkspaceCwd();
-    const agentId = this.findAgentIdForConnection(conn);
-    if (!agentId) {
-      throw new Error(`Unable to locate agent process for "${agentName}".`);
-    }
-    this.historyStore?.upsertNew(agentName, cwd, sessionId);
-
-    // Pre-register a placeholder so notifications that arrive during the
-    // replay can be associated with the session (closing the same race the
-    // pending* buffers handle for session/new).
-    const placeholder: SessionInfo = {
-      sessionId,
-      agentId,
-      agentName,
-      agentDisplayName: conn.initResponse.agentInfo?.title
-        || conn.initResponse.agentInfo?.name
-        || agentName,
-      cwd,
-      createdAt: new Date().toISOString(),
-      initResponse: conn.initResponse,
-      modes: null,
-      models: null,
-      configOptions: null,
-      availableCommands: [],
-    };
-    this.sessions.set(sessionId, placeholder);
-    this.drainPending(placeholder);
-    this.loadingSessionIds.add(sessionId);
-    this.historyStore?.clearDiscussion(agentName, sessionId);
-    // Mark this session as active up front so handleSessionUpdate forwards
-    // the replayed chunks to the webview during the load. Without this,
-    // updates arrive before the activeSessionId is set and are dropped.
-    this.agentSessions.set(agentName, sessionId);
-    this.activeSessionId = sessionId;
-    // Emit active-session-changed BEFORE session-load-start so the webview
-    // first repaints from the new session state, then immediately enters
-    // the loading-overlay state.
-    this.emit('agent-connected', agentName);
-    this.emit('active-session-changed', sessionId);
-    this.emit('session-load-start', sessionId, agentName);
-
-    try {
-      const response = await conn.connection.loadSession({
-        sessionId,
-        cwd,
-        mcpServers: [],
-      });
-      // The response carries the latest mode/model/configOptions snapshot.
-      placeholder.modes = (response as any).modes ?? null;
-      placeholder.models = (response as any).models ?? null;
-      placeholder.configOptions = (response as any).configOptions ?? null;
-    } catch (e: any) {
-      this.loadingSessionIds.delete(sessionId);
-      this.sessions.delete(sessionId);
-      this.agentSessions.delete(agentName);
-      if (this.activeSessionId === sessionId) { this.activeSessionId = null; }
-      this.emit('session-load-end', sessionId, agentName, /*ok=*/false);
-      this.emit('active-session-changed', null);
-
-      // If the agent says the session is gone, mark it stale but keep the
-      // record for explicit user cleanup.
-      const msg = String(e?.message || '');
-      if (/not found|no such|unknown session/i.test(msg)) {
-        this.historyStore?.markStatus(agentName, sessionId, 'missing');
-      }
-      throw e;
-    }
-
-    this.loadingSessionIds.delete(sessionId);
-    if (sharedDiscussionContext) {
-      this.pendingSharedDiscussionContext.set(sessionId, sharedDiscussionContext.text);
-      this.linkContextFamily(sharedDiscussionContext, agentName, sessionId, cwd);
-      this.emit('pending-shared-context-changed', sessionId);
-    }
-    this.emit('session-load-end', sessionId, agentName, /*ok=*/true);
-
-    // Touch history-store activity timestamp.
-    this.historyStore?.touch(agentName, sessionId);
-    return placeholder;
-  }
-
-  /**
-   * Resume an existing session without replaying history (light path).
-   */
-  async resumeSession(agentName: string, sessionId: string, options: OpenSessionOptions = {}): Promise<SessionInfo> {
-    // Capture before disconnecting or replacing the active session; after that
-    // point the source session may no longer be available in the in-memory map.
-    const sharedDiscussionContext = options.shareCurrentContext
-      ? this.buildSharedDiscussionContextForTarget(agentName, sessionId)
-      : null;
-
-    const currentAgent = this.getActiveAgentName();
-    if (currentAgent && currentAgent !== agentName) {
-      await this.disconnectAgent(currentAgent);
-    }
-
-    const conn = await this.ensureConnected(agentName);
-    const caps = this.capabilities.get(agentName);
-    if (!caps?.resume) {
-      throw new Error(`Agent "${agentName}" does not support session/resume.`);
-    }
-
-    // If the same agent has a different active session, clear it.
-    const previouslyActive = this.activeSessionId;
-    if (previouslyActive && previouslyActive !== sessionId) {
-      const prevSession = this.sessions.get(previouslyActive);
-      if (prevSession) {
-        this.agentSessions.delete(prevSession.agentName);
-      }
-      this.sessions.delete(previouslyActive);
-      this.activeSessionId = null;
-    }
-
-    const cwd = this.getWorkspaceCwd();
-    const agentId = this.findAgentIdForConnection(conn);
-    if (!agentId) {
-      throw new Error(`Unable to locate agent process for "${agentName}".`);
-    }
-
-    let response: any;
-    try {
-      response = await conn.connection.resumeSession({
-        sessionId,
-        cwd,
-        mcpServers: [],
-      });
-    } catch (e: any) {
-      const msg = String(e?.message || '');
-      if (/not found|no such|unknown session/i.test(msg)) {
-        this.historyStore?.markStatus(agentName, sessionId, 'missing');
-      }
-      throw e;
-    }
-
-    const sessionInfo: SessionInfo = {
-      sessionId,
-      agentId,
-      agentName,
-      agentDisplayName: conn.initResponse.agentInfo?.title
-        || conn.initResponse.agentInfo?.name
-        || agentName,
-      cwd,
-      createdAt: new Date().toISOString(),
-      initResponse: conn.initResponse,
-      modes: response?.modes ?? null,
-      models: response?.models ?? null,
-      configOptions: response?.configOptions ?? null,
-      availableCommands: [],
-    };
-    this.sessions.set(sessionId, sessionInfo);
-    if (sharedDiscussionContext) {
-      this.pendingSharedDiscussionContext.set(sessionId, sharedDiscussionContext.text);
-      this.linkContextFamily(sharedDiscussionContext, agentName, sessionId, cwd);
-      this.emit('pending-shared-context-changed', sessionId);
-    }
-    this.drainPending(sessionInfo);
-    this.agentSessions.set(agentName, sessionId);
-    this.activeSessionId = sessionId;
-    this.emit('agent-connected', agentName);
-    this.emit('active-session-changed', sessionId);
-
-    this.historyStore?.touch(agentName, sessionId);
-    return sessionInfo;
-  }
-
-  /** Return true if a session is currently mid-replay via `session/load`. */
-  isLoading(sessionId: string): boolean {
-    return this.loadingSessionIds.has(sessionId);
-  }
-
-  hasPendingSharedDiscussionContext(sessionId: string): boolean {
-    return this.pendingSharedDiscussionContext.has(sessionId);
-  }
-
-  /** Helper: reverse-lookup agentId for a known ConnectionInfo. */
-  private findAgentIdForConnection(conn: ConnectionInfo): string | undefined {
-    for (const session of this.sessions.values()) {
-      const c = this.connectionManager.getConnection(session.agentId);
-      if (c === conn) { return session.agentId; }
-    }
-    // Connection without a session — search agentManager's spawned set.
-    for (const instance of this.agentManager.getRunningAgents()) {
-      if (this.connectionManager.getConnection(instance.id) === conn) {
-        return instance.id;
-      }
-    }
-    return undefined;
-  }
-
-
-  // --- Getters ---
-
-  getSession(sessionId: string): SessionInfo | undefined {
-    return this.sessions.get(sessionId);
-  }
-
-  getActiveSession(): SessionInfo | undefined {
-    if (!this.activeSessionId) { return undefined; }
-    return this.sessions.get(this.activeSessionId);
-  }
-
-  getActiveSessionId(): string | null {
-    return this.activeSessionId;
-  }
-
-  /** Get the agent name for the current active session. */
-  getActiveAgentName(): string | null {
-    const session = this.getActiveSession();
-    return session?.agentName ?? null;
-  }
-
-  /** Check if a specific agent is currently connected. */
-  isAgentConnected(agentName: string): boolean {
-    return this.agentSessions.has(agentName);
-  }
-
-  /** Get all connected agent names. */
-  getConnectedAgentNames(): string[] {
-    return Array.from(this.agentSessions.keys());
-  }
-
-  getConnectionForSession(sessionId: string): ConnectionInfo | undefined {
-    const session = this.sessions.get(sessionId);
-    if (!session) { return undefined; }
-    return this.connectionManager.getConnection(session.agentId);
-  }
-
-  isPipelineSession(sessionId: string | null | undefined): boolean {
-    if (!sessionId) { return false; }
-    const session = this.sessions.get(sessionId);
-    return !!session && (
-      session.agentId.startsWith('pipeline_agent_')
-      || isPipelineVirtualAgentName(session.agentName)
-    );
-  }
-
-  private recordAgentConnectionFailure(agentName: string, error: unknown): void {
-    const classified = classifyAgentError(error);
-    if (classified.kind === 'missing-pipeline-agent') {
-      this.historyStore?.markAgentStatus(agentName, 'agentRemoved');
-    } else if (classified.kind !== 'auth-cancelled') {
-      this.historyStore?.markAgentStatus(agentName, 'agentUnavailable');
-    }
-    this.emit('agent-error', agentName, error);
-  }
-
   // --- Cleanup ---
 
   dispose(): void {
     this.agentManager.killAll();
     this.connectionManager.dispose();
-    this.sessions.clear();
-    this.agentSessions.clear();
-  }
-}
-
-function fingerprintAgentConfig(config: unknown): string | undefined {
-  try {
-    return JSON.stringify(config);
-  } catch {
-    return undefined;
+    this.sessionState.dispose();
+    this.updateBuffer.clear();
+    this.discussionContextHandler.dispose();
   }
 }

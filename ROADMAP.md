@@ -61,3 +61,8 @@ Cette roadmap regroupe les idées d'évolution et les possibilités pour ACP Cli
 2. Documenter les nouveaux workflows, en particulier le pipeline A2A et les options `acp.pipeline.*`.
 3. Améliorer l'ergonomie du chat avant d'ajouter des scénarios multi-agents plus avancés.
 4. Étendre les tests automatisés sur les comportements qui dépendent des capacités variables des agents.
+
+
+1 trouver un moyen de partager les skill 
+2 click stop dois tout stopper et ne pas laisser les agents continuer à répondre
+3 bug sur la suppression d'un fichier ajouté en @ dans le text prompt

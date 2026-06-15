@@ -4,7 +4,7 @@ title: Test Gap Radar
 
 primitives:
   scope_testing:
-    agent: Codex CLI
+    agent: Vibe
     output: markdown
     sideEffects: none
     prompt: |
@@ -14,7 +14,7 @@ primitives:
       {{userPrompt}}
 
   inspect_unit:
-    agent: Codex CLI
+    agent: Vibe
     output: markdown
     sideEffects: none
     prompt: |
@@ -24,7 +24,7 @@ primitives:
       {{steps.scope.output}}
 
   inspect_integration:
-    agent: Codex CLI
+    agent: Vibe
     output: markdown
     sideEffects: none
     prompt: |
@@ -34,7 +34,7 @@ primitives:
       {{steps.scope.output}}
 
   inspect_manual:
-    agent: Codex CLI
+    agent: Vibe
     output: markdown
     sideEffects: none
     prompt: |
@@ -44,7 +44,7 @@ primitives:
       {{steps.scope.output}}
 
   testing_strategy:
-    agent: Codex CLI
+    agent: Vibe
     output: markdown
     sideEffects: none
     prompt: |

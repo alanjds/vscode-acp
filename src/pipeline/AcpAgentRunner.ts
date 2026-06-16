@@ -6,12 +6,15 @@ import { AgentManager } from '../core/AgentManager';
 import { ConnectionInfo, ConnectionManager } from '../core/ConnectionManager';
 import { SessionUpdateHandler } from '../handlers/SessionUpdateHandler';
 import { getAgentConfig } from '../config/AgentConfig';
+import type { SandboxContext } from '../sandbox/SandboxContext';
+import { logNetworkPolicyNotice } from '../sandbox/NetworkPolicy';
 import { log, logError } from '../utils/Logger';
 import { RunAbortedError } from './RunAbortedError';
 
 export interface AcpAgentRunOptions {
   onSessionUpdate?: (update: SessionNotification) => void;
   signal?: AbortSignal;
+  sandbox?: SandboxContext;
 }
 
 export class AcpAgentRunner {
@@ -28,7 +31,11 @@ export class AcpAgentRunner {
     const sessionUpdateHandler = new SessionUpdateHandler();
     const agentManager = new AgentManager();
     const connectionManager = new ConnectionManager(sessionUpdateHandler);
-    const cwd = this.workspaceCwd();
+    const cwd = options.sandbox?.root ?? this.workspaceCwd();
+    if (options.sandbox) {
+      logNetworkPolicyNotice();
+      log(`Pipeline ACP runner: sandbox mode (${options.sandbox.id}) cwd=${cwd}`);
+    }
     let sessionId: string | null = null;
     let collectedText = '';
     let connInfo: ConnectionInfo | null = null;

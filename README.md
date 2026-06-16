@@ -21,6 +21,7 @@ A [Visual Studio Code extension](https://marketplace.visualstudio.com/items?item
 - **Debug Snapshots**: In-memory ACP/client traces can be viewed, refreshed, copied, or exported from the debug snapshot panel.
 - **Interactive Chat**: Built-in chat panel with Markdown rendering, inline tool call display, and collapsible tool sections
 - **LangGraph Pipelines**: Optional virtual agents can orchestrate ACP agents from workspace YAML workflows with reviewable approvals.
+- **Agent Sandbox**: Optional git worktree isolation for workspace-changing pipeline steps, with diff review and promotion gate before applying changes to the main workspace.
 - **Thinking Display**: See agent reasoning in a collapsible block with streaming animation and elapsed time
 - **Slash Commands**: Autocomplete popup for agent-provided commands with keyboard navigation
 - **File Mentions**: Type `@` in the composer to search workspace files and send precise relative-path references to agents.
@@ -80,8 +81,24 @@ You can add custom agent configurations in settings.
 | `acp.defaultWorkingDirectory` | `""` | Default working directory for agent sessions. Empty uses current workspace. |
 | `acp.logTraffic` | `true` | Log all ACP protocol traffic to the ACP Traffic output channel. |
 | `acp.pipeline.enabled` | `true` | Enable virtual pipeline agents loaded from `.acp/pipelines/*.yaml`. |
+| `acp.sandbox.enabled` | `false` | Run workspace-changing pipeline steps in isolated git worktrees with promotion gate. |
+| `acp.sandbox.directory` | `.acp/sandboxes` | Relative path where sandbox worktrees are created. |
+| `acp.sandbox.promotion.lintCommand` | `""` | Optional lint command run in the sandbox before promotion. |
+| `acp.sandbox.promotion.testCommand` | `""` | Optional test command run in the sandbox before promotion. |
+| `acp.sandbox.promotion.requireChecksPass` | `false` | Block apply when configured checks fail (unless overridden). |
+| `acp.sandbox.network.allowlist` | `[]` | Optional host allowlist (application-level policy in v1). |
 
-## Pipeline Workflow
+## Agent Sandbox
+
+When `acp.sandbox.enabled` is `true`, pipeline primitives with `sideEffects: workspace` run inside a disposable **git worktree** under `.acp/sandboxes/`. Agent file and terminal access is scoped to that worktree. When the step completes:
+
+1. The extension shows a promotion summary (files changed, optional lint/test results).
+2. You can **View Diff**, **Apply** changes to the main workspace, or **Reject** and discard the worktree.
+
+One-shot sandbox runs are also available via **ACP: Run in Sandbox** (`acp.runInSandbox`).
+
+See [docs/adr/0011-agent-sandbox-worktree.md](docs/adr/0011-agent-sandbox-worktree.md) for design details and limitations.
+
 
 When `acp.pipeline.enabled` is true, the Agents view includes one virtual agent for each valid workspace pipeline in `.acp/pipelines/*.yaml`.
 
@@ -115,6 +132,10 @@ Main commands are available from the Command Palette, view title buttons, or con
 | `ACP: Set Agent Model` | Change the agent's model |
 | `ACP: Enable Editor Context Link` | Enable automatic editor context injection from the chat view. |
 | `ACP: Disable Editor Context Link` | Disable automatic editor context injection. |
+| `ACP: Run in Sandbox` | Run a one-shot agent prompt inside an isolated git worktree. |
+| `ACP: Promote Sandbox Changes` | Open the promotion gate for the active sandbox. |
+| `ACP: Discard Sandbox` | Discard the active sandbox worktree. |
+| `ACP: Cleanup Stale Sandboxes` | Remove sandbox worktrees older than the configured TTL. |
 | `ACP: Refresh Sessions` | Re-fetch the session list for an agent (also on the agent's right-click menu) |
 | `ACP: Show Log` | Open the ACP Client log output channel |
 | `ACP: Show Protocol Traffic` | Open the ACP Traffic output channel |

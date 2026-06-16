@@ -10,9 +10,12 @@ import {
   type PipelineDefinition,
   type PipelinePrimitiveDefinition,
 } from '../config/PipelineCatalog';
-import { AcpAgentRunner } from './AcpAgentRunner';
 import { assertSingleProposedPlan } from './ProposedPlan';
 import { isRunAbortedError } from './RunAbortedError';
+import { isSandboxEnabled } from '../sandbox/SandboxConfig';
+import { runSandboxedAcpAgent } from '../sandbox/sandboxedAgentRun';
+import type { SandboxPromotionPanel } from '../sandbox/SandboxPromotionPanel';
+import type { SandboxService } from '../sandbox/SandboxService';
 import {
   type AcpRunCallback,
   type CompiledPipelineGraph,
@@ -71,6 +74,9 @@ export interface PipelineServiceDependencies {
   getPipelineDefinitionForAgent?: (agentName: string) => PipelineDefinition | null;
   getAgentConfigs?: () => Record<string, unknown>;
   runAcpAgent?: AcpRunCallback;
+  sandboxService?: SandboxService;
+  sandboxPromotionPanel?: SandboxPromotionPanel;
+  isSandboxEnabled?: () => boolean;
 }
 
 export class PipelineService extends EventEmitter {
@@ -266,20 +272,39 @@ export class PipelineService extends EventEmitter {
       throw new Error('Pipeline cancelled.');
     }
 
+    const primitive = this.findPrimitiveForExecutorKind(state.pipeline, kind);
+
     if (this.dependencies.runAcpAgent) {
-      return this.dependencies.runAcpAgent(
-        kind,
+      return runSandboxedAcpAgent({
+        primitive,
+        workspaceCwd: this.workspaceCwd(),
+        agentName: primitive.agent,
         promptText,
+        signal: state.abortController.signal,
         onSessionUpdate,
-        state.abortController.signal,
-      );
+        sandboxService: this.dependencies.sandboxService,
+        sandboxPromotionPanel: this.dependencies.sandboxPromotionPanel,
+        isSandboxEnabled: this.dependencies.isSandboxEnabled ?? isSandboxEnabled,
+        runRunner: async (_cwd, sandbox) => this.dependencies.runAcpAgent!(
+          kind,
+          promptText,
+          onSessionUpdate,
+          state.abortController.signal,
+          sandbox,
+        ),
+      });
     }
 
-    const primitive = this.findPrimitiveForExecutorKind(state.pipeline, kind);
-    const runner = new AcpAgentRunner(this.workspaceCwd);
-    return runner.run(primitive.agent, promptText, {
-      onSessionUpdate,
+    return runSandboxedAcpAgent({
+      primitive,
+      workspaceCwd: this.workspaceCwd(),
+      agentName: primitive.agent,
+      promptText,
       signal: state.abortController.signal,
+      onSessionUpdate,
+      sandboxService: this.dependencies.sandboxService,
+      sandboxPromotionPanel: this.dependencies.sandboxPromotionPanel,
+      isSandboxEnabled: this.dependencies.isSandboxEnabled ?? isSandboxEnabled,
     });
   }
 

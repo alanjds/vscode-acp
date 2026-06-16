@@ -14,11 +14,20 @@ import { DebugWebviewPanel } from './ui/DebugWebviewPanel';
 import { captureEditorContext, captureOpenEditorPaths, initializeOpenEditorsTracker } from './ui/EditorContext';
 import { PipelineService } from './pipeline/PipelineService';
 import {
+  PromotionGate,
+  SandboxApplyService,
+  SandboxPromotionPanel,
+  SandboxRegistry,
+  SandboxService,
+} from './sandbox';
+import {
   EDITOR_CONTEXT_LINK_STATE_KEY,
   PIPELINE_ENABLED_CONTEXT_KEY,
+  SANDBOX_ENABLED_CONTEXT_KEY,
   registerCommands,
 } from './commands/RegisterCommands';
 import { isPipelineEnabled } from './config/PipelineConfig';
+import { isSandboxEnabled } from './sandbox/SandboxConfig';
 import { log, disposeChannels } from './utils/Logger';
 import { initTelemetry, sendEvent } from './utils/TelemetryManager';
 import { version as extensionVersion } from '../package.json';
@@ -44,7 +53,23 @@ export function activate(context: vscode.ExtensionContext): void {
     connectionManager,
   );
   const workspaceIdentity = () => resolveWorkspaceIdentity();
-  const pipelineService = new PipelineService(() => workspaceIdentity().cwd);
+  const sandboxRegistry = new SandboxRegistry();
+  const sandboxService = new SandboxService(sandboxRegistry);
+  const promotionGate = new PromotionGate();
+  const sandboxApplyService = new SandboxApplyService();
+  const sandboxPromotionPanel = new SandboxPromotionPanel(
+    sandboxService,
+    promotionGate,
+    sandboxApplyService,
+  );
+  const pipelineService = new PipelineService(
+    () => workspaceIdentity().cwd,
+    {
+      sandboxService,
+      sandboxPromotionPanel,
+      isSandboxEnabled: () => vscode.workspace.getConfiguration('acp.sandbox').get<boolean>('enabled', false),
+    },
+  );
   sessionManager.setPipelineService(pipelineService);
 
   const inlineChatController = new InlineChatController(
@@ -91,6 +116,7 @@ export function activate(context: vscode.ExtensionContext): void {
   chatWebviewProvider.setEditorContextLinked(initialEditorContextLinked);
   void vscode.commands.executeCommand('setContext', EDITOR_CONTEXT_LINK_STATE_KEY, initialEditorContextLinked);
   void vscode.commands.executeCommand('setContext', PIPELINE_ENABLED_CONTEXT_KEY, isPipelineEnabled());
+  void vscode.commands.executeCommand('setContext', SANDBOX_ENABLED_CONTEXT_KEY, isSandboxEnabled());
   const chatViewRegistration = vscode.window.registerWebviewViewProvider(
     ChatWebviewProvider.viewType,
     chatWebviewProvider,
@@ -114,8 +140,10 @@ export function activate(context: vscode.ExtensionContext): void {
       event.affectsConfiguration('acp.agents')
       || event.affectsConfiguration('acp.pipeline.enabled')
       || event.affectsConfiguration('acp.defaultWorkingDirectory')
+      || event.affectsConfiguration('acp.sandbox.enabled')
     ) {
       void vscode.commands.executeCommand('setContext', PIPELINE_ENABLED_CONTEXT_KEY, isPipelineEnabled());
+      void vscode.commands.executeCommand('setContext', SANDBOX_ENABLED_CONTEXT_KEY, isSandboxEnabled());
       refreshPipelineAgents();
     }
   });
@@ -184,6 +212,8 @@ export function activate(context: vscode.ExtensionContext): void {
     sessionTreeProvider,
     chatWebviewProvider,
     historyStore,
+    sandboxService,
+    sandboxPromotionPanel,
   });
   const openDebugSnapshotCmd = vscode.commands.registerCommand('acp.openDebugSnapshot', async () => {
     sendEvent('command/openDebugSnapshot');

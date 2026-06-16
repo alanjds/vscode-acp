@@ -1,6 +1,15 @@
-import { useState, useMemo, useCallback, useRef } from 'react';
+import {
+  useState,
+  useMemo,
+  useCallback,
+  useRef,
+  type Dispatch,
+  type SetStateAction,
+  type MutableRefObject,
+} from 'react';
 import type { FileSearchResult, SelectedFileMention } from '../chatTypes';
 import {
+  createFileMentionToken,
   getActiveFileMention,
   replaceActiveFileMention,
   type ActiveFileMention,
@@ -20,12 +29,15 @@ interface UseFileMentionsReturn {
   suppressedFileMention: string | null;
   selectedFileMentions: SelectedFileMention[];
   isFilePopupOpen: boolean;
-  fileSearchRequestIdRef: React.MutableRefObject<number>;
+  fileSearchRequestIdRef: MutableRefObject<number>;
   setFileResults: (results: FileSearchResult[]) => void;
   setFileSelectedIdx: (index: number) => void;
   setSuppressedFileMention: (key: string | null) => void;
-  setSelectedFileMentions: (mentions: SelectedFileMention[]) => void;
-  selectFileResult: (result: FileSearchResult | undefined, mention?: ActiveFileMention | null) => void;
+  setSelectedFileMentions: Dispatch<SetStateAction<SelectedFileMention[]>>;
+  selectFileResult: (
+    result: FileSearchResult | undefined,
+    mention?: ActiveFileMention | null,
+  ) => { text: string; cursorPosition: number } | null;
 }
 
 /**
@@ -69,22 +81,20 @@ export function useFileMentions({ promptText, cursorPosition }: UseFileMentionsP
   const selectFileResult = useCallback((
     result: FileSearchResult | undefined,
     mention: ActiveFileMention | null = null,
-  ): void => {
+  ): { text: string; cursorPosition: number } | null => {
     const activeMention = mention || activeFileMention;
     if (!result || !activeMention) {
-      return;
+      return null;
     }
 
-    // Create Markdown link format for the file mention
     const replacement = replaceActiveFileMention(
       promptText,
       activeMention,
       result.name,
-      result.path
+      result.path,
     );
-    
-    // The token now uses Markdown format: [@filename](file://path)
-    const token = `[@${result.name}](file://${result.path})`;
+
+    const token = createFileMentionToken(result.name, result.path);
     const nextSuppressedKey = `${activeMention.start}:${activeMention.start + token.length}:${result.name}:${activeMention.start + token.length}`;
     fileSearchRequestIdRef.current += 1;
     setSuppressedFileMention(nextSuppressedKey);
@@ -96,7 +106,8 @@ export function useFileMentions({ promptText, cursorPosition }: UseFileMentionsP
       ...prevMentions.filter((candidate) => candidate.token !== token),
       { ...result, token },
     ]);
-    // Note: The actual text update is handled by the caller
+
+    return replacement;
   }, [activeFileMention, promptText]);
 
   return {

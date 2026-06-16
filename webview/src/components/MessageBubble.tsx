@@ -18,7 +18,7 @@ function MessageBubbleComponent({ item, onMentionClick }: MessageBubbleProps): J
 
   if (item.role === 'assistant') {
     return (
-      <div className={`message assistant md-rendered`}>
+      <div className="message assistant md-rendered">
         <MarkdownDisplay onMentionClick={onMentionClick}>
           {item.text}
         </MarkdownDisplay>
@@ -28,7 +28,7 @@ function MessageBubbleComponent({ item, onMentionClick }: MessageBubbleProps): J
 
   if (item.role === 'error') {
     return (
-      <div className="message error">
+      <div className="message error md-rendered">
         <MarkdownDisplay>{item.text}</MarkdownDisplay>
       </div>
     );
@@ -36,7 +36,7 @@ function MessageBubbleComponent({ item, onMentionClick }: MessageBubbleProps): J
 
   if (item.role === 'info') {
     return (
-      <div className="message info">
+      <div className="message info md-rendered">
         <MarkdownDisplay>{item.text}</MarkdownDisplay>
       </div>
     );
@@ -44,14 +44,14 @@ function MessageBubbleComponent({ item, onMentionClick }: MessageBubbleProps): J
 
   if (!parsedUserMessage) {
     return (
-      <div className="message user">
+      <div className="message user md-rendered">
         <MarkdownDisplay>{item.text}</MarkdownDisplay>
       </div>
     );
   }
 
   return (
-    <div className="message user">
+    <div className="message user md-rendered">
       <span className="file-badge">📄 {parsedUserMessage.badgeText}</span>
       {parsedUserMessage.body ? (
         <div className="message-text">

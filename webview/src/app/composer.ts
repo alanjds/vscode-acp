@@ -1,8 +1,7 @@
-import type { SlashCommand } from '../chatTypes';
-import type { SelectedFileMention } from '../chatTypes';
+import type { SlashCommand, SelectedFileMention } from '../chatTypes';
 
-// Regex to match Markdown file mentions: [@filename](file://path)
-const MARKDOWN_FILE_MENTION_REGEX = /\[@([^\]]+)\]\(file:\/\/([^)]+)\)/g;
+// Matches Markdown file mentions in the canonical form: [@filename](file://encoded/path)
+const MARKDOWN_FILE_MENTION_REGEX = /\[@((?:\\.|[^\]\\])*)\]\(file:\/\/([^)]+)\)/g;
 
 export type ParsedUserMessage = {
   badgeText: string;
@@ -22,6 +21,39 @@ export type FileMentionMatch = {
   start: number;
   end: number;
 };
+
+function escapeMarkdownLabel(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/\]/g, '\\]');
+}
+
+function unescapeMarkdownLabel(value: string): string {
+  return value.replace(/\\([\]\\])/g, '$1');
+}
+
+export function encodeFileMentionPath(filePath: string): string {
+  return filePath
+    .replace(/\\/g, '/')
+    .split('/')
+    .map(segment => encodeURIComponent(segment))
+    .join('/');
+}
+
+export function decodeFileMentionPath(encodedPath: string): string {
+  return encodedPath
+    .split('/')
+    .map(segment => {
+      try {
+        return decodeURIComponent(segment);
+      } catch {
+        return segment;
+      }
+    })
+    .join('/');
+}
+
+export function createFileMentionToken(displayText: string, filePath: string): string {
+  return `[@${escapeMarkdownLabel(displayText)}](file://${encodeFileMentionPath(filePath)})`;
+}
 
 export function parseUserMessage(text: string): ParsedUserMessage | null {
   const newlineIndex = text.indexOf('\n');
@@ -87,13 +119,14 @@ export function getActiveFileMention(text: string, cursorPosition: number): Acti
 
 export function findAllMarkdownFileMentions(text: string): FileMentionMatch[] {
   const mentions: FileMentionMatch[] = [];
-  let match;
+  let match: RegExpExecArray | null;
+  MARKDOWN_FILE_MENTION_REGEX.lastIndex = 0;
   
   while ((match = MARKDOWN_FILE_MENTION_REGEX.exec(text)) !== null) {
     mentions.push({
       fullMatch: match[0],
-      displayName: match[1],
-      filePath: match[2],
+      displayName: unescapeMarkdownLabel(match[1]),
+      filePath: decodeFileMentionPath(match[2]),
       start: match.index,
       end: match.index + match[0].length,
     });
@@ -109,10 +142,7 @@ export function replaceActiveFileMention(
   filePath?: string,
 ): { text: string; cursorPosition: number } {
   const suffix = text[mention.end] && !/\s/.test(text[mention.end]) ? '' : ' ';
-  
-  // Create Markdown link format for file mentions
-  const filePathForLink = filePath || displayText;
-  const replacement = `[@${displayText}](file://${filePathForLink})${suffix}`;
+  const replacement = `${createFileMentionToken(displayText, filePath || displayText)}${suffix}`;
   
   const nextText = `${text.slice(0, mention.start)}${replacement}${text.slice(mention.end)}`;
   return {
@@ -130,9 +160,9 @@ export function expandFileMentionsForPrompt(
     // Handle both old token format and new markdown format
     if (mention.token.startsWith('[@') && mention.token.includes('](file://')) {
       // Already in markdown format, extract the path
-      const pathMatch = mention.token.match(/\[@([^\]]+)\]\(file:\/\/([^)]+)\)/);
+      const [pathMatch] = findAllMarkdownFileMentions(mention.token);
       if (pathMatch) {
-        return nextText.split(mention.token).join(`@${pathMatch[2]}`);
+        return nextText.split(mention.token).join(`@${pathMatch.filePath}`);
       }
     }
     // Old format: @filename
@@ -140,40 +170,12 @@ export function expandFileMentionsForPrompt(
   }, text);
   
   // Also handle any markdown mentions that weren't in selectedMentions
-  result = result.replace(MARKDOWN_FILE_MENTION_REGEX, (fullMatch, displayName, filePath) => {
-    return `@${filePath}`;
+  MARKDOWN_FILE_MENTION_REGEX.lastIndex = 0;
+  result = result.replace(MARKDOWN_FILE_MENTION_REGEX, (_fullMatch, _displayName, filePath) => {
+    return `@${decodeFileMentionPath(filePath)}`;
   });
   
   return result;
-}
-
-/**
- * Extract file path from a markdown file mention token
- */
-export function extractFilePathFromToken(token: string): string | null {
-  const match = token.match(/\[@([^\]]+)\]\(file:\/\/([^)]+)\)/);
-  return match ? match[2] : null;
-}
-
-/**
- * Extract display name from a markdown file mention token
- */
-export function extractDisplayNameFromToken(token: string): string | null {
-  const match = token.match(/\[@([^\]]+)\]\(file:\/\/([^)]+)\)/);
-  return match ? match[1] : null;
-}
-
-/**
- * Check if text contains any markdown file mentions
- */
-export function hasMarkdownFileMentions(text: string): boolean {
-  return MARKDOWN_FILE_MENTION_REGEX.test(text);
-}
-
-export function getBasePlaceholder(commands: SlashCommand[]): string {
-  return commands.length > 0
-    ? 'Type a message, @ for files, or / for commands...'
-    : 'Type a message or @ for files...';
 }
 
 export function getSlashFilteredCommands(promptText: string, commands: SlashCommand[]): SlashCommand[] {

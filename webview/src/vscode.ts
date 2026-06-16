@@ -39,7 +39,7 @@ export type HostToWebviewMessage =
 
 export type WebviewToHostMessage =
   | { type: 'ready' }
-  | { type: 'sendPrompt'; text: string }
+  | { type: 'sendPrompt'; text: string; agentText?: string }
   | { type: 'cancelTurn' }
   | { type: 'setMode'; modeId: string }
   | { type: 'setModel'; modelId: string }

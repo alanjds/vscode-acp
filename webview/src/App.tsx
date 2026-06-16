@@ -6,7 +6,6 @@ import {
   useRef,
   useState,
   type JSX,
-  type FormEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
 } from 'react';
@@ -19,22 +18,16 @@ import type {
   PipelinePhase,
   PipelinePlanStatus,
   PersistedWebviewState,
-  SelectedFileMention,
   SessionConfigOption,
   SlashCommand,
 } from './chatTypes';
 import {
   expandFileMentionsForPrompt,
-  getActiveFileMention,
-  getBasePlaceholder,
   getSlashFilteredCommands,
-  replaceActiveFileMention,
-  type ActiveFileMention,
 } from './app/composer';
-import { buildHistoryBlocks, getPromptEndMarkdownItem, getRestoreMarkdownItems, getToolCollapseState } from './app/history';
+import { buildHistoryBlocks, getRestoreMarkdownItems, getToolCollapseState } from './app/history';
 import {
   normalizeConfigOptions,
-  normalizeMarkdownRenderedItems,
   normalizeModelsState,
   normalizeModesState,
   normalizeSessionSnapshot,
@@ -43,14 +36,14 @@ import {
 import { mapSessionUpdateToActions } from './app/sessionUpdates';
 import { appReducer, createInitialState } from './app/state';
 import { MessageBubble } from './components/MessageBubble';
-import { MarkdownEditor } from './components/MarkdownEditor';
-import { MarkdownDisplay } from './components/MarkdownDisplay';
+import {
+  MarkdownEditor,
+  setMarkdownEditableCursorPosition,
+} from './components/MarkdownEditor';
 import { PlanBlock } from './components/PlanBlock';
 import { PipelinePlanBlock } from './components/PipelinePlanBlock';
 import { TurnBlock } from './components/TurnBlock';
 import { getState, onMessage, postMessage, setState } from './vscode';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import { useFileMentions } from './app/useFileMentions';
 import { useSessionDisplay } from './app/useSessionDisplay';
 
@@ -92,7 +85,6 @@ export function App(): JSX.Element {
   } = useFileMentions({ promptText: state.promptText, cursorPosition });
 
   const {
-    basePlaceholder,
     slashFilteredCommands,
     currentMode,
     currentModel,
@@ -346,7 +338,7 @@ export function App(): JSX.Element {
       if (!input || document.activeElement !== input) {
         return;
       }
-      setEditableCursorPosition(input, nextCursorPosition);
+      setMarkdownEditableCursorPosition(input, nextCursorPosition);
     });
   }, [state.promptText, cursorPosition]);
 
@@ -378,44 +370,15 @@ export function App(): JSX.Element {
     });
   }, []);
 
-  // Update cursor from input
-  const updateCursorFromInput = useCallback((input: HTMLDivElement): void => {
-    const newPos = getEditableCursorPosition(input);
-    pendingCursorPositionRef.current = newPos;
-    setCursorPosition(newPos);
-  }, []);
-
-  // Handle prompt input
-  const handlePromptInput = useCallback((event: FormEvent<HTMLDivElement>): void => {
-    const input = event.currentTarget;
-    const nextPromptText = getEditableText(input);
-    const nextCursorPosition = getEditableCursorPosition(input);
-
-    pendingCursorPositionRef.current = nextCursorPosition;
-    dispatch({ type: 'setPromptText', text: nextPromptText });
-    setCursorPosition(nextCursorPosition);
-
-    if (state.slashPopupSuppressedFor && state.slashPopupSuppressedFor !== nextPromptText) {
-      dispatch({ type: 'suppressSlashPopup', promptText: null });
-    }
-    // Filter mentions based on new text
-    const filteredMentions = selectedFileMentions.filter((mention: SelectedFileMention) => 
-      nextPromptText.includes(mention.token)
-    );
-    if (filteredMentions.length !== selectedFileMentions.length) {
-      setSelectedFileMentions(filteredMentions);
-    }
-  }, [state.slashPopupSuppressedFor, selectedFileMentions]);
-
   // Handle file select - wrapper that updates prompt text
   const handleFileSelect = useCallback((result: FileSearchResult | undefined): void => {
-    selectFileResult(result);
-    if (result && activeFileMention) {
-      const next = replaceActiveFileMention(state.promptText, activeFileMention, result.name);
+    const next = selectFileResult(result);
+    if (next) {
       pendingCursorPositionRef.current = next.cursorPosition;
       dispatch({ type: 'setPromptText', text: next.text });
+      setCursorPosition(next.cursorPosition);
     }
-  }, [activeFileMention, selectFileResult, state.promptText]);
+  }, [selectFileResult]);
 
   // Handle send
   const handleSend = useCallback((explicitText?: string): void => {
@@ -429,7 +392,11 @@ export function App(): JSX.Element {
     dispatch({ type: 'setPlaceholderOverride', placeholder: null });
     dispatch({ type: 'suppressSlashPopup', promptText: null });
     setSelectedFileMentions([]);
-    postMessage({ type: 'sendPrompt', text: expandFileMentionsForPrompt(text, selectedFileMentions) });
+    postMessage({
+      type: 'sendPrompt',
+      text,
+      agentText: expandFileMentionsForPrompt(text, selectedFileMentions),
+    });
   }, [selectedFileMentions, state.isProcessing, state.promptText]);
 
   // Handle cancel
@@ -937,9 +904,8 @@ export function App(): JSX.Element {
           <MarkdownEditor
             ref={promptInputRef}
             value={state.promptText}
-            onChange={(text) => {
+            onChange={(text, nextCursorPosition = text.length) => {
               dispatch({ type: 'setPromptText', text });
-              const nextCursorPosition = text.length;
               pendingCursorPositionRef.current = nextCursorPosition;
               setCursorPosition(nextCursorPosition);
 
@@ -983,56 +949,6 @@ export function App(): JSX.Element {
       </div>
     </>
   );
-}
-
-function getEditableText(input: HTMLDivElement): string {
-  return input.textContent ?? '';
-}
-
-function getEditableCursorPosition(input: HTMLDivElement): number {
-  const selection = window.getSelection();
-  if (!selection || selection.rangeCount === 0) {
-    return getEditableText(input).length;
-  }
-
-  const range = selection.getRangeAt(0);
-  if (!input.contains(range.endContainer)) {
-    return getEditableText(input).length;
-  }
-
-  const preCaretRange = range.cloneRange();
-  preCaretRange.selectNodeContents(input);
-  preCaretRange.setEnd(range.endContainer, range.endOffset);
-  return preCaretRange.toString().length;
-}
-
-function setEditableCursorPosition(input: HTMLDivElement, cursorPosition: number): void {
-  const targetPosition = Math.max(0, Math.min(cursorPosition, getEditableText(input).length));
-  const walker = document.createTreeWalker(input, NodeFilter.SHOW_TEXT);
-  let remaining = targetPosition;
-  let node = walker.nextNode();
-
-  while (node) {
-    const textLength = node.textContent?.length ?? 0;
-    if (remaining <= textLength) {
-      const range = document.createRange();
-      const selection = window.getSelection();
-      range.setStart(node, remaining);
-      range.collapse(true);
-      selection?.removeAllRanges();
-      selection?.addRange(range);
-      return;
-    }
-    remaining -= textLength;
-    node = walker.nextNode();
-  }
-
-  const range = document.createRange();
-  const selection = window.getSelection();
-  range.selectNodeContents(input);
-  range.collapse(false);
-  selection?.removeAllRanges();
-  selection?.addRange(range);
 }
 
 // Local normalization functions (not in normalizers.ts)

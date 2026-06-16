@@ -1,5 +1,7 @@
 import type { JSX } from 'react';
 
+import { MarkdownDisplay } from './MarkdownDisplay';
+
 export type PlanningDraftBlockProps = {
   text: string;
 };
@@ -12,7 +14,9 @@ export function PlanningDraftBlock({ text }: PlanningDraftBlockProps): JSX.Eleme
   return (
     <div className="planning-draft">
       <div className="planning-draft-title">Planning draft</div>
-      <pre className="planning-draft-content">{text}</pre>
+      <div className="planning-draft-content md-rendered">
+        <MarkdownDisplay>{text}</MarkdownDisplay>
+      </div>
     </div>
   );
 }

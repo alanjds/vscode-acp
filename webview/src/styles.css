@@ -145,7 +145,6 @@ body {
 }
 
 .message-text {
-  white-space: pre-wrap;
   margin-top: 6px;
 }
 
@@ -155,19 +154,19 @@ body {
   border: 1px solid var(--vscode-panel-border);
 }
 
-.message.assistant.md-rendered {
+.md-rendered {
   white-space: normal;
 }
 
-.message.assistant.md-rendered p {
+.md-rendered p {
   margin: 0 0 0.5em;
 }
 
-.message.assistant.md-rendered p:last-child {
+.md-rendered p:last-child {
   margin-bottom: 0;
 }
 
-.message.assistant.md-rendered pre {
+.md-rendered pre {
   background: var(--vscode-textCodeBlock-background);
   border: 1px solid var(--vscode-panel-border);
   border-radius: 4px;
@@ -179,7 +178,7 @@ body {
   line-height: 1.4;
 }
 
-.message.assistant.md-rendered code {
+.md-rendered code {
   font-family: var(--vscode-editor-font-family);
   font-size: 0.9em;
   background: var(--vscode-textCodeBlock-background);
@@ -187,76 +186,79 @@ body {
   border-radius: 3px;
 }
 
-.message.assistant.md-rendered pre code {
+.md-rendered pre code {
   background: none;
   padding: 0;
   border-radius: 0;
 }
 
-.message.assistant.md-rendered ul,
-.message.assistant.md-rendered ol {
+.md-rendered ul,
+.md-rendered ol {
   margin: 0.4em 0;
   padding-left: 1.5em;
 }
 
-.message.assistant.md-rendered li {
+.md-rendered li {
   margin: 0.15em 0;
 }
 
-.message.assistant.md-rendered h1,
-.message.assistant.md-rendered h2,
-.message.assistant.md-rendered h3,
-.message.assistant.md-rendered h4 {
+.md-rendered h1,
+.md-rendered h2,
+.md-rendered h3,
+.md-rendered h4 {
   margin: 0.6em 0 0.3em;
   font-weight: 600;
 }
 
-.message.assistant.md-rendered h1 {
+.md-rendered h1 {
   font-size: 1.3em;
 }
 
-.message.assistant.md-rendered h2 {
+.md-rendered h2 {
   font-size: 1.15em;
 }
 
-.message.assistant.md-rendered h3 {
+.md-rendered h3 {
   font-size: 1.05em;
 }
 
-.message.assistant.md-rendered blockquote {
+.md-rendered blockquote {
   border-left: 3px solid var(--vscode-focusBorder);
   margin: 0.4em 0;
   padding: 0.2em 0 0.2em 0.8em;
   opacity: 0.85;
 }
 
-.message.assistant.md-rendered a {
+.md-rendered a {
   color: var(--vscode-textLink-foreground);
   text-decoration: none;
 }
 
-.message.assistant.md-rendered a:hover {
+.md-rendered a:hover {
   text-decoration: underline;
 }
 
-.message.assistant.md-rendered table {
+.md-rendered table {
   border-collapse: collapse;
+  display: block;
   margin: 0.4em 0;
+  max-width: 100%;
+  overflow-x: auto;
   font-size: 0.9em;
 }
 
-.message.assistant.md-rendered th,
-.message.assistant.md-rendered td {
+.md-rendered th,
+.md-rendered td {
   border: 1px solid var(--vscode-panel-border);
   padding: 4px 8px;
 }
 
-.message.assistant.md-rendered th {
+.md-rendered th {
   background: var(--vscode-editorWidget-background);
   font-weight: 600;
 }
 
-.message.assistant.md-rendered hr {
+.md-rendered hr {
   border: none;
   border-top: 1px solid var(--vscode-panel-border);
   margin: 0.6em 0;
@@ -376,11 +378,7 @@ body {
   max-height: 260px;
   margin: 0;
   overflow-y: auto;
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-family: var(--vscode-editor-font-family);
   font-size: 0.88em;
-  line-height: 1.45;
   color: var(--vscode-descriptionForeground);
 }
 
@@ -1088,26 +1086,27 @@ body {
 .prompt-file-mention {
   display: inline-flex;
   align-items: center;
-  background: var(--vscode-badge-background);
-  color: var(--vscode-badge-foreground);
+  background: var(--vscode-textCodeBlock-background, var(--vscode-editorWidget-background));
+  color: var(--vscode-textLink-foreground, var(--vscode-foreground));
   border-radius: 4px;
   padding: 2px 6px;
   font-size: 0.9em;
+  font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
-  border: 1px solid var(--vscode-badge-border, rgba(0, 0, 0, 0.2));
+  border: 1px solid var(--vscode-textLink-foreground, var(--vscode-panel-border));
   user-select: none;
 }
 
 .prompt-file-mention:hover {
-  background: var(--vscode-badge-hoverBackground, var(--vscode-hoverBackground));
-  opacity: 0.9;
+  background: var(--vscode-list-hoverBackground, var(--vscode-hoverBackground));
+  color: var(--vscode-textLink-activeForeground, var(--vscode-textLink-foreground));
 }
 
 .prompt-file-mention::before {
   content: "@";
   margin-right: 2px;
-  opacity: 0.7;
+  opacity: 1;
   font-size: 0.9em;
 }
 

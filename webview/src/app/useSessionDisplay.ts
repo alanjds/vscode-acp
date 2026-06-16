@@ -1,24 +1,29 @@
 import { useMemo } from 'react';
-import type { PersistedWebviewState } from '../chatTypes';
-import { getBasePlaceholder, getSlashFilteredCommands } from './composer';
+import type { ModelOption, ModeOption, PersistedWebviewState, SlashCommand } from '../chatTypes';
+import { getSlashFilteredCommands } from './composer';
 
 type SessionState = PersistedWebviewState['sessionState'];
 
 interface UseSessionDisplayProps {
   sessionState: SessionState | null;
-  availableCommands: any[];
+  availableCommands: SlashCommand[];
   promptText: string;
   placeholderOverride: string | null;
   slashPopupSuppressedFor: string | null;
 }
 
 interface UseSessionDisplayReturn {
-  basePlaceholder: string;
-  slashFilteredCommands: any[];
-  currentMode: any | undefined;
-  currentModel: any | undefined;
+  slashFilteredCommands: SlashCommand[];
+  currentMode: ModeOption | undefined;
+  currentModel: ModelOption | undefined;
   placeholder: string;
   isSlashPopupOpen: boolean;
+}
+
+function getBasePlaceholder(commands: readonly SlashCommand[]): string {
+  return commands.length > 0
+    ? 'Type a message, @ for files, or / for commands...'
+    : 'Type a message or @ for files...';
 }
 
 /**
@@ -32,24 +37,24 @@ export function useSessionDisplay({
   placeholderOverride,
   slashPopupSuppressedFor,
 }: UseSessionDisplayProps): UseSessionDisplayReturn {
-  const basePlaceholder = useMemo(
-    () => getBasePlaceholder(availableCommands),
-    [availableCommands],
-  );
-
   const slashFilteredCommands = useMemo(
     () => getSlashFilteredCommands(promptText, availableCommands),
     [availableCommands, promptText],
   );
 
   const currentMode = useMemo(
-    () => sessionState?.modes?.availableModes.find((mode: any) => mode.id === sessionState.modes?.currentModeId),
+    () => sessionState?.modes?.availableModes.find((mode) => mode.id === sessionState.modes?.currentModeId),
     [sessionState?.modes?.availableModes, sessionState?.modes?.currentModeId],
   );
 
   const currentModel = useMemo(
-    () => sessionState?.models?.availableModels.find((model: any) => model.modelId === sessionState.models?.currentModelId),
+    () => sessionState?.models?.availableModels.find((model) => model.modelId === sessionState.models?.currentModelId),
     [sessionState?.models?.availableModels, sessionState?.models?.currentModelId],
+  );
+
+  const basePlaceholder = useMemo(
+    () => getBasePlaceholder(availableCommands),
+    [availableCommands],
   );
 
   const placeholder = useMemo(() => {
@@ -66,7 +71,6 @@ export function useSessionDisplay({
   );
 
   return {
-    basePlaceholder,
     slashFilteredCommands,
     currentMode,
     currentModel,

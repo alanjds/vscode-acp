@@ -142,6 +142,19 @@ suite('ChatWebviewProvider', () => {
     assert.deepStrictEqual(recordedPrompts, ['raw prompt']);
   });
 
+  test('sendPrompt message records source text and sends expanded agent text', async () => {
+    const { triggerMessage, sentPrompts, recordedPrompts } = await createProvider(editorContext);
+
+    await triggerMessage({
+      type: 'sendPrompt',
+      text: 'Check [@index.ts](file://src/a/index.ts)',
+      agentText: 'Check @src/a/index.ts',
+    });
+
+    assert.deepStrictEqual(recordedPrompts, ['Check [@index.ts](file://src/a/index.ts)']);
+    assert.deepStrictEqual(sentPrompts, ['Check @src/a/index.ts']);
+  });
+
   test('sends enriched prompt to agent and records only raw prompt', async () => {
     const { provider, sentPrompts, recordedPrompts, messages } = await createProvider(editorContext);
     provider.setEditorContextLinked(true);
@@ -596,6 +609,48 @@ suite('ChatWebviewProvider', () => {
         resultMessage.results.map((result: any) => result.path),
         ['src/a/index.ts', 'src/b/index.ts'],
       );
+    } finally {
+      vscode.workspace.findFiles = originalFindFiles;
+      (vscode.workspace as any).getWorkspaceFolder = originalGetWorkspaceFolder;
+      Object.defineProperty(vscode.workspace, 'workspaceFolders', {
+        value: originalWorkspaceFolders,
+        configurable: true,
+      });
+    }
+  });
+
+  test('searchFiles supports fuzzy indexed file matching', async () => {
+    const { provider, messages } = await createProvider();
+    messages.length = 0;
+
+    const originalFindFiles = vscode.workspace.findFiles;
+    const originalWorkspaceFolders = vscode.workspace.workspaceFolders;
+    const originalGetWorkspaceFolder = vscode.workspace.getWorkspaceFolder;
+    const workspaceFolder = {
+      uri: vscode.Uri.file(workspaceRoot),
+      name: 'workspace',
+      index: 0,
+    };
+
+    Object.defineProperty(vscode.workspace, 'workspaceFolders', {
+      value: [workspaceFolder],
+      configurable: true,
+    });
+    vscode.workspace.findFiles = async () => [
+      vscode.Uri.file(`${workspaceRoot}/src/services/UserService.ts`),
+      vscode.Uri.file(`${workspaceRoot}/src/config/settings.ts`),
+    ];
+    (vscode.workspace as any).getWorkspaceFolder = () => workspaceFolder;
+
+    try {
+      await (provider as any).handleSearchFiles('userservce', 8);
+
+      const resultMessage = messages.find(m => m.type === 'fileSearchResults' && m.requestId === 8);
+      assert.ok(resultMessage);
+      assert.deepStrictEqual(resultMessage.results[0], {
+        path: 'src/services/UserService.ts',
+        name: 'UserService.ts',
+      });
     } finally {
       vscode.workspace.findFiles = originalFindFiles;
       (vscode.workspace as any).getWorkspaceFolder = originalGetWorkspaceFolder;

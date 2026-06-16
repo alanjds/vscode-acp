@@ -11,6 +11,12 @@ import { HtmlSanitizer } from './HtmlSanitizer';
 import { log, logError } from '../utils/Logger';
 import { sendEvent } from '../utils/TelemetryManager';
 import { buildPromptWithEditorContext, type EditorContext } from './EditorContext';
+import {
+  createFileSearchIndex,
+  searchIndexedFiles,
+  type FileSearchEntry,
+  type IndexedFile,
+} from './FileSearchIndex';
 import { getReactShellHtmlContent } from './WebviewHtml';
 import {
   PipelinePlanReadyEvent,
@@ -27,7 +33,8 @@ type WebviewMessage = {
   [key: string]: unknown;
 };
 
-const FILE_SEARCH_LIMIT = 30;
+const FILE_SEARCH_RESULT_LIMIT = 30;
+const FILE_SEARCH_INDEX_LIMIT = 5000;
 
 function getTextUpdateContent(updateData: any): string | null {
   const content = updateData?.content;
@@ -51,6 +58,8 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
   private pendingMessages: WebviewMessage[] = [];
   private readonly pipelineService: PipelineService | null;
   private readonly getEditorContext: GetEditorContext;
+  private fileSearchIndexPromise: Promise<{ index: ReturnType<typeof createFileSearchIndex>; files: IndexedFile[] }> | null = null;
+  private readonly fileSearchDisposables: vscode.Disposable[] = [];
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -73,6 +82,13 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       breaks: true,
       gfm: true,
     });
+
+    this.fileSearchDisposables.push(
+      vscode.workspace.onDidCreateFiles(() => this.invalidateFileSearchIndex()),
+      vscode.workspace.onDidDeleteFiles(() => this.invalidateFileSearchIndex()),
+      vscode.workspace.onDidRenameFiles(() => this.invalidateFileSearchIndex()),
+      vscode.workspace.onDidChangeWorkspaceFolders(() => this.invalidateFileSearchIndex()),
+    );
 
     this.updateListener = (update: SessionNotification) => {
       this.handleSessionUpdate(update);
@@ -138,7 +154,10 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       switch (message.type) {
         case 'sendPrompt':
           this._hasChatContent = true;
-          await this.handleSendPrompt(String(message.text ?? ''));
+          await this.handleSendPrompt(
+            String(message.text ?? ''),
+            typeof message.agentText === 'string' ? message.agentText : undefined,
+          );
           break;
         case 'cancelTurn':
           await this.handleCancelTurn();
@@ -255,7 +274,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
   /**
    * Handle a prompt sent from the webview.
    */
-  private async handleSendPrompt(text: string): Promise<void> {
+  private async handleSendPrompt(text: string, agentPromptText?: string): Promise<void> {
     const activeId = this.sessionManager.getActiveSessionId();
     if (!activeId) {
       this.postMessage({
@@ -265,10 +284,11 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       return;
     }
 
+    const baseAgentText = agentPromptText ?? text;
     const editorContext = this.editorContextLinked ? this.getEditorContext() : null;
     const agentText = this.editorContextLinked && editorContext
-      ? buildPromptWithEditorContext(text, editorContext)
-      : text;
+      ? buildPromptWithEditorContext(baseAgentText, editorContext)
+      : baseAgentText;
     const promptStartedAt = Date.now();
 
     this.debugTraceStore?.record({
@@ -278,6 +298,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       status: 'started',
       payload: {
         rawText: text,
+        baseAgentText,
         agentText,
         editorContextLinked: this.editorContextLinked,
         editorContext,
@@ -444,28 +465,11 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
    * Search workspace files for the `@file` mention popup.
    */
   private async handleSearchFiles(query: string, requestId: number): Promise<void> {
-    const normalizedQuery = query.trim().replace(/\\/g, '/');
-    const words = normalizedQuery.split('/').filter(Boolean);
-    const glob = words.length > 0
-      ? `**/${words.map(word => `*${this.escapeGlobSegment(word)}*`).join('/')}`
-      : '**/*';
-
     try {
-      const uris = await vscode.workspace.findFiles(
-        glob,
-        '**/{node_modules,.git,dist,out}/**',
-        FILE_SEARCH_LIMIT,
+      const { index, files } = await this.getFileSearchIndex();
+      const results = disambiguateFileSearchResults(
+        searchIndexedFiles(index, files, query.replace(/\\/g, '/'), FILE_SEARCH_RESULT_LIMIT),
       );
-      const results = disambiguateFileSearchResults(uris.map(uri => {
-        const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
-        const relativePath = workspaceFolder
-          ? path.relative(workspaceFolder.uri.fsPath, uri.fsPath).replace(/\\/g, '/')
-          : uri.fsPath.replace(/\\/g, '/');
-        return {
-          path: relativePath,
-          name: uri.fsPath.split(/[\\/]/).pop() || relativePath,
-        };
-      }));
 
       this.postMessage({ type: 'fileSearchResults', requestId, results });
     } catch (e: any) {
@@ -474,8 +478,40 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private escapeGlobSegment(value: string): string {
-    return value.replace(/[{}[\]*?\\]/g, match => `[${match}]`);
+  private getFileSearchIndex(): Promise<{ index: ReturnType<typeof createFileSearchIndex>; files: IndexedFile[] }> {
+    this.fileSearchIndexPromise ??= this.buildFileSearchIndex();
+    return this.fileSearchIndexPromise;
+  }
+
+  private async buildFileSearchIndex(): Promise<{ index: ReturnType<typeof createFileSearchIndex>; files: IndexedFile[] }> {
+    const uris = await vscode.workspace.findFiles(
+      '**/*',
+      '**/{node_modules,.git,dist,out}/**',
+      FILE_SEARCH_INDEX_LIMIT,
+    );
+
+    const files = uris.map((uri, index) => {
+      const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
+      const relativePath = workspaceFolder
+        ? path.relative(workspaceFolder.uri.fsPath, uri.fsPath).replace(/\\/g, '/')
+        : uri.fsPath.replace(/\\/g, '/');
+
+      return {
+        id: `${index}:${relativePath}`,
+        path: relativePath,
+        name: uri.fsPath.split(/[\\/]/).pop() || relativePath,
+        content: '',
+      };
+    });
+
+    return {
+      index: createFileSearchIndex(files),
+      files,
+    };
+  }
+
+  private invalidateFileSearchIndex(): void {
+    this.fileSearchIndexPromise = null;
   }
 
   private async handleOpenFile(filePath: string): Promise<void> {
@@ -658,6 +694,9 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     this.pipelineService?.off('status', this.handlePipelineStatus);
     this.pipelineService?.off('plan-ready', this.handlePipelinePlanReady);
     this.pipelineService?.off('session-update', this.handlePipelineSessionUpdate);
+    for (const disposable of this.fileSearchDisposables) {
+      disposable.dispose();
+    }
   }
 
   private async getHtmlContent(webview: vscode.Webview): Promise<string> {
@@ -666,9 +705,9 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 }
 
 function disambiguateFileSearchResults(
-  results: Array<{ path: string; name: string }>,
-): Array<{ path: string; name: string }> {
-  const byName = new Map<string, Array<{ path: string; name: string }>>();
+  results: FileSearchEntry[],
+): FileSearchEntry[] {
+  const byName = new Map<string, FileSearchEntry[]>();
   for (const result of results) {
     const bucket = byName.get(result.name) ?? [];
     bucket.push(result);

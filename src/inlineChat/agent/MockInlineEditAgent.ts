@@ -1,15 +1,17 @@
+import { RunAbortedError } from '../../pipeline/RunAbortedError';
 import { InlineEditRequest, InlineEditResult } from '../InlineChatTypes';
-import { InlineEditAgent } from './InlineEditAgent';
+import { InlineEditAgent, InlineEditOptions } from './InlineEditAgent';
 
 /**
  * Mock agent for testing inline chat UX
  */
 export class MockInlineEditAgent implements InlineEditAgent {
-  async generateEdit(request: InlineEditRequest): Promise<InlineEditResult> {
+  async generateEdit(request: InlineEditRequest, options?: InlineEditOptions): Promise<InlineEditResult> {
+    await this.waitUnlessAborted(options?.signal);
+
     const { selection, selectedText } = request;
 
     if (selectedText.trim()) {
-      // If there's selected text, wrap it with a comment
       return {
         summary: 'Mock proposal: wrap selection with comment',
         edits: [
@@ -30,7 +32,6 @@ export class MockInlineEditAgent implements InlineEditAgent {
       };
     }
 
-    // If no selection, insert at cursor position
     return {
       summary: 'Mock insertion: add comment at cursor',
       edits: [
@@ -49,6 +50,28 @@ export class MockInlineEditAgent implements InlineEditAgent {
         }
       ]
     };
+  }
+
+  private waitUnlessAborted(signal?: AbortSignal): Promise<void> {
+    if (!signal) {
+      return Promise.resolve();
+    }
+
+    if (signal.aborted) {
+      return Promise.reject(new RunAbortedError());
+    }
+
+    return new Promise((resolve, reject) => {
+      const onAbort = (): void => {
+        signal.removeEventListener('abort', onAbort);
+        reject(new RunAbortedError());
+      };
+      signal.addEventListener('abort', onAbort, { once: true });
+      queueMicrotask(() => {
+        signal.removeEventListener('abort', onAbort);
+        resolve();
+      });
+    });
   }
 
   getDisplayName(): string {

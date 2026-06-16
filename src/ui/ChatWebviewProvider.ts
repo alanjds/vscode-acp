@@ -399,8 +399,10 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 
     try {
       await this.sessionManager.cancelTurn(activeId);
+      this.postMessage({ type: 'promptEnd', stopReason: 'cancelled' });
     } catch (e) {
       logError('Cancel failed', e);
+      this.postMessage({ type: 'promptEnd', stopReason: 'error' });
     }
   }
 

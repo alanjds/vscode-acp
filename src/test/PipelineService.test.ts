@@ -1,6 +1,7 @@
 import * as assert from 'assert';
 
 import { PipelineService } from '../pipeline/PipelineService';
+import { RunAbortedError } from '../pipeline/RunAbortedError';
 import type { PipelineDefinition } from '../config/PipelineCatalog';
 
 const PLAN_EXECUTE_VERIFY_PIPELINE: PipelineDefinition = {
@@ -347,6 +348,35 @@ suite('PipelineService', () => {
 
     assert.strictEqual(events.filter(e => e.status === 'cancelled').length, 2);
     assert.strictEqual(service.listenerCount('status'), 0);
+  });
+
+  test('cancel aborts in-flight runAcpAgent via AbortSignal', async () => {
+    const events: Array<{ status: string }> = [];
+    let receivedSignal: AbortSignal | undefined;
+
+    const service = createService({
+      runAcpAgent: async (_kind, _prompt, _onSessionUpdate, signal) => {
+        receivedSignal = signal;
+        return new Promise<string>((_resolve, reject) => {
+          signal?.addEventListener('abort', () => {
+            reject(new RunAbortedError());
+          }, { once: true });
+        });
+      },
+    });
+
+    service.on('status', (event: any) => {
+      events.push({ status: event.status });
+    });
+
+    const planPromise = service.createPlan('session-1', 'build feature', PLAN_EXECUTE_VERIFY_PIPELINE.title);
+    await new Promise(resolve => setTimeout(resolve, 20));
+
+    service.cancel('session-1');
+
+    await assert.rejects(() => planPromise);
+    assert.strictEqual(receivedSignal?.aborted, true);
+    assert.ok(events.some(event => event.status === 'cancelled'));
   });
 });
 

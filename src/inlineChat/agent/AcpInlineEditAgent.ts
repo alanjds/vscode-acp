@@ -5,7 +5,7 @@ import { WorkspaceIdentity } from '../../core/WorkspaceIdentity';
 import { AcpAgentRunner } from '../../pipeline/AcpAgentRunner';
 import { getSafeFenceMarker } from '../../ui/EditorContext';
 import { InlineEditRequest, InlineEditResult } from '../InlineChatTypes';
-import { InlineEditAgent } from './InlineEditAgent';
+import { InlineEditAgent, InlineEditOptions } from './InlineEditAgent';
 
 export class AcpInlineEditAgent implements InlineEditAgent {
   private readonly runner: AcpAgentRunner;
@@ -17,10 +17,12 @@ export class AcpInlineEditAgent implements InlineEditAgent {
     this.runner = new AcpAgentRunner(() => this.workspaceIdentity().cwd);
   }
 
-  async generateEdit(request: InlineEditRequest): Promise<InlineEditResult> {
+  async generateEdit(request: InlineEditRequest, options?: InlineEditOptions): Promise<InlineEditResult> {
     const agentName = this.resolveAgentName();
     const prompt = this.buildPrompt(request);
-    const responseText = await this.runner.run(agentName, prompt);
+    const responseText = await this.runner.run(agentName, prompt, {
+      signal: options?.signal,
+    });
     return this.parseResponse(request, responseText);
   }
 

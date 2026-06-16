@@ -44,6 +44,7 @@ export type AcpRunCallback = (
   kind: PipelineExecutorKind,
   promptText: string,
   onSessionUpdate?: (update: SessionNotification) => void,
+  signal?: AbortSignal,
 ) => Promise<string>;
 
 export interface PipelineGraphCompilerHooks {

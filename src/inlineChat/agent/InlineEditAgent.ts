@@ -1,11 +1,14 @@
-import * as vscode from 'vscode';
 import { InlineEditRequest, InlineEditResult } from '../InlineChatTypes';
 
 /**
  * Agent interface for generating inline edits
  */
+export interface InlineEditOptions {
+  signal?: AbortSignal;
+}
+
 export interface InlineEditAgent {
-  generateEdit(request: InlineEditRequest): Promise<InlineEditResult>;
+  generateEdit(request: InlineEditRequest, options?: InlineEditOptions): Promise<InlineEditResult>;
   /**
    * Optional display name for UI while generating edits.
    */

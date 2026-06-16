@@ -3,7 +3,7 @@ import * as vscode from 'vscode';
 /**
  * Generate HTML for the inline chat webview
  */
-export function getInlineChatHtml(webview: vscode.Webview): string {
+export function getInlineChatHtml(_webview: vscode.Webview): string {
   const nonce = getNonce();
 
   return `<!DOCTYPE html>
@@ -130,6 +130,10 @@ export function getInlineChatHtml(webview: vscode.Webview): string {
       opacity: 0.5;
       cursor: not-allowed;
     }
+
+    button.stop {
+      min-width: 52px;
+    }
   </style>
 </head>
 <body>
@@ -167,10 +171,15 @@ export function getInlineChatHtml(webview: vscode.Webview): string {
     const accept = document.getElementById('accept');
     const reject = document.getElementById('reject');
     const close = document.getElementById('close');
+    let isThinking = false;
 
     prompt.focus();
 
     submit.addEventListener('click', () => {
+      if (isThinking) {
+        stopGeneration();
+        return;
+      }
       sendPrompt();
     });
 
@@ -189,7 +198,11 @@ export function getInlineChatHtml(webview: vscode.Webview): string {
     prompt.addEventListener('keydown', event => {
       if (event.key === 'Enter' && !event.shiftKey) {
         event.preventDefault();
-        sendPrompt();
+        if (isThinking) {
+          stopGeneration();
+        } else {
+          sendPrompt();
+        }
       }
 
       if (event.key === 'Escape') {
@@ -198,34 +211,49 @@ export function getInlineChatHtml(webview: vscode.Webview): string {
       }
     });
 
+    function setThinking(thinking) {
+      isThinking = thinking;
+      if (thinking) {
+        submit.textContent = '■ Stop';
+        submit.classList.add('stop');
+        submit.disabled = false;
+        prompt.disabled = true;
+      } else {
+        submit.textContent = 'Send';
+        submit.classList.remove('stop');
+        submit.disabled = false;
+        prompt.disabled = false;
+      }
+    }
+
+    function stopGeneration() {
+      vscode.postMessage({ type: 'stop' });
+    }
+
     window.addEventListener('message', event => {
       const message = event.data;
 
       if (message.type === 'status' && message.value === 'thinking') {
         const agent = message.agent || 'Damien';
         status.textContent = agent + ' is editing...';
-        submit.disabled = true;
-        prompt.disabled = true;
+        setThinking(true);
         actions.classList.remove('visible');
       }
 
       if (message.type === 'proposal') {
         status.textContent = message.summary || 'Proposal ready';
         actions.classList.add('visible');
-        submit.disabled = false;
-        prompt.disabled = false;
+        setThinking(false);
       }
 
       if (message.type === 'status' && message.value === 'ready') {
-        status.textContent = 'Ready';
-        submit.disabled = false;
-        prompt.disabled = false;
+        status.textContent = 'Enter to send · Esc to cancel';
+        setThinking(false);
       }
 
       if (message.type === 'status' && message.value === 'error') {
         status.textContent = 'Error occurred';
-        submit.disabled = false;
-        prompt.disabled = false;
+        setThinking(false);
       }
     });
 

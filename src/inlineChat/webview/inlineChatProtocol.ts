@@ -12,6 +12,7 @@ export class InlineChatProtocol {
   static readonly TYPE_SUBMIT = 'submit';
   static readonly TYPE_ACCEPT = 'accept';
   static readonly TYPE_REJECT = 'reject';
+  static readonly TYPE_STOP = 'stop';
   static readonly TYPE_CANCEL = 'cancel';
   static readonly TYPE_STATUS = 'status';
   static readonly TYPE_PROPOSAL = 'proposal';
@@ -35,6 +36,13 @@ export class InlineChatProtocol {
    */
   static reject(): InlineChatMessage {
     return { type: this.TYPE_REJECT };
+  }
+
+  /**
+   * Create a stop message
+   */
+  static stop(): InlineChatMessage {
+    return { type: this.TYPE_STOP };
   }
 
   /**
@@ -66,6 +74,7 @@ export class InlineChatProtocol {
       this.TYPE_SUBMIT,
       this.TYPE_ACCEPT,
       this.TYPE_REJECT,
+      this.TYPE_STOP,
       this.TYPE_CANCEL
     ].includes(message.type);
   }

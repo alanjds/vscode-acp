@@ -28,23 +28,13 @@ export interface InlineEditResult {
 }
 
 /**
- * Agent interface for generating inline edits
- */
-export interface InlineEditAgent {
-  generateEdit(request: InlineEditRequest): Promise<InlineEditResult>;
-  /**
-   * Optional display name for UI while generating edits.
-   */
-  getDisplayName?(): string | Promise<string>;
-}
-
-/**
  * Message types for webview communication
  */
 export type InlineChatMessage = 
   | { type: 'submit'; prompt: string }
   | { type: 'accept' }
   | { type: 'reject' }
+  | { type: 'stop' }
   | { type: 'cancel' };
 
 /**

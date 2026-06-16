@@ -7,9 +7,11 @@ import { ConnectionInfo, ConnectionManager } from '../core/ConnectionManager';
 import { SessionUpdateHandler } from '../handlers/SessionUpdateHandler';
 import { getAgentConfig } from '../config/AgentConfig';
 import { log, logError } from '../utils/Logger';
+import { RunAbortedError } from './RunAbortedError';
 
 export interface AcpAgentRunOptions {
   onSessionUpdate?: (update: SessionNotification) => void;
+  signal?: AbortSignal;
 }
 
 export class AcpAgentRunner {
@@ -29,6 +31,33 @@ export class AcpAgentRunner {
     const cwd = this.workspaceCwd();
     let sessionId: string | null = null;
     let collectedText = '';
+    let connInfo: ConnectionInfo | null = null;
+    let agentId: string | null = null;
+
+    const throwIfAborted = (): void => {
+      if (options.signal?.aborted) {
+        throw new RunAbortedError();
+      }
+    };
+
+    const onAbort = (): void => {
+      void (async () => {
+        if (sessionId && connInfo) {
+          try {
+            await connInfo.connection.cancel({ sessionId });
+          } catch (e) {
+            logError('Pipeline ACP runner: cancel failed', e);
+          }
+        }
+        if (agentId) {
+          agentManager.killAgent(agentId);
+        } else {
+          agentManager.killAll();
+        }
+      })();
+    };
+
+    options.signal?.addEventListener('abort', onAbort, { once: true });
 
     const listener = (update: SessionNotification) => {
       if (sessionId && update.sessionId !== sessionId) {
@@ -49,24 +78,42 @@ export class AcpAgentRunner {
     sessionUpdateHandler.addListener(listener);
 
     try {
+      throwIfAborted();
       log(`Pipeline ACP runner: starting "${agentName}"`);
       const agentInstance = agentManager.spawnAgent(agentName, config, cwd);
-      const connInfo = await connectionManager.connect(
+      agentId = agentInstance.id;
+      throwIfAborted();
+
+      connInfo = await connectionManager.connect(
         agentInstance.id,
         agentInstance.process,
         cwd,
       );
+      throwIfAborted();
 
-      const sessionResponse = await this.createSessionWithAuth(agentName, agentInstance.id, connInfo, cwd, agentManager);
+      const sessionResponse = await this.createSessionWithAuth(
+        agentName,
+        agentInstance.id,
+        connInfo,
+        cwd,
+        agentManager,
+        options.signal,
+      );
       sessionId = sessionResponse.sessionId;
+      throwIfAborted();
 
       await connInfo.connection.prompt({
         sessionId,
         prompt: [{ type: 'text', text: promptText }],
       });
 
+      if (options.signal?.aborted) {
+        throw new RunAbortedError();
+      }
+
       return collectedText.trim();
     } finally {
+      options.signal?.removeEventListener('abort', onAbort);
       sessionUpdateHandler.removeListener(listener);
       agentManager.killAll();
       connectionManager.dispose();
@@ -80,14 +127,22 @@ export class AcpAgentRunner {
     connInfo: ConnectionInfo,
     cwd: string,
     agentManager: AgentManager,
+    signal?: AbortSignal,
   ): Promise<{ sessionId: string }> {
+    if (signal?.aborted) {
+      throw new RunAbortedError();
+    }
+
     try {
       return await connInfo.connection.newSession({ cwd, mcpServers: [] });
     } catch (e: any) {
       if (!this.isAuthRequiredError(e)) {
         throw e;
       }
-      await this.runAuthFlow(agentName, agentId, connInfo, agentManager);
+      await this.runAuthFlow(agentName, agentId, connInfo, agentManager, signal);
+      if (signal?.aborted) {
+        throw new RunAbortedError();
+      }
       return connInfo.connection.newSession({ cwd, mcpServers: [] });
     }
   }
@@ -103,7 +158,13 @@ export class AcpAgentRunner {
     agentId: string,
     connInfo: ConnectionInfo,
     agentManager: AgentManager,
+    signal?: AbortSignal,
   ): Promise<void> {
+    if (signal?.aborted) {
+      agentManager.killAgent(agentId);
+      throw new RunAbortedError();
+    }
+
     const authMethods = connInfo.initResponse.authMethods;
     if (!authMethods || authMethods.length === 0) {
       agentManager.killAgent(agentId);
@@ -143,6 +204,11 @@ export class AcpAgentRunner {
       }
     }
 
+    if (signal?.aborted) {
+      agentManager.killAgent(agentId);
+      throw new RunAbortedError();
+    }
+
     try {
       await connInfo.connection.authenticate({ methodId: selectedMethod.id });
     } catch (authErr: any) {
@@ -152,4 +218,3 @@ export class AcpAgentRunner {
     }
   }
 }
-

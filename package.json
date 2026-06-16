@@ -440,6 +440,13 @@
               "args": [],
               "env": {}
             },
+            "Cursor CLI": {
+              "command": "agent",
+              "args": [
+                "acp"
+              ],
+              "env": {}
+            },
             "OpenCode": {
               "command": "npx",
               "args": [

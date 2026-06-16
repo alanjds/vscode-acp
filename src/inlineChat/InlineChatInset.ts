@@ -3,6 +3,7 @@ import { getInlineChatHtml } from './webview/inlineChatHtml';
 import { InlineEditAgent } from './agent/InlineEditAgent';
 import { PatchApplyService } from './patch/PatchApplyService';
 import { InlineChatMessage, InlineChatResponse, InlineEditRequest, InlineEditResult } from './InlineChatTypes';
+import { isRunAbortedError } from '../pipeline/RunAbortedError';
 
 // Import the proposed API types
 // This will be available when running in VS Code Insiders with enabled proposed APIs
@@ -23,6 +24,7 @@ export class InlineChatInset implements vscode.Disposable {
   private inset?: WebviewEditorInset;
   private disposables: vscode.Disposable[] = [];
   private pendingEdits?: vscode.TextEdit[];
+  private activeRun?: AbortController;
   private readonly documentVersion: number;
 
   constructor(
@@ -94,7 +96,9 @@ export class InlineChatInset implements vscode.Disposable {
    * Set up message handling between webview and extension
    */
   private setupMessageHandling(): void {
-    if (!this.inset) return;
+    if (!this.inset) {
+      return;
+    }
 
     this.disposables.push(
       this.inset.webview.onDidReceiveMessage(async (message: InlineChatMessage) => {
@@ -106,7 +110,15 @@ export class InlineChatInset implements vscode.Disposable {
             await this.accept();
             break;
           case 'reject':
+            this.abortActiveRun();
+            this.dispose();
+            break;
+          case 'stop':
+            this.abortActiveRun();
+            await this.post({ type: 'status', value: 'ready' } as InlineChatResponse);
+            break;
           case 'cancel':
+            this.abortActiveRun();
             this.dispose();
             break;
         }
@@ -157,6 +169,10 @@ export class InlineChatInset implements vscode.Disposable {
     const document = this.editor.document;
     const selection = this.editor.selection;
 
+    this.activeRun?.abort();
+    const runController = new AbortController();
+    this.activeRun = runController;
+
     // Post thinking status including agent display name (if available)
     let agentName = 'Damien';
     try {
@@ -184,7 +200,13 @@ export class InlineChatInset implements vscode.Disposable {
       };
 
       // Get edit proposal from agent
-      const result: InlineEditResult = await this.agent.generateEdit(request);
+      const result: InlineEditResult = await this.agent.generateEdit(request, {
+        signal: runController.signal,
+      });
+
+      if (runController.signal.aborted) {
+        return;
+      }
 
       // Convert to VS Code text edits
       this.pendingEdits = result.edits.map((edit: InlineEditResult['edits'][number]) =>
@@ -204,9 +226,16 @@ export class InlineChatInset implements vscode.Disposable {
       } as InlineChatResponse);
 
     } catch (error) {
+      if (isRunAbortedError(error) || runController.signal.aborted) {
+        return;
+      }
       console.error('Error generating edit:', error);
       await this.post({ type: 'status', value: 'error' } as InlineChatResponse);
       vscode.window.showErrorMessage(`Error generating edit: ${error}`);
+    } finally {
+      if (this.activeRun === runController) {
+        this.activeRun = undefined;
+      }
     }
   }
 
@@ -274,6 +303,7 @@ export class InlineChatInset implements vscode.Disposable {
    * Dispose of the inset and clean up resources
    */
   dispose(): void {
+    this.abortActiveRun();
     this.inset?.dispose();
     this.inset = undefined;
 
@@ -283,5 +313,10 @@ export class InlineChatInset implements vscode.Disposable {
     this.disposables = [];
 
     this.pendingEdits = undefined;
+  }
+
+  private abortActiveRun(): void {
+    this.activeRun?.abort();
+    this.activeRun = undefined;
   }
 }

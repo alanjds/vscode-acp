@@ -12,6 +12,7 @@ import {
 } from '../config/PipelineCatalog';
 import { AcpAgentRunner } from './AcpAgentRunner';
 import { assertSingleProposedPlan } from './ProposedPlan';
+import { isRunAbortedError } from './RunAbortedError';
 import {
   type AcpRunCallback,
   type CompiledPipelineGraph,
@@ -62,6 +63,7 @@ interface PipelineRunState {
   graph: CompiledPipelineGraph;
   pendingApproval: PendingApprovalState | null;
   cancelled: boolean;
+  abortController: AbortController;
 }
 
 export interface PipelineServiceDependencies {
@@ -91,6 +93,7 @@ export class PipelineService extends EventEmitter {
       graph: this.compileGraph(sessionId, pipeline),
       pendingApproval: null,
       cancelled: false,
+      abortController: new AbortController(),
     };
     this.runs.set(sessionId, state);
 
@@ -101,6 +104,10 @@ export class PipelineService extends EventEmitter {
       );
       return this.handleGraphResult(sessionId, state, result, 'Pipeline completed.');
     } catch (e: any) {
+      if (this.isPipelineAborted(sessionId, state, e)) {
+        this.runs.delete(sessionId);
+        throw e;
+      }
       this.emitStatus(sessionId, 'error', e.message || 'Pipeline failed.');
       this.runs.delete(sessionId);
       throw e;
@@ -116,6 +123,7 @@ export class PipelineService extends EventEmitter {
     const approvedOutput = approvedPlan.trim();
     assertSingleProposedPlan(approvedOutput);
     state.pendingApproval = null;
+    state.abortController = new AbortController();
 
     try {
       const result = await state.graph.invoke(
@@ -124,6 +132,10 @@ export class PipelineService extends EventEmitter {
       );
       return this.handleGraphResult(sessionId, state, result, 'Pipeline completed.');
     } catch (e: any) {
+      if (this.isPipelineAborted(sessionId, state, e)) {
+        this.runs.delete(sessionId);
+        throw e;
+      }
       this.emitStatus(sessionId, 'error', e.message || 'Pipeline implementation failed.');
       this.runs.delete(sessionId);
       throw e;
@@ -134,6 +146,7 @@ export class PipelineService extends EventEmitter {
     const state = this.runs.get(sessionId);
     if (state) {
       state.cancelled = true;
+      state.abortController.abort();
     }
     this.runs.delete(sessionId);
     this.emitStatus(sessionId, 'rejected', 'Pipeline plan rejected.');
@@ -143,6 +156,7 @@ export class PipelineService extends EventEmitter {
     const state = this.runs.get(sessionId);
     if (state) {
       state.cancelled = true;
+      state.abortController.abort();
     }
     this.runs.delete(sessionId);
     this.emitStatus(sessionId, 'cancelled', 'Pipeline cancelled.');
@@ -151,6 +165,7 @@ export class PipelineService extends EventEmitter {
   async dispose(): Promise<void> {
     for (const [sessionId, state] of this.runs) {
       state.cancelled = true;
+      state.abortController.abort();
       this.emitStatus(sessionId, 'cancelled', 'Pipeline cancelled.');
     }
     this.runs.clear();
@@ -252,14 +267,34 @@ export class PipelineService extends EventEmitter {
     }
 
     if (this.dependencies.runAcpAgent) {
-      return this.dependencies.runAcpAgent(kind, promptText, onSessionUpdate);
+      return this.dependencies.runAcpAgent(
+        kind,
+        promptText,
+        onSessionUpdate,
+        state.abortController.signal,
+      );
     }
 
     const primitive = this.findPrimitiveForExecutorKind(state.pipeline, kind);
     const runner = new AcpAgentRunner(this.workspaceCwd);
     return runner.run(primitive.agent, promptText, {
       onSessionUpdate,
+      signal: state.abortController.signal,
     });
+  }
+
+  private isPipelineAborted(sessionId: string, state: PipelineRunState, error: unknown): boolean {
+    const aborted = state.cancelled
+      || isRunAbortedError(error)
+      || (error instanceof Error && error.message === 'Pipeline cancelled.');
+    if (!aborted) {
+      return false;
+    }
+    if (!state.cancelled) {
+      state.cancelled = true;
+      this.emitStatus(sessionId, 'cancelled', 'Pipeline cancelled.');
+    }
+    return true;
   }
 
   private findPrimitiveForExecutorKind(

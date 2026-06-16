@@ -183,6 +183,20 @@ suite('ChatWebviewProvider', () => {
   });
   // ============ New tests ============
 
+  test('handleCancelTurn posts promptEnd after cancelTurn succeeds', async () => {
+    let cancelCalled = false;
+    const { provider, messages } = await createProvider();
+    (provider as any).sessionManager.cancelTurn = async () => {
+      cancelCalled = true;
+    };
+    messages.length = 0;
+
+    await (provider as any).handleCancelTurn();
+
+    assert.strictEqual(cancelCalled, true);
+    assert.ok(messages.some(message => message.type === 'promptEnd' && message.stopReason === 'cancelled'));
+  });
+
   test('handleSendPrompt with no activeSessionId posts error and does not call sendPrompt', async () => {
     const { provider, sentPrompts, messages } = await createProvider();
     // Override to have no active session

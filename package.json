@@ -457,6 +457,14 @@
                 "acp"
               ],
               "env": {}
+            },
+            "Pi Agent": {
+              "command": "npx",
+              "args": [
+                "-y",
+                "pi-acp"
+              ],
+              "env": {}
             }
           }
         },

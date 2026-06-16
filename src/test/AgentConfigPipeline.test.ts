@@ -21,7 +21,7 @@ suite('AgentConfig pipeline', () => {
         get: (key: string, defaultValue?: unknown) => {
           switch (key) {
             case 'agents':
-              return { 'Codex CLI': { command: 'codex' }, Vibe: { command: 'vibe' } };
+              return { 'Gemini CLI': { command: 'gemini' }, 'Codex CLI': { command: 'codex' }, Vibe: { command: 'vibe' } };
             case 'pipeline.enabled':
               return true;
             default:
@@ -59,7 +59,7 @@ suite('AgentConfig pipeline', () => {
         get: (key: string, defaultValue?: unknown) => {
           switch (key) {
             case 'agents':
-              return { 'Codex CLI': { command: 'codex' }, Vibe: { command: 'vibe' } };
+              return { 'Gemini CLI': { command: 'gemini' }, 'Codex CLI': { command: 'codex' }, Vibe: { command: 'vibe' } };
             case 'pipeline.enabled':
               return true;
             default:

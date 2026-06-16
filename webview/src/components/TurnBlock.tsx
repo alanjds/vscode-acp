@@ -4,6 +4,7 @@ import type { CurrentToolCall, ToolCallHistoryItem } from '../chatTypes';
 import { PlanningDraftBlock } from './PlanningDraftBlock';
 import { ThoughtBlock, type ThoughtBlockProps } from './ThoughtBlock';
 import { TurnTools } from './TurnTools';
+import { MarkdownDisplay } from './MarkdownDisplay';
 
 type TurnToolHistoryItem = {
   item: ToolCallHistoryItem;
@@ -15,10 +16,10 @@ export type TurnBlockProps = {
   thought: ThoughtBlockProps | null;
   planningDraftText?: string;
   assistantText?: string;
-  assistantHtml?: string;
   toolCalls: CurrentToolCall[] | TurnToolHistoryItem[];
   collapsed: boolean;
   onToggleTools: () => void;
+  onMentionClick?: (path: string) => void;
 };
 
 export function TurnBlock({
@@ -26,13 +27,13 @@ export function TurnBlock({
   thought,
   planningDraftText,
   assistantText,
-  assistantHtml,
   toolCalls,
   collapsed,
   onToggleTools,
+  onMentionClick,
 }: TurnBlockProps): JSX.Element | null {
   const hasAssistantContent = typeof assistantText === 'string' && assistantText.trim().length > 0;
-  const hasAssistant = Boolean(assistantHtml) || assistantText !== undefined;
+  const hasAssistant = hasAssistantContent;
   const hasPlanningDraft = typeof planningDraftText === 'string' && planningDraftText.trim().length > 0;
   const hasVisibleContent = Boolean(thought) || hasPlanningDraft || hasAssistant || toolCalls.length > 0;
 
@@ -45,11 +46,10 @@ export function TurnBlock({
       {thought ? <ThoughtBlock {...thought} /> : null}
       {hasPlanningDraft ? <PlanningDraftBlock text={planningDraftText ?? ''} /> : null}
       {hasAssistant ? (
-        <div
-          className={`message assistant${assistantHtml ? ' md-rendered' : ''}`}
-          {...(assistantHtml ? { dangerouslySetInnerHTML: { __html: assistantHtml } } : {})}
-        >
-          {!assistantHtml && hasAssistantContent ? assistantText : !assistantHtml ? assistantText : null}
+        <div className={`message assistant md-rendered`}>
+          <MarkdownDisplay onMentionClick={onMentionClick}>
+            {assistantText || ''}
+          </MarkdownDisplay>
         </div>
       ) : null}
       <TurnTools turnKey={turnKey} toolCalls={toolCalls} collapsed={collapsed} onToggle={onToggleTools} />

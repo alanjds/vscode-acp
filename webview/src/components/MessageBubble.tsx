@@ -3,13 +3,14 @@ import type { JSX } from 'react';
 
 import type { MessageHistoryItem } from '../chatTypes';
 import { parseUserMessage } from '../app/composer';
+import { MarkdownDisplay } from './MarkdownDisplay';
 
 export type MessageBubbleProps = {
   item: MessageHistoryItem;
-  renderedHtml?: string;
+  onMentionClick?: (path: string) => void;
 };
 
-function MessageBubbleComponent({ item, renderedHtml }: MessageBubbleProps): JSX.Element {
+function MessageBubbleComponent({ item, onMentionClick }: MessageBubbleProps): JSX.Element {
   const parsedUserMessage = useMemo(
     () => (item.role === 'user' ? parseUserMessage(item.text) : null),
     [item],
@@ -17,31 +18,46 @@ function MessageBubbleComponent({ item, renderedHtml }: MessageBubbleProps): JSX
 
   if (item.role === 'assistant') {
     return (
-      <div
-        className={`message assistant${renderedHtml ? ' md-rendered' : ''}`}
-        {...(renderedHtml ? { dangerouslySetInnerHTML: { __html: renderedHtml } } : {})}
-      >
-        {!renderedHtml ? item.text : null}
+      <div className={`message assistant md-rendered`}>
+        <MarkdownDisplay onMentionClick={onMentionClick}>
+          {item.text}
+        </MarkdownDisplay>
       </div>
     );
   }
 
   if (item.role === 'error') {
-    return <div className="message error">{item.text}</div>;
+    return (
+      <div className="message error">
+        <MarkdownDisplay>{item.text}</MarkdownDisplay>
+      </div>
+    );
   }
 
   if (item.role === 'info') {
-    return <div className="message info">{item.text}</div>;
+    return (
+      <div className="message info">
+        <MarkdownDisplay>{item.text}</MarkdownDisplay>
+      </div>
+    );
   }
 
   if (!parsedUserMessage) {
-    return <div className="message user">{item.text}</div>;
+    return (
+      <div className="message user">
+        <MarkdownDisplay>{item.text}</MarkdownDisplay>
+      </div>
+    );
   }
 
   return (
     <div className="message user">
       <span className="file-badge">📄 {parsedUserMessage.badgeText}</span>
-      {parsedUserMessage.body ? <div className="message-text">{parsedUserMessage.body}</div> : null}
+      {parsedUserMessage.body ? (
+        <div className="message-text">
+          <MarkdownDisplay>{parsedUserMessage.body}</MarkdownDisplay>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -43,11 +43,14 @@ import {
 import { mapSessionUpdateToActions } from './app/sessionUpdates';
 import { appReducer, createInitialState } from './app/state';
 import { MessageBubble } from './components/MessageBubble';
-import InputArea from './components/InputArea';
+import { MarkdownEditor } from './components/MarkdownEditor';
+import { MarkdownDisplay } from './components/MarkdownDisplay';
 import { PlanBlock } from './components/PlanBlock';
 import { PipelinePlanBlock } from './components/PipelinePlanBlock';
 import { TurnBlock } from './components/TurnBlock';
 import { getState, onMessage, postMessage, setState } from './vscode';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { useFileMentions } from './app/useFileMentions';
 import { useSessionDisplay } from './app/useSessionDisplay';
 
@@ -119,26 +122,17 @@ export function App(): JSX.Element {
     setState(state.persisted);
   }, [state.persisted]);
 
-  // Handle markdown rendering
+  // Handle markdown rendering (désactivé - rendu côté frontend avec react-markdown)
   useEffect(() => {
     if (!loadMarkdownRequestedRef.current || state.isLoadingSession) {
       return;
     }
-
-    const items = getRestoreMarkdownItems(state.persisted.chatHistory);
-    if (items.length > 0) {
-      postMessage({ type: 'renderMarkdown', items });
-    }
     loadMarkdownRequestedRef.current = false;
   }, [state.isLoadingSession, state.persisted.chatHistory]);
 
-  // Handle restored markdown items
+  // Handle restored markdown items (désactivé - rendu côté frontend)
   useEffect(() => {
-    if (restoreMarkdownItemsRef.current.length > 0) {
-      postMessage({ type: 'renderMarkdown', items: restoreMarkdownItemsRef.current });
-      restoreMarkdownItemsRef.current = [];
-    }
-
+    restoreMarkdownItemsRef.current = [];
     postMessage({ type: 'ready' });
 
     return onMessage((message) => {
@@ -184,11 +178,7 @@ export function App(): JSX.Element {
           break;
 
         case 'promptEnd': {
-          const markdownItem = getPromptEndMarkdownItem(stateRef.current);
           dispatch({ type: 'promptEnd' });
-          if (markdownItem) {
-            postMessage({ type: 'renderMarkdown', items: [markdownItem] });
-          }
           break;
         }
 
@@ -275,13 +265,6 @@ export function App(): JSX.Element {
             title: typeof message.title === 'string' ? message.title : null,
           });
           break;
-
-        case 'markdownRendered':
-          dispatch({
-            type: 'setRenderedMarkdown',
-            items: normalizeMarkdownRenderedItems(message.items),
-          });
-          break;
       }
     });
   }, []);
@@ -336,7 +319,7 @@ export function App(): JSX.Element {
     }
 
     container.scrollTop = container.scrollHeight;
-  }, [historyBlocks, state.currentTurn, state.renderedMarkdown]);
+  }, [historyBlocks, state.currentTurn]);
 
   // Close pickers on document click
   useEffect(() => {
@@ -752,7 +735,7 @@ export function App(): JSX.Element {
               <MessageBubble
                 item={block.item}
                 key={`message-${block.historyIndex}`}
-                renderedHtml={state.renderedMarkdown[block.historyIndex]}
+                onMentionClick={(path) => postMessage({ type: 'openFile', path })}
               />
             );
           }
@@ -772,13 +755,9 @@ export function App(): JSX.Element {
             );
           }
 
-          const assistantHtml = block.assistant
-            ? state.renderedMarkdown[block.assistant.historyIndex]
-            : undefined;
           const collapsed = getToolCollapseState(block.key, block.toolCalls.length, state.collapsedTools);
           return (
             <TurnBlock
-              assistantHtml={assistantHtml}
               assistantText={block.assistant?.item.text}
               collapsed={collapsed}
               key={block.key}
@@ -800,6 +779,7 @@ export function App(): JSX.Element {
               }
               toolCalls={block.toolCalls}
               turnKey={block.key}
+              onMentionClick={(path) => postMessage({ type: 'openFile', path })}
             />
           );
         })}
@@ -829,6 +809,7 @@ export function App(): JSX.Element {
             }
             toolCalls={state.currentTurn.toolCalls}
             turnKey="current-turn"
+            onMentionClick={(path) => postMessage({ type: 'openFile', path })}
           />
         ) : null}
       </div>
@@ -840,36 +821,166 @@ export function App(): JSX.Element {
         </div>
       ) : null}
 
-      <InputArea
-        state={state}
-        disabledBySession={disabledBySession}
-        slashFilteredCommands={slashFilteredCommands}
-        isSlashPopupOpen={isSlashPopupOpen}
-        slashPopupRef={slashPopupRef}
-        selectSlashCommand={selectSlashCommand}
-        dispatch={dispatch}
-        handleResizeStart={handleResizeStart}
-        sessionState={sessionState}
-        currentMode={currentMode}
-        currentModel={currentModel}
-        handleModeSelect={handleModeSelect}
-        handleModelSelect={handleModelSelect}
-        handleConfigOptionSelect={handleConfigOptionSelect}
-        promptInputRef={promptInputRef}
-        handlePromptKeyDown={handlePromptKeyDown}
-        placeholder={placeholder}
-        handleCancel={handleCancel}
-        handleSend={handleSend}
-        fileResults={fileResults}
-        fileSelectedIdx={fileSelectedIdx}
-        filePopupRef={filePopupRef}
-        isFilePopupOpen={isFilePopupOpen}
-        onFileSelect={handleFileSelect}
-        onFileHover={setFileSelectedIdx}
-        onPromptInput={handlePromptInput}
-        onPromptSelect={updateCursorFromInput}
-        selectedFileMentions={selectedFileMentions}
-      />
+      <div
+        className={`input-area${disabledBySession ? ' disabled' : ''}`}
+        id="inputArea"
+        style={{ height: state.inputAreaHeight }}
+      >
+        <div
+          className={`slash-popup${isSlashPopupOpen ? ' open' : ''}`}
+          id="slashPopup"
+          ref={slashPopupRef}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className="slash-popup-header">Commands</div>
+          {slashFilteredCommands.map((command, index) => (
+            <div
+              className={`slash-popup-item${index === state.slashSelectedIdx ? ' active' : ''}`}
+              data-index={index}
+              key={command.name}
+              onClick={() => selectSlashCommand(command)}
+              onMouseEnter={() => dispatch({ type: 'setSlashSelectedIdx', index })}
+            >
+              <span className="cmd-name">/{command.name}</span>
+              <span className="cmd-desc">{command.description}</span>
+            </div>
+          ))}
+        </div>
+
+        <div
+          className={`file-popup${isFilePopupOpen ? ' open' : ''}`}
+          id="filePopup"
+          ref={filePopupRef}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className="slash-popup-header">Files</div>
+          {fileResults.map((result, index) => (
+            <div
+              className={`file-popup-item${index === fileSelectedIdx ? ' active' : ''}`}
+              data-index={index}
+              key={result.path}
+              onClick={() => handleFileSelect(result)}
+              onMouseEnter={() => setFileSelectedIdx(index)}
+            >
+              <span className="file-name">{result.name}</span>
+              <span className="file-path">{result.path}</span>
+            </div>
+          ))}
+        </div>
+
+        <div className="input-resize-handle" id="resizeHandle" onMouseDown={handleResizeStart} />
+
+        <div className="input-toolbar">
+          {(sessionState?.configOptions ?? []).filter((option) =>
+            option.type === 'select' && (option.options ?? []).length > 0
+          ).map((option) => (
+            <div className="picker-wrap" key={option.id} onClick={(event) => event.stopPropagation()}>
+              <button
+                className="picker-btn"
+                title={option.description || option.name || ''}
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  dispatch({ type: 'toggleConfigDropdown', configId: option.id });
+                }}
+              >
+                <span className="picker-icon">⚙</span>
+                <span className="picker-label">{option.name}</span>
+                <span className="picker-chevron">▾</span>
+              </button>
+            </div>
+          ))}
+
+          {!sessionState?.configOptions?.some(opt => opt.type === 'select' && (opt.options ?? []).length > 0) && sessionState?.modes?.availableModes.length ? (
+            <div className="picker-wrap" onClick={(event) => event.stopPropagation()}>
+              <button
+                className="picker-btn"
+                title={currentMode?.description ?? 'Select mode'}
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  dispatch({ type: 'toggleModeDropdown' });
+                }}
+              >
+                <span className="picker-icon">⚡</span>
+                <span className="picker-label">{currentMode?.name ?? 'Mode'}</span>
+                <span className="picker-chevron">▾</span>
+              </button>
+            </div>
+          ) : (
+            <div className="picker-wrap hidden" />
+          )}
+
+          {!sessionState?.configOptions?.some(opt => opt.type === 'select' && (opt.options ?? []).length > 0) && sessionState?.models?.availableModels.length ? (
+            <div className="picker-wrap" onClick={(event) => event.stopPropagation()}>
+              <button
+                className="picker-btn"
+                title={currentModel?.description ?? 'Select model'}
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  dispatch({ type: 'toggleModelDropdown' });
+                }}
+              >
+                <span className="picker-icon">🧠</span>
+                <span className="picker-label">{currentModel?.name ?? 'Model'}</span>
+                <span className="picker-chevron">▾</span>
+              </button>
+            </div>
+          ) : (
+            <div className="picker-wrap hidden" />
+          )}
+          <span className="toolbar-spacer" />
+        </div>
+
+        <div className="input-editor-wrap">
+          <MarkdownEditor
+            ref={promptInputRef}
+            value={state.promptText}
+            onChange={(text) => {
+              dispatch({ type: 'setPromptText', text });
+              const nextCursorPosition = text.length;
+              pendingCursorPositionRef.current = nextCursorPosition;
+              setCursorPosition(nextCursorPosition);
+
+              if (state.slashPopupSuppressedFor && state.slashPopupSuppressedFor !== text) {
+                dispatch({ type: 'suppressSlashPopup', promptText: null });
+              }
+
+              const filteredMentions = selectedFileMentions.filter((mention) =>
+                text.includes(mention.token)
+              );
+              if (filteredMentions.length !== selectedFileMentions.length) {
+                setSelectedFileMentions(filteredMentions);
+              }
+            }}
+            placeholder={placeholder}
+            disabled={disabledBySession || state.isProcessing}
+            onKeyDown={handlePromptKeyDown}
+            onFocus={focusPromptInput}
+            fileMentions={selectedFileMentions.map(m => ({ token: m.token, path: m.path, name: m.name }))}
+            onMentionClick={(path) => postMessage({ type: 'openFile', path })}
+          />
+        </div>
+
+        <div className="input-send-row">
+          <button
+            className={`send-stop-btn ${state.isProcessing ? 'stop' : 'send'}`}
+            disabled={!state.isProcessing && (disabledBySession || state.promptText.trim().length === 0)}
+            id="sendStopBtn"
+            type="button"
+            onClick={() => {
+              if (state.isProcessing) {
+                handleCancel();
+              } else {
+                handleSend();
+              }
+            }}
+          >
+            {state.isProcessing ? '■ Stop' : 'Send'}
+          </button>
+        </div>
+      </div>
     </>
   );
 }

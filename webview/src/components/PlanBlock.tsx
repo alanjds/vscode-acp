@@ -1,6 +1,7 @@
 import type { JSX } from 'react';
 
 import type { PlanHistoryItem } from '../chatTypes';
+import { MarkdownDisplay } from './MarkdownDisplay';
 
 export type PlanBlockProps = {
   item: PlanHistoryItem;
@@ -25,7 +26,10 @@ export function PlanBlock({ item }: PlanBlockProps): JSX.Element {
           className={`plan-entry${entry.status === 'completed' ? ' completed' : ''}`}
           key={`plan-entry-${index}`}
         >
-          {getPlanEntryIcon(entry.status)} {entry.title || entry.description || entry.content || ''}
+          <span style={{ marginRight: '8px' }}>{getPlanEntryIcon(entry.status)}</span>
+          <MarkdownDisplay>
+            {entry.title || entry.description || entry.content || ''}
+          </MarkdownDisplay>
         </div>
       ))}
     </div>

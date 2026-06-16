@@ -4,7 +4,7 @@ title: Cleanup Dead Code Plan
 
 primitives:
   scope_cleanup:
-    agent: Codex CLI
+    agent: Pi Agent
     output: markdown
     sideEffects: none
     prompt: |

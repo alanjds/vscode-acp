@@ -4,7 +4,7 @@ title: Deep PR Review
 
 primitives:
   scope_review:
-    agent: Codex CLI
+    agent: Vibe
     output: markdown
     sideEffects: none
     prompt: |
@@ -14,7 +14,7 @@ primitives:
       {{userPrompt}}
 
   review_correctness:
-    agent: Codex CLI
+    agent: Vibe
     output: markdown
     sideEffects: none
     prompt: |
@@ -24,7 +24,7 @@ primitives:
       {{steps.scope.output}}
 
   review_tests:
-    agent: Codex CLI
+    agent: Vibe
     output: markdown
     sideEffects: none
     prompt: |
@@ -34,7 +34,7 @@ primitives:
       {{steps.scope.output}}
 
   review_maintainability:
-    agent: Codex CLI
+    agent: Vibe
     output: markdown
     sideEffects: none
     prompt: |
@@ -44,7 +44,7 @@ primitives:
       {{steps.scope.output}}
 
   review_security:
-    agent: Codex CLI
+    agent: Vibe
     output: markdown
     sideEffects: none
     prompt: |
@@ -54,7 +54,7 @@ primitives:
       {{steps.scope.output}}
 
   synthesize_pr_review:
-    agent: Codex CLI
+    agent: Vibe
     output: markdown
     sideEffects: none
     prompt: |

@@ -22,6 +22,9 @@ import { isPipelineEnabled } from './config/PipelineConfig';
 import { log, disposeChannels } from './utils/Logger';
 import { initTelemetry, sendEvent } from './utils/TelemetryManager';
 import { version as extensionVersion } from '../package.json';
+import { InlineChatController } from './inlineChat/InlineChatController';
+import { AcpInlineEditAgent } from './inlineChat/agent/AcpInlineEditAgent';
+import { PatchApplyService } from './inlineChat/patch/PatchApplyService';
 
 export function activate(context: vscode.ExtensionContext): void {
   log('ACP Client extension activating...');
@@ -43,6 +46,12 @@ export function activate(context: vscode.ExtensionContext): void {
   const workspaceIdentity = () => resolveWorkspaceIdentity();
   const pipelineService = new PipelineService(() => workspaceIdentity().cwd);
   sessionManager.setPipelineService(pipelineService);
+
+  const inlineChatController = new InlineChatController(
+    context,
+    new AcpInlineEditAgent(workspaceIdentity, sessionManager),
+    new PatchApplyService(),
+  );
 
   // Persistent client-side session-history cache (used as the tier-2 tree
   // source for agents that support session/load or session/resume but not
@@ -180,6 +189,9 @@ export function activate(context: vscode.ExtensionContext): void {
     sendEvent('command/openDebugSnapshot');
     await debugWebviewPanel.open();
   });
+  const openInlineChatCmd = vscode.commands.registerCommand('damien.inlineChat.open', async () => {
+    await inlineChatController.open();
+  });
 
   // --- Register disposables ---
   context.subscriptions.push(
@@ -190,6 +202,8 @@ export function activate(context: vscode.ExtensionContext): void {
     pipelineYmlWatcher,
     pipelineConfigWatcher,
     openDebugSnapshotCmd,
+    openInlineChatCmd,
+    inlineChatController,
     ...commandDisposables,
     {
       dispose: () => {

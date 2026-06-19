@@ -12,6 +12,7 @@ import type { SandboxPromotionPanel } from '../sandbox/SandboxPromotionPanel';
 import type { SandboxService } from '../sandbox/SandboxService';
 import { resolveWorkspaceIdentity } from '../core/WorkspaceIdentity';
 import { ChatWebviewProvider } from '../ui/ChatWebviewProvider';
+import { ChatEditorPanelManager } from '../ui/ChatEditorPanelManager';
 import { SessionTreeProvider } from '../ui/SessionTreeProvider';
 import { PipelineService } from '../pipeline/PipelineService';
 import { serializeCompiledTeamPipeline } from '../pipeline/AgentTeamCompiler';
@@ -29,6 +30,7 @@ interface RegisterCommandsDependencies {
   sessionManager: SessionManager;
   sessionTreeProvider: SessionTreeProvider;
   chatWebviewProvider: ChatWebviewProvider;
+  chatEditorPanelManager: ChatEditorPanelManager;
   historyStore: SessionHistoryStore;
   sandboxService: SandboxService;
   sandboxPromotionPanel: SandboxPromotionPanel;
@@ -40,6 +42,7 @@ export function registerCommands({
   sessionManager,
   sessionTreeProvider,
   chatWebviewProvider,
+  chatEditorPanelManager,
   historyStore,
   sandboxService,
   sandboxPromotionPanel,
@@ -189,6 +192,14 @@ export function registerCommands({
 
   const openChatCmd = vscode.commands.registerCommand('acp.openChat', () => {
     vscode.commands.executeCommand(FOCUS_CHAT_COMMAND);
+  });
+
+  const openChatEditorCmd = vscode.commands.registerCommand('acp.openChatEditor', async () => {
+    await chatEditorPanelManager.open();
+  });
+
+  const moveChatToEditorCmd = vscode.commands.registerCommand('acp.moveChatToEditor', async () => {
+    await chatEditorPanelManager.open();
   });
 
   const sendPromptCmd = vscode.commands.registerCommand('acp.sendPrompt', async () => {
@@ -656,6 +667,8 @@ export function registerCommands({
     newConversationCmd,
     disconnectAgentCmd,
     openChatCmd,
+    openChatEditorCmd,
+    moveChatToEditorCmd,
     sendPromptCmd,
     cancelTurnCmd,
     restartAgentCmd,

@@ -105,6 +105,14 @@
         "title": "ACP: Open Chat Panel"
       },
       {
+        "command": "acp.openChatEditor",
+        "title": "ACP: Open Chat in Editor"
+      },
+      {
+        "command": "acp.moveChatToEditor",
+        "title": "ACP: Move Chat to Editor"
+      },
+      {
         "command": "acp.addAgent",
         "title": "ACP: Add Agent Configuration",
         "icon": "$(add)"
@@ -328,6 +336,11 @@
           "command": "acp.newConversation",
           "when": "view == acp-chat",
           "group": "navigation@1"
+        },
+        {
+          "command": "acp.openChatEditor",
+          "when": "view == acp-chat",
+          "group": "navigation@0"
         },
         {
           "command": "acp.enableEditorContextLink",

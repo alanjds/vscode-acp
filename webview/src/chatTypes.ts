@@ -187,6 +187,23 @@ export type PersistedWebviewState = {
   hasActiveSession: boolean;
 };
 
+export type ChatWebviewSharedState = {
+  version: number;
+  updatedAt: number;
+  chatHistory: ChatHistoryItem[];
+  sessionState: SessionSnapshot | null;
+  hasActiveSession: boolean;
+  promptText: string;
+  inputAreaHeight: number;
+  isProcessing: boolean;
+  currentTurn: CurrentTurn | null;
+  collapsedTools: Record<string, boolean>;
+  pipelineTimeline: PipelineTimelineStep[];
+  activePipelineRole: PipelinePhase | null;
+  activePipelineAgentName: string | null;
+  composerUnlocked?: boolean;
+};
+
 export type FileSearchResult = {
   path: string;
   name: string;

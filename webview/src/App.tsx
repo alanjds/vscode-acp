@@ -18,6 +18,7 @@ import type {
   PipelinePhase,
   PipelinePlanStatus,
   PersistedWebviewState,
+  ChatWebviewSharedState,
   SessionConfigOption,
   SlashCommand,
 } from './chatTypes';
@@ -34,7 +35,7 @@ import {
   normalizeSessionUpdate,
 } from './app/normalizers';
 import { mapSessionUpdateToActions } from './app/sessionUpdates';
-import { appReducer, createInitialState } from './app/state';
+import { appReducer, buildSharedSnapshot, createInitialState } from './app/state';
 import { MessageBubble } from './components/MessageBubble';
 import {
   MarkdownEditor,
@@ -66,6 +67,9 @@ export function App(): JSX.Element {
   const slashPopupRef = useRef<HTMLDivElement | null>(null);
   const filePopupRef = useRef<HTMLDivElement | null>(null);
   const pendingCursorPositionRef = useRef<number | null>(null);
+  const sharedVersionRef = useRef(0);
+  const sharedUpdatedAtRef = useRef(0);
+  const skipSharedSyncRef = useRef(false);
 
   stateRef.current = state;
 
@@ -115,10 +119,34 @@ export function App(): JSX.Element {
     [excludedToolIndexes, state.persisted.chatHistory],
   );
 
-  // Sync state to extension
+  // Sync shared UI state to extension host and VS Code serializer
   useEffect(() => {
-    setState(state.persisted);
-  }, [state.persisted]);
+    if (skipSharedSyncRef.current) {
+      skipSharedSyncRef.current = false;
+      return;
+    }
+
+    sharedVersionRef.current += 1;
+    sharedUpdatedAtRef.current = Date.now();
+    const snapshot = buildSharedSnapshot(
+      state,
+      sharedVersionRef.current,
+      sharedUpdatedAtRef.current,
+    );
+    setState(snapshot);
+    postMessage({ type: 'sharedStateChanged', state: snapshot });
+  }, [
+    state.persisted,
+    state.promptText,
+    state.inputAreaHeight,
+    state.isProcessing,
+    state.currentTurn,
+    state.collapsedTools,
+    state.pipelineTimeline,
+    state.activePipelineRole,
+    state.activePipelineAgentName,
+    state.composerUnlocked,
+  ]);
 
   // Handle markdown rendering (désactivé - rendu côté frontend avec react-markdown)
   useEffect(() => {
@@ -135,6 +163,23 @@ export function App(): JSX.Element {
 
     return onMessage((message) => {
       switch (message.type) {
+        case 'hydrateSharedState':
+        case 'sharedStateUpdated':
+          if (message.state && typeof message.state === 'object') {
+            const sharedState = message.state as ChatWebviewSharedState;
+            if (
+              sharedState.version === sharedVersionRef.current
+              && sharedState.updatedAt === sharedUpdatedAtRef.current
+            ) {
+              break;
+            }
+            sharedVersionRef.current = sharedState.version;
+            sharedUpdatedAtRef.current = sharedState.updatedAt;
+            skipSharedSyncRef.current = true;
+            dispatch({ type: 'hydrateSharedState', state: sharedState });
+          }
+          break;
+
         case 'state':
           if (message.session) {
             dispatch({

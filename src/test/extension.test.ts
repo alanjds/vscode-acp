@@ -85,6 +85,8 @@ suite('Extension Test Suite', () => {
 	      'acp.connectAgentWithCurrentContext',
 	      'acp.newConversation',
       'acp.openChat',
+      'acp.openChatEditor',
+      'acp.moveChatToEditor',
       'acp.cancelTurn',
       'acp.disconnectAgent',
 	      'acp.openSession',

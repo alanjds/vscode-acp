@@ -9,7 +9,10 @@ import { resolveWorkspaceIdentity } from './core/WorkspaceIdentity';
 import { SessionUpdateHandler } from './handlers/SessionUpdateHandler';
 import { SessionTreeProvider } from './ui/SessionTreeProvider';
 import { StatusBarManager } from './ui/StatusBarManager';
+import { ChatWebviewController } from './ui/ChatWebviewController';
 import { ChatWebviewProvider } from './ui/ChatWebviewProvider';
+import { ChatWebviewStateStore } from './ui/ChatWebviewStateStore';
+import { ChatEditorPanelManager } from './ui/ChatEditorPanelManager';
 import { DebugWebviewPanel } from './ui/DebugWebviewPanel';
 import { getEditorContextSnapshot, initializeOpenEditorsTracker, trackLastKnownEditorContext } from './ui/EditorContext';
 import { PipelineService } from './pipeline/PipelineService';
@@ -98,15 +101,19 @@ export function activate(context: vscode.ExtensionContext): void {
     extensionVersion,
   );
 
-  const chatWebviewProvider = new ChatWebviewProvider(
+  const chatStateStore = new ChatWebviewStateStore(context.workspaceState);
+  const chatController = new ChatWebviewController(
     context.extensionUri,
     sessionManager,
     sessionUpdateHandler,
+    chatStateStore,
     pipelineService,
     () => getEditorContextSnapshot(),
     debugTraceStore,
     (chatState) => debugWebviewPanel.open(chatState),
   );
+  const chatWebviewProvider = new ChatWebviewProvider(chatController);
+  const chatEditorPanelManager = new ChatEditorPanelManager(chatController, chatStateStore);
   const initialEditorContextLinked = context.workspaceState.get<boolean>(
     EDITOR_CONTEXT_LINK_STATE_KEY,
     false,
@@ -119,6 +126,10 @@ export function activate(context: vscode.ExtensionContext): void {
     ChatWebviewProvider.viewType,
     chatWebviewProvider,
     { webviewOptions: { retainContextWhenHidden: true } },
+  );
+  const chatEditorSerializerRegistration = vscode.window.registerWebviewPanelSerializer(
+    ChatEditorPanelManager.viewType,
+    chatEditorPanelManager,
   );
 
   const statusBarManager = new StatusBarManager(sessionManager);
@@ -218,6 +229,7 @@ export function activate(context: vscode.ExtensionContext): void {
     sessionManager,
     sessionTreeProvider,
     chatWebviewProvider,
+    chatEditorPanelManager,
     historyStore,
     sandboxService,
     sandboxPromotionPanel,
@@ -235,6 +247,10 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     treeView,
     chatViewRegistration,
+    chatEditorSerializerRegistration,
+    chatStateStore,
+    chatController,
+    chatEditorPanelManager,
     statusBarManager,
     pipelineYamlWatcher,
     pipelineYmlWatcher,
@@ -251,6 +267,9 @@ export function activate(context: vscode.ExtensionContext): void {
         void pipelineService.dispose();
         sessionUpdateHandler.dispose();
         chatWebviewProvider.dispose();
+        chatController.dispose();
+        chatEditorPanelManager.dispose();
+        chatStateStore.dispose();
         sessionTreeProvider.dispose();
         debugWebviewPanel.dispose();
         disposeChannels();

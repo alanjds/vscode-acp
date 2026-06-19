@@ -1,4 +1,5 @@
 import type {
+  ChatWebviewSharedState,
   FileSearchResult,
   MarkdownRenderItem,
   MarkdownRenderedItem,
@@ -36,6 +37,8 @@ export type HostToWebviewMessage =
   | { type: 'reviewerRerunReady'; output: string }
   | { type: 'markdownRendered'; items: MarkdownRenderedItem[] }
   | { type: 'debugSnapshot'; snapshot: DebugSnapshot }
+  | { type: 'hydrateSharedState'; state: ChatWebviewSharedState }
+  | { type: 'sharedStateUpdated'; state: ChatWebviewSharedState }
   | { type: string; [key: string]: unknown };
 
 export type WebviewToHostMessage =
@@ -54,7 +57,8 @@ export type WebviewToHostMessage =
   | { type: 'openDebugSnapshot'; chatState: unknown }
   | { type: 'refreshDebugSnapshot' }
   | { type: 'copyDebugSnapshot' }
-  | { type: 'exportDebugSnapshot' };
+  | { type: 'exportDebugSnapshot' }
+  | { type: 'sharedStateChanged'; state: ChatWebviewSharedState };
 
 type VsCodeApi<State> = {
   postMessage(message: WebviewToHostMessage): void;

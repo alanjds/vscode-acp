@@ -1,5 +1,6 @@
 import type {
   ChatHistoryItem,
+  ChatWebviewSharedState,
   CurrentTurn,
   ModelsState,
   ModesState,
@@ -88,7 +89,8 @@ export type AppAction =
   | { type: 'resetPipelineTimeline' }
   | { type: 'loadSessionStart' }
   | { type: 'loadSessionEnd'; ok: boolean }
-  | { type: 'setRenderedMarkdown'; items: Array<{ index: number; html: string }> };
+  | { type: 'setRenderedMarkdown'; items: Array<{ index: number; html: string }> }
+  | { type: 'hydrateSharedState'; state: ChatWebviewSharedState };
 
 export function emptyPersistedState(): PersistedWebviewState {
   return {
@@ -109,14 +111,34 @@ export function createCurrentTurn(turnId: string): CurrentTurn {
   };
 }
 
+export function buildSharedSnapshot(state: AppState, version: number, updatedAt: number): ChatWebviewSharedState {
+  return {
+    version,
+    updatedAt,
+    chatHistory: state.persisted.chatHistory,
+    sessionState: state.persisted.sessionState,
+    hasActiveSession: state.persisted.hasActiveSession,
+    promptText: state.promptText,
+    inputAreaHeight: state.inputAreaHeight,
+    isProcessing: state.isProcessing,
+    currentTurn: state.currentTurn,
+    collapsedTools: state.collapsedTools,
+    pipelineTimeline: state.pipelineTimeline,
+    activePipelineRole: state.activePipelineRole,
+    activePipelineAgentName: state.activePipelineAgentName,
+    composerUnlocked: state.composerUnlocked,
+  };
+}
+
 export function createInitialState(persistedValue: unknown): AppState {
-  const persisted = normalizePersistedState(persistedValue);
+  const shared = normalizeSharedBootstrapState(persistedValue);
+  const persisted = shared?.persisted ?? normalizePersistedState(persistedValue);
   return {
     persisted,
-    promptText: '',
-    inputAreaHeight: DEFAULT_INPUT_HEIGHT,
-    isProcessing: false,
-    composerUnlocked: persisted.hasActiveSession,
+    promptText: shared?.promptText ?? '',
+    inputAreaHeight: shared?.inputAreaHeight ?? DEFAULT_INPUT_HEIGHT,
+    isProcessing: shared?.isProcessing ?? false,
+    composerUnlocked: shared?.composerUnlocked ?? persisted.hasActiveSession,
     isModeDropdownOpen: false,
     isModelDropdownOpen: false,
     openConfigDropdownId: null,
@@ -124,12 +146,47 @@ export function createInitialState(persistedValue: unknown): AppState {
     slashPopupSuppressedFor: null,
     placeholderOverride: null,
     renderedMarkdown: {},
-    currentTurn: null,
-    collapsedTools: {},
+    currentTurn: shared?.currentTurn ?? null,
+    collapsedTools: shared?.collapsedTools ?? {},
     isLoadingSession: false,
-    pipelineTimeline: [],
-    activePipelineRole: null,
-    activePipelineAgentName: null,
+    pipelineTimeline: shared?.pipelineTimeline ?? [],
+    activePipelineRole: shared?.activePipelineRole ?? null,
+    activePipelineAgentName: shared?.activePipelineAgentName ?? null,
+  };
+}
+
+function normalizeSharedBootstrapState(value: unknown): Partial<{
+  persisted: PersistedWebviewState;
+  promptText: string;
+  inputAreaHeight: number;
+  isProcessing: boolean;
+  composerUnlocked: boolean;
+  currentTurn: CurrentTurn | null;
+  collapsedTools: Record<string, boolean>;
+  pipelineTimeline: PipelineTimelineStep[];
+  activePipelineRole: PipelinePhase | null;
+  activePipelineAgentName: string | null;
+}> | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const candidate = value as Partial<ChatWebviewSharedState>;
+  if (typeof candidate.version !== 'number' && typeof candidate.updatedAt !== 'number') {
+    return null;
+  }
+
+  return {
+    persisted: normalizePersistedState(candidate),
+    promptText: typeof candidate.promptText === 'string' ? candidate.promptText : '',
+    inputAreaHeight: typeof candidate.inputAreaHeight === 'number' ? candidate.inputAreaHeight : DEFAULT_INPUT_HEIGHT,
+    isProcessing: Boolean(candidate.isProcessing),
+    composerUnlocked: candidate.composerUnlocked,
+    currentTurn: candidate.currentTurn ?? null,
+    collapsedTools: candidate.collapsedTools ?? {},
+    pipelineTimeline: Array.isArray(candidate.pipelineTimeline) ? candidate.pipelineTimeline : [],
+    activePipelineRole: candidate.activePipelineRole ?? null,
+    activePipelineAgentName: candidate.activePipelineAgentName ?? null,
   };
 }
 
@@ -837,6 +894,25 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         composerUnlocked: state.persisted.hasActiveSession,
       };
     }
+
+    case 'hydrateSharedState':
+      return {
+        ...state,
+        persisted: {
+          chatHistory: action.state.chatHistory,
+          sessionState: action.state.sessionState,
+          hasActiveSession: action.state.hasActiveSession,
+        },
+        promptText: action.state.promptText,
+        inputAreaHeight: clamp(action.state.inputAreaHeight, MIN_INPUT_HEIGHT, MAX_INPUT_HEIGHT),
+        isProcessing: action.state.isProcessing,
+        composerUnlocked: action.state.composerUnlocked ?? action.state.hasActiveSession,
+        currentTurn: action.state.currentTurn,
+        collapsedTools: action.state.collapsedTools,
+        pipelineTimeline: action.state.pipelineTimeline,
+        activePipelineRole: action.state.activePipelineRole,
+        activePipelineAgentName: action.state.activePipelineAgentName,
+      };
 
     default:
       return state;

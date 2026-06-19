@@ -42,6 +42,12 @@ import {
 } from './components/MarkdownEditor';
 import { PlanBlock } from './components/PlanBlock';
 import { PipelinePlanBlock } from './components/PipelinePlanBlock';
+import {
+  applyPipelineStatusToTimeline,
+  createDefaultTeamTimeline,
+  PipelineRoleTimeline,
+} from './components/PipelineRoleTimeline';
+import { PipelineRoleOutputBlock } from './components/PipelineRoleOutputBlock';
 import { TurnBlock } from './components/TurnBlock';
 import { getState, onMessage, postMessage, setState } from './vscode';
 import { useFileMentions } from './app/useFileMentions';
@@ -194,7 +200,18 @@ export function App(): JSX.Element {
 
         case 'pipelinePlanReady':
           if (typeof message.plan === 'string') {
-            dispatch({ type: 'appendPipelinePlan', plan: message.plan });
+            dispatch({
+              type: 'appendPipelinePlan',
+              plan: message.plan,
+              role: normalizePipelinePhase(message.role),
+              agentName: typeof message.agentName === 'string' ? message.agentName : undefined,
+            });
+            if (typeof message.teamId === 'string') {
+              dispatch({
+                type: 'updatePipelineTimeline',
+                timeline: createDefaultTeamTimeline(false),
+              });
+            }
           }
           break;
 
@@ -207,15 +224,53 @@ export function App(): JSX.Element {
               message: typeof message.message === 'string' ? message.message : undefined,
             });
           }
+          if (typeof message.teamId === 'string') {
+            dispatch({
+              type: 'updatePipelineTimeline',
+              timeline: applyPipelineStatusToTimeline(
+                stateRef.current.pipelineTimeline.length > 0
+                  ? stateRef.current.pipelineTimeline
+                  : createDefaultTeamTimeline(false),
+                typeof message.status === 'string' ? message.status : undefined,
+                typeof message.stepId === 'string' ? message.stepId : undefined,
+              ),
+            });
+          }
+          const role = normalizePipelinePhase(message.role);
+          if (role) {
+            dispatch({
+              type: 'setActivePipelineRole',
+              role,
+              agentName: typeof message.agentName === 'string' ? message.agentName : null,
+            });
+          }
           break;
         }
+
+        case 'reviewerRerunReady':
+          if (typeof message.output === 'string') {
+            dispatch({
+              type: 'appendPipelineRoleOutput',
+              role: 'reviewer-rerun',
+              text: message.output,
+              title: 'Review (rerun)',
+            });
+          }
+          break;
 
         case 'sessionUpdate':
           for (const action of mapSessionUpdateToActions(
             normalizeSessionUpdate(message.update),
-            normalizePipelinePhase(message.phase),
+            normalizePipelinePhase(message.phase ?? message.role),
           )) {
             dispatch(action);
+          }
+          if (message.role || message.agentName) {
+            dispatch({
+              type: 'setActivePipelineRole',
+              role: normalizePipelinePhase(message.role ?? message.phase) ?? null,
+              agentName: typeof message.agentName === 'string' ? message.agentName : null,
+            });
           }
           break;
 
@@ -696,6 +751,10 @@ export function App(): JSX.Element {
           </div>
         ) : null}
 
+        {state.pipelineTimeline.length > 0 ? (
+          <PipelineRoleTimeline timeline={state.pipelineTimeline} />
+        ) : null}
+
         {historyBlocks.map((block) => {
           if (block.kind === 'message') {
             return (
@@ -718,6 +777,15 @@ export function App(): JSX.Element {
                 key={`pipeline-plan-${block.historyIndex}`}
                 onApprove={handleApprovePipelinePlan}
                 onReject={handleRejectPipelinePlan}
+              />
+            );
+          }
+
+          if (block.kind === 'pipelineRoleOutput') {
+            return (
+              <PipelineRoleOutputBlock
+                item={block.item}
+                key={`pipeline-role-${block.historyIndex}`}
               />
             );
           }
@@ -968,5 +1036,11 @@ function normalizePipelineStatus(status: unknown): PipelinePlanStatus | null {
 }
 
 function normalizePipelinePhase(phase: unknown): PipelinePhase | undefined {
-  return phase === 'planner' || phase === 'implementer' ? phase : undefined;
+  return phase === 'planner'
+    || phase === 'implementer'
+    || phase === 'reviewer'
+    || phase === 'tester'
+    || phase === 'reviewer-rerun'
+    ? phase
+    : undefined;
 }

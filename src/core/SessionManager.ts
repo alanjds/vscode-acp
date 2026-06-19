@@ -20,6 +20,7 @@ import { classifyAgentError } from './AgentError';
 import { resolveWorkspaceIdentity, type WorkspaceIdentity } from './WorkspaceIdentity';
 import { getAgentConfigs } from '../config/AgentConfig';
 import { getPipelineDefinitionForAgent, isPipelineVirtualAgentName } from '../config/PipelineCatalog';
+import { isTeamVirtualAgentName, isValidTeamVirtualAgentName, getTeamEntryForAgent } from '../config/AgentTeamCatalog';
 import { PipelineService } from '../pipeline/PipelineService';
 import { SessionState } from './SessionState';
 import { SessionUpdateBuffer } from './SessionUpdateBuffer';
@@ -157,6 +158,10 @@ export class SessionManager extends EventEmitter {
    * Internally creates a session via ACP protocol.
    */
   async connectToAgent(agentName: string, options: OpenSessionOptions = {}): Promise<SessionInfo> {
+    if (isTeamVirtualAgentName(agentName) && !isValidTeamVirtualAgentName(agentName)) {
+      const entry = getTeamEntryForAgent(agentName);
+      throw new Error(`Invalid agent team: ${entry?.errors.join('; ') ?? 'configuration error'}`);
+    }
     if (isPipelineVirtualAgentName(agentName)) {
       return this.connectToPipelineAgent(agentName, options);
     }
@@ -328,6 +333,11 @@ export class SessionManager extends EventEmitter {
     };
 
     this.sessionState.addSession(sessionInfo);
+    this.discussionContextHandler.getHistoryStore()?.upsertNew(
+      agentName,
+      cwd,
+      sessionId,
+    );
     if (sharedDiscussionContext) {
       this.discussionContextHandler.setPending(sessionId, sharedDiscussionContext.text);
       this.discussionContextHandler.linkContextFamily(

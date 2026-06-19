@@ -1,0 +1,18 @@
+version: 1
+id: feature-team
+title: Feature Team
+orchestrator:
+  agent: Codex CLI
+roles:
+  planner:
+    agent: Codex CLI
+    instructions: .acp/agents/planner.md
+  implementer:
+    agent: Vibe
+    instructions: .acp/agents/implementer.md
+  reviewer:
+    agent: Claude Code
+    instructions: .acp/agents/reviewer.md
+  tester:
+    agent: Codex CLI
+    instructions: .acp/agents/tester.md

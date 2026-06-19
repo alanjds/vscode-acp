@@ -21,7 +21,12 @@ suite('AgentConfig pipeline', () => {
         get: (key: string, defaultValue?: unknown) => {
           switch (key) {
             case 'agents':
-              return { 'Gemini CLI': { command: 'gemini' }, 'Codex CLI': { command: 'codex' }, Vibe: { command: 'vibe' } };
+              return {
+                'Gemini CLI': { command: 'gemini' },
+                'Codex CLI': { command: 'codex' },
+                'Claude Code': { command: 'claude' },
+                Vibe: { command: 'vibe' },
+              };
             case 'pipeline.enabled':
               return true;
             default:
@@ -59,7 +64,12 @@ suite('AgentConfig pipeline', () => {
         get: (key: string, defaultValue?: unknown) => {
           switch (key) {
             case 'agents':
-              return { 'Gemini CLI': { command: 'gemini' }, 'Codex CLI': { command: 'codex' }, Vibe: { command: 'vibe' } };
+              return {
+                'Gemini CLI': { command: 'gemini' },
+                'Codex CLI': { command: 'codex' },
+                'Claude Code': { command: 'claude' },
+                Vibe: { command: 'vibe' },
+              };
             case 'pipeline.enabled':
               return true;
             default:
@@ -70,7 +80,7 @@ suite('AgentConfig pipeline', () => {
     };
 
     const names = getAgentNames(path.join(__dirname, '..', '..'));
-    assert.ok(names.includes('Demo Simple'));
-    assert.ok(names.includes('Demo Parallel Review'));
+    assert.ok(names.includes('Plan Execute Verify'));
+    assert.ok(names.includes('Feature Team'));
   });
 });

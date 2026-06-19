@@ -197,6 +197,14 @@
         "title": "ACP: Cleanup Stale Sandboxes"
       },
       {
+        "command": "acp.showCompiledTeamPipeline",
+        "title": "ACP: Show Compiled Team Pipeline"
+      },
+      {
+        "command": "acp.rerunTeamReviewer",
+        "title": "ACP: Re-run Team Reviewer"
+      },
+      {
         "command": "acp.refreshSessions",
         "title": "ACP: Refresh Sessions"
       },
@@ -571,7 +579,12 @@
         "acp.pipeline.enabled": {
           "type": "boolean",
           "default": true,
-          "description": "Enable workspace-defined LangGraph pipeline agents from .acp/pipelines/*.yaml."
+          "description": "Enable workspace-defined LangGraph pipeline agents from .acp/pipelines/*.yaml and agent teams from .acp/teams/*.yaml."
+        },
+        "acp.instructions.maxBytes": {
+          "type": "number",
+          "default": 262144,
+          "description": "Maximum size in bytes for Markdown instruction files referenced by agent teams."
         },
         "acp.sandbox.enabled": {
           "type": "boolean",

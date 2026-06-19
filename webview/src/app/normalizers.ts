@@ -9,6 +9,7 @@ import type {
   PersistedWebviewState,
   PipelinePlanHistoryItem,
   PipelinePlanStatus,
+  PipelineRoleOutputHistoryItem,
   PlanEntry,
   PlanHistoryItem,
   PlanUpdate,
@@ -359,6 +360,34 @@ export function normalizePipelinePlanHistoryItem(value: unknown): PipelinePlanHi
     plan: candidate.plan,
     status: normalizePipelinePlanStatus(candidate.status),
     message: typeof candidate.message === 'string' ? candidate.message : undefined,
+    role: candidate.role === 'planner' || candidate.role === 'implementer' || candidate.role === 'reviewer' || candidate.role === 'tester' || candidate.role === 'reviewer-rerun'
+      ? candidate.role
+      : undefined,
+    agentName: typeof candidate.agentName === 'string' ? candidate.agentName : undefined,
+  };
+}
+
+export function normalizePipelineRoleOutputHistoryItem(value: unknown): PipelineRoleOutputHistoryItem | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const candidate = value as Partial<PipelineRoleOutputHistoryItem>;
+  if (candidate.kind !== 'pipelineRoleOutput' || typeof candidate.text !== 'string') {
+    return null;
+  }
+
+  const role = candidate.role;
+  if (role !== 'planner' && role !== 'implementer' && role !== 'reviewer' && role !== 'tester' && role !== 'reviewer-rerun') {
+    return null;
+  }
+
+  return {
+    kind: 'pipelineRoleOutput',
+    role,
+    agentName: typeof candidate.agentName === 'string' ? candidate.agentName : undefined,
+    text: candidate.text,
+    title: typeof candidate.title === 'string' ? candidate.title : role,
   };
 }
 
@@ -421,7 +450,8 @@ export function normalizeChatHistoryItem(value: unknown): ChatHistoryItem | null
     normalizeThoughtHistoryItem(value) ??
     normalizeToolCallHistoryItem(value) ??
     normalizePlanHistoryItem(value) ??
-    normalizePipelinePlanHistoryItem(value)
+    normalizePipelinePlanHistoryItem(value) ??
+    normalizePipelineRoleOutputHistoryItem(value)
   );
 }
 

@@ -10,6 +10,11 @@ import {
 } from '../core/WorkspaceIdentity';
 import { getAgentNames } from '../config/AgentConfig';
 import { isPipelineVirtualAgentName } from '../config/PipelineCatalog';
+import {
+  getTeamEntryForAgent,
+  isTeamVirtualAgentName,
+  getTeamTooltip,
+} from '../config/AgentTeamCatalog';
 import { log, logError } from '../utils/Logger';
 
 /**
@@ -224,6 +229,23 @@ export class SessionTreeProvider implements vscode.TreeDataProvider<AgentNode | 
       const linkedToActiveContext = activeContextFamilyId
         ? this.historyStore?.agentHasContextFamily(name, activeContextFamilyId, workspace) ?? false
         : false;
+      if (isTeamVirtualAgentName(name, workspace.cwd)) {
+        const entry = getTeamEntryForAgent(name, workspace.cwd)!;
+        const item = new AgentTreeItem(
+          name,
+          this.sessionManager.isAgentConnected(name),
+          vscode.TreeItemCollapsibleState.None,
+          linkedToActiveContext,
+        );
+        item.iconPath = new vscode.ThemeIcon('organization');
+        item.tooltip = getTeamTooltip(entry);
+        if (entry.errors.length > 0) {
+          item.description = 'invalid team';
+        } else {
+          item.description = item.description ? `${item.description} · team` : 'team';
+        }
+        return item;
+      }
       if (isPipelineVirtualAgentName(name, workspace.cwd)) {
         return new AgentTreeItem(
           name,

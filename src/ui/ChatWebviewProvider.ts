@@ -43,6 +43,25 @@ function getTextUpdateContent(updateData: any): string | null {
     : null;
 }
 
+function persistSessionUpdateToHistory(
+  sessionManager: SessionManager,
+  sessionId: string,
+  updateData: any,
+): void {
+  if (updateData?.sessionUpdate === 'agent_message_chunk') {
+    const text = getTextUpdateContent(updateData);
+    if (text) {
+      sessionManager.recordAssistantMessageChunk(sessionId, text);
+    }
+  }
+  if (updateData?.sessionUpdate === 'user_message_chunk' && sessionManager.isLoading(sessionId)) {
+    const text = getTextUpdateContent(updateData);
+    if (text) {
+      sessionManager.recordUserMessageChunk(sessionId, text);
+    }
+  }
+}
+
 /**
  * WebviewViewProvider for the ACP chat sidebar.
  * The extension host owns ACP/session behavior; the React webview owns rendering.
@@ -108,20 +127,37 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       type: 'pipelineStatus',
       status: event.status,
       message: event.message,
+      stepId: event.stepId,
+      role: event.role,
+      agentName: event.agentName,
+      teamId: event.teamId,
     });
   };
 
   private readonly handlePipelinePlanReady = (event: PipelinePlanReadyEvent) => {
+    if (event.plan) {
+      this.sessionManager.recordAssistantMessageChunk(event.sessionId, event.plan);
+    }
+
     if (event.sessionId !== this.sessionManager.getActiveSessionId()) {
       return;
     }
     this.postMessage({
       type: 'pipelinePlanReady',
       plan: event.plan,
+      role: event.role,
+      agentName: event.agentName,
+      teamId: event.teamId,
     });
   };
 
   private readonly handlePipelineSessionUpdate = (event: PipelineSessionUpdateEvent) => {
+    persistSessionUpdateToHistory(
+      this.sessionManager,
+      event.sessionId,
+      event.update?.update,
+    );
+
     if (event.sessionId !== this.sessionManager.getActiveSessionId()) {
       return;
     }
@@ -130,6 +166,9 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       update: event.update.update,
       sessionId: event.sessionId,
       phase: event.phase,
+      role: event.role,
+      agentName: event.agentName,
+      teamId: event.teamId,
     });
   };
 
@@ -246,18 +285,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
         updatedAt: updateData.updatedAt,
       });
     }
-    if (updateData?.sessionUpdate === 'agent_message_chunk') {
-      const text = getTextUpdateContent(updateData);
-      if (text) {
-        this.sessionManager.recordAssistantMessageChunk(update.sessionId, text);
-      }
-    }
-    if (updateData?.sessionUpdate === 'user_message_chunk' && this.sessionManager.isLoading(update.sessionId)) {
-      const text = getTextUpdateContent(updateData);
-      if (text) {
-        this.sessionManager.recordUserMessageChunk(update.sessionId, text);
-      }
-    }
+    persistSessionUpdateToHistory(this.sessionManager, update.sessionId, updateData);
 
     const activeId = this.sessionManager.getActiveSessionId();
     if (update.sessionId !== activeId) {
@@ -649,6 +677,10 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
    */
   notifySessionInfoUpdate(title: string | undefined | null): void {
     this.postMessage({ type: 'sessionInfoUpdate', title: title ?? null });
+  }
+
+  notifyReviewerRerun(output: string): void {
+    this.postMessage({ type: 'reviewerRerunReady', output });
   }
 
   showInfoMessage(message: string): void {

@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { getTeamAgentDisplayNames } from './AgentTeamCatalog';
 import { getPipelineAgentNames } from './PipelineCatalog';
 
 /**
@@ -37,10 +38,13 @@ export function getAgentNames(
   agentConfigs: Record<string, AgentConfigEntry> = getAgentConfigs(),
 ): string[] {
   const agentNames = Object.keys(agentConfigs);
-  const namesToAdd = getPipelineAgentNames(workspaceCwd, agentConfigs)
+  const pipelineNames = getPipelineAgentNames(workspaceCwd, agentConfigs);
+  const teamNames = getTeamAgentDisplayNames(workspaceCwd, agentConfigs)
+    .filter(name => !pipelineNames.includes(name.replace(/ \(invalid\)$/, '')));
+  const virtualNames = [...pipelineNames, ...teamNames]
     .filter(name => !agentNames.includes(name));
 
-  return [...agentNames, ...namesToAdd];
+  return [...agentNames, ...virtualNames];
 }
 
 /**

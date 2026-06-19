@@ -13,6 +13,8 @@ import type { SandboxService } from '../sandbox/SandboxService';
 import { resolveWorkspaceIdentity } from '../core/WorkspaceIdentity';
 import { ChatWebviewProvider } from '../ui/ChatWebviewProvider';
 import { SessionTreeProvider } from '../ui/SessionTreeProvider';
+import { PipelineService } from '../pipeline/PipelineService';
+import { serializeCompiledTeamPipeline } from '../pipeline/AgentTeamCompiler';
 import { getOutputChannel, getTrafficChannel, logError } from '../utils/Logger';
 import { sendEvent } from '../utils/TelemetryManager';
 
@@ -30,6 +32,7 @@ interface RegisterCommandsDependencies {
   historyStore: SessionHistoryStore;
   sandboxService: SandboxService;
   sandboxPromotionPanel: SandboxPromotionPanel;
+  pipelineService: PipelineService;
 }
 
 export function registerCommands({
@@ -40,6 +43,7 @@ export function registerCommands({
   historyStore,
   sandboxService,
   sandboxPromotionPanel,
+  pipelineService,
 }: RegisterCommandsDependencies): vscode.Disposable[] {
   const resolveAgentName = async (agentNameOrItem?: string | any): Promise<string | undefined> => {
     if (typeof agentNameOrItem === 'string') {
@@ -596,6 +600,56 @@ export function registerCommands({
     );
   });
 
+  const showCompiledTeamPipelineCmd = vscode.commands.registerCommand('acp.showCompiledTeamPipeline', async (agentNameOrItem?: string | any) => {
+    const agentName = await resolveAgentName(agentNameOrItem);
+    if (!agentName) { return; }
+
+    const pipeline = pipelineService.getCompiledPipelineForTeam(agentName.replace(/ \(invalid\)$/, ''));
+    if (!pipeline) {
+      vscode.window.showWarningMessage(`"${agentName}" is not a valid agent team.`);
+      return;
+    }
+
+    const doc = await vscode.workspace.openTextDocument({
+      content: serializeCompiledTeamPipeline(pipeline),
+      language: 'json',
+    });
+    await vscode.window.showTextDocument(doc, { preview: true });
+  });
+
+  const rerunTeamReviewerCmd = vscode.commands.registerCommand('acp.rerunTeamReviewer', async (agentNameOrItem?: string | any) => {
+    const activeSession = sessionManager.getActiveSession();
+    const agentName = typeof agentNameOrItem === 'string'
+      ? agentNameOrItem
+      : activeSession?.agentName;
+    if (!agentName) {
+      vscode.window.showWarningMessage('Connect to an agent team before re-running the reviewer.');
+      return;
+    }
+
+    if (!pipelineService.getLastTeamRunSnapshot()) {
+      vscode.window.showWarningMessage('No completed team run is available for reviewer re-run.');
+      return;
+    }
+
+    try {
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: `Re-running reviewer for ${agentName}...`,
+          cancellable: true,
+        },
+        async (_progress, token) => {
+          token.onCancellationRequested(() => pipelineService.cancelReviewerRerun());
+          const output = await pipelineService.rerunTeamReviewer(agentName.replace(/ \(invalid\)$/, ''));
+          chatWebviewProvider.notifyReviewerRerun(output);
+        },
+      );
+    } catch (e: any) {
+      await showClassifiedAgentError('Reviewer re-run failed', e);
+    }
+  });
+
   return [
     connectAgentCmd,
     connectAgentWithCurrentContextCmd,
@@ -630,6 +684,8 @@ export function registerCommands({
     sandboxPromoteCmd,
     sandboxDiscardCmd,
     sandboxCleanupCmd,
+    showCompiledTeamPipelineCmd,
+    rerunTeamReviewerCmd,
   ];
 }
 

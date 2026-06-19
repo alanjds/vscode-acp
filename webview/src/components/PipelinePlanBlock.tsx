@@ -18,6 +18,9 @@ export function PipelinePlanBlock({
   const [draft, setDraft] = useState(item.plan);
   const isPending = item.status === 'pending';
   const isBusy = item.status === 'implementing';
+  const title = item.role === 'planner' && item.agentName
+    ? `Proposed Plan — Planner (${item.agentName})`
+    : 'Proposed Plan';
 
   useEffect(() => {
     if (isPending) {
@@ -29,7 +32,7 @@ export function PipelinePlanBlock({
     <div className={`pipeline-plan pipeline-plan-${item.status}`}>
       <div className="pipeline-plan-header">
         <div>
-          <div className="pipeline-plan-title">Proposed Plan</div>
+          <div className="pipeline-plan-title">{title}</div>
           {item.message ? <div className="pipeline-plan-status"><MarkdownDisplay>{item.message}</MarkdownDisplay></div> : null}
         </div>
         {isBusy ? <span className="spinner" /> : null}

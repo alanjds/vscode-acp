@@ -5,6 +5,8 @@ import type {
   ModesState,
   PersistedWebviewState,
   PipelinePlanStatus,
+  PipelinePhase,
+  PipelineTimelineStep,
   PlanUpdate,
   SessionConfigOption,
   SessionSnapshot,
@@ -39,6 +41,9 @@ export type AppState = {
   currentTurn: CurrentTurn | null;
   collapsedTools: Record<string, boolean>;
   isLoadingSession: boolean;
+  pipelineTimeline: PipelineTimelineStep[];
+  activePipelineRole: PipelinePhase | null;
+  activePipelineAgentName: string | null;
 };
 
 export type AppAction =
@@ -75,8 +80,12 @@ export type AppAction =
   | { type: 'appendToolCall'; toolCallId: string; title: string; status: ToolCallStatus }
   | { type: 'updateToolCall'; toolCallId: string; title?: string; status: ToolCallStatus }
   | { type: 'appendPlan'; plan: PlanUpdate }
-  | { type: 'appendPipelinePlan'; plan: string }
+  | { type: 'appendPipelinePlan'; plan: string; role?: PipelinePhase; agentName?: string }
   | { type: 'updatePipelinePlanStatus'; status: PipelinePlanStatus; message?: string }
+  | { type: 'updatePipelineTimeline'; timeline: PipelineTimelineStep[] }
+  | { type: 'setActivePipelineRole'; role: PipelinePhase | null; agentName?: string | null }
+  | { type: 'appendPipelineRoleOutput'; role: PipelinePhase; agentName?: string; text: string; title: string }
+  | { type: 'resetPipelineTimeline' }
   | { type: 'loadSessionStart' }
   | { type: 'loadSessionEnd'; ok: boolean }
   | { type: 'setRenderedMarkdown'; items: Array<{ index: number; html: string }> };
@@ -118,6 +127,9 @@ export function createInitialState(persistedValue: unknown): AppState {
     currentTurn: null,
     collapsedTools: {},
     isLoadingSession: false,
+    pipelineTimeline: [],
+    activePipelineRole: null,
+    activePipelineAgentName: null,
   };
 }
 
@@ -127,6 +139,21 @@ function clamp(value: number, min: number, max: number): number {
 
 function ensureSessionState(state: AppState): SessionSnapshot {
   return state.persisted.sessionState ?? { availableCommands: [] };
+}
+
+function formatPipelineRoleLabel(role: PipelinePhase): string {
+  switch (role) {
+    case 'planner':
+      return 'Planner';
+    case 'implementer':
+      return 'Implementer';
+    case 'reviewer':
+      return 'Reviewer';
+    case 'tester':
+      return 'Tester';
+    case 'reviewer-rerun':
+      return 'Review (rerun)';
+  }
 }
 
 function ensureCurrentTurn(state: AppState): CurrentTurn {
@@ -368,10 +395,33 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       };
 
     case 'promptEnd': {
-      const nextHistory = commitCurrentTurnToHistory(
-        state.persisted.chatHistory,
-        state.currentTurn,
+      const isTeamRoleOutput = Boolean(
+        state.activePipelineRole
+        && state.activePipelineRole !== 'planner'
+        && state.currentTurn?.assistantText.trim(),
       );
+
+      let nextHistory = isTeamRoleOutput
+        ? state.persisted.chatHistory
+        : commitCurrentTurnToHistory(
+          state.persisted.chatHistory,
+          state.currentTurn,
+        );
+
+      if (isTeamRoleOutput && state.activePipelineRole && state.currentTurn) {
+        const roleLabel = formatPipelineRoleLabel(state.activePipelineRole);
+        const agentSuffix = state.activePipelineAgentName ? ` (${state.activePipelineAgentName})` : '';
+        nextHistory = [
+          ...nextHistory,
+          {
+            kind: 'pipelineRoleOutput' as const,
+            role: state.activePipelineRole,
+            agentName: state.activePipelineAgentName ?? undefined,
+            text: state.currentTurn.assistantText,
+            title: `${roleLabel}${agentSuffix}`,
+          },
+        ];
+      }
 
       return {
         ...state,
@@ -398,6 +448,9 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         renderedMarkdown: {},
         currentTurn: null,
         isLoadingSession: false,
+        pipelineTimeline: [],
+        activePipelineRole: null,
+        activePipelineAgentName: null,
       };
 
     case 'updateModes': {
@@ -664,9 +717,50 @@ export function appReducer(state: AppState, action: AppAction): AppState {
               kind: 'pipelinePlan',
               plan: action.plan,
               status: 'pending',
+              role: action.role,
+              agentName: action.agentName,
             },
           ],
         },
+      };
+
+    case 'updatePipelineTimeline':
+      return {
+        ...state,
+        pipelineTimeline: action.timeline,
+      };
+
+    case 'setActivePipelineRole':
+      return {
+        ...state,
+        activePipelineRole: action.role,
+        activePipelineAgentName: action.agentName ?? null,
+      };
+
+    case 'appendPipelineRoleOutput':
+      return {
+        ...state,
+        persisted: {
+          ...state.persisted,
+          chatHistory: [
+            ...state.persisted.chatHistory,
+            {
+              kind: 'pipelineRoleOutput',
+              role: action.role,
+              agentName: action.agentName,
+              text: action.text,
+              title: action.title,
+            },
+          ],
+        },
+      };
+
+    case 'resetPipelineTimeline':
+      return {
+        ...state,
+        pipelineTimeline: [],
+        activePipelineRole: null,
+        activePipelineAgentName: null,
       };
 
     case 'updatePipelinePlanStatus': {

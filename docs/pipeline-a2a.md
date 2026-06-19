@@ -93,6 +93,12 @@ Supported template variables:
 | Implementation fails immediately | The workspace-changing agent cannot start, authenticate, or initialize ACP. | Check PATH, credentials, and ACP Client logs. |
 | Pipeline cancelled | The active turn was cancelled or the virtual session was disconnected. | Reconnect to the virtual agent and start a new request. |
 
+## Agent Teams
+
+For role-oriented workflows, use `.acp/teams/*.yaml` instead of hand-written pipeline YAML. Teams compile to pipeline v2 at runtime and appear as virtual agents in the Agents tree.
+
+See [agent-teams.md](./agent-teams.md) for the v1 schema, commands, and limits.
+
 ## Notes
 
 - LangGraph owns orchestration and approval resume state.

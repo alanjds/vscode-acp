@@ -10,6 +10,11 @@ import {
   type PipelineDefinition,
   type PipelinePrimitiveDefinition,
 } from '../config/PipelineCatalog';
+import { getTeamEntryForAgent } from '../config/AgentTeamCatalog';
+import { defaultGitCommandRunner } from '../sandbox/GitCommandRunner';
+import { AcpAgentRunner } from './AcpAgentRunner';
+import type { CompiledTeamMetadata } from '../pipeline/AgentTeamCompiler';
+import type { TeamRoleId } from '../config/AgentTeamConfig';
 import { assertSingleProposedPlan } from './ProposedPlan';
 import { isRunAbortedError } from './RunAbortedError';
 import { isSandboxEnabled } from '../sandbox/SandboxConfig';
@@ -27,6 +32,8 @@ export type PipelineStatus =
   | 'planning'
   | 'awaiting_approval'
   | 'implementing'
+  | 'reviewing'
+  | 'testing'
   | 'completed'
   | 'rejected'
   | 'error'
@@ -38,12 +45,18 @@ export interface PipelineStatusEvent {
   message: string;
   stepId?: string;
   branchId?: string;
+  role?: TeamRoleId;
+  agentName?: string;
+  teamId?: string;
 }
 
 export interface PipelinePlanReadyEvent {
   sessionId: string;
   plan: string;
   stepId: string;
+  role?: TeamRoleId;
+  agentName?: string;
+  teamId?: string;
 }
 
 export interface PipelineSessionUpdateEvent {
@@ -52,6 +65,18 @@ export interface PipelineSessionUpdateEvent {
   update: SessionNotification;
   stepId?: string;
   branchId?: string;
+  role?: TeamRoleId;
+  agentName?: string;
+  teamId?: string;
+}
+
+export interface TeamRunSnapshot {
+  sessionId: string;
+  teamId: string;
+  teamTitle: string;
+  approvedPlan: string;
+  implementOutput: string;
+  completedAt: string;
 }
 
 export type PipelineExecutorKind = string;
@@ -67,6 +92,9 @@ interface PipelineRunState {
   pendingApproval: PendingApprovalState | null;
   cancelled: boolean;
   abortController: AbortController;
+  approvedPlan?: string;
+  implementOutput?: string;
+  stepOutputs: Map<string, string>;
 }
 
 export interface PipelineServiceDependencies {
@@ -82,6 +110,8 @@ export interface PipelineServiceDependencies {
 export class PipelineService extends EventEmitter {
   private readonly runs: Map<string, PipelineRunState> = new Map();
   private readonly checkpointer = new MemorySaver();
+  private lastTeamRunSnapshot: TeamRunSnapshot | null = null;
+  private reviewerRerunAbortController: AbortController | null = null;
 
   constructor(
     private readonly workspaceCwd: () => string,
@@ -100,6 +130,7 @@ export class PipelineService extends EventEmitter {
       pendingApproval: null,
       cancelled: false,
       abortController: new AbortController(),
+      stepOutputs: new Map(),
     };
     this.runs.set(sessionId, state);
 
@@ -129,6 +160,7 @@ export class PipelineService extends EventEmitter {
     const approvedOutput = approvedPlan.trim();
     assertSingleProposedPlan(approvedOutput);
     state.pendingApproval = null;
+    state.approvedPlan = approvedOutput;
     state.abortController = new AbortController();
 
     try {
@@ -169,6 +201,7 @@ export class PipelineService extends EventEmitter {
   }
 
   async dispose(): Promise<void> {
+    this.reviewerRerunAbortController?.abort();
     for (const [sessionId, state] of this.runs) {
       state.cancelled = true;
       state.abortController.abort();
@@ -178,28 +211,145 @@ export class PipelineService extends EventEmitter {
     this.removeAllListeners();
   }
 
+  getLastTeamRunSnapshot(): TeamRunSnapshot | null {
+    return this.lastTeamRunSnapshot;
+  }
+
+  getCompiledPipelineForTeam(agentName: string): PipelineDefinition | null {
+    const definition = this.dependencies.getPipelineDefinitionForAgent?.(agentName)
+      ?? getPipelineDefinitionForAgent(agentName, this.workspaceCwd(), this.readAgentConfigs());
+    if (!definition?.metadata || definition.metadata.sourceKind !== 'team') {
+      return null;
+    }
+    return definition;
+  }
+
+  cancelReviewerRerun(): void {
+    this.reviewerRerunAbortController?.abort();
+    this.reviewerRerunAbortController = null;
+  }
+
+  async rerunTeamReviewer(teamAgentName: string): Promise<string> {
+    const snapshot = this.lastTeamRunSnapshot;
+    if (!snapshot) {
+      throw new Error('No completed team run is available for reviewer re-run.');
+    }
+
+    const entry = getTeamEntryForAgent(teamAgentName, this.workspaceCwd(), this.readAgentConfigs());
+    if (!entry?.pipeline?.metadata) {
+      throw new Error(`Team "${teamAgentName}" is not available.`);
+    }
+
+    const reviewerRole = entry.pipeline.metadata.agentByRole.reviewer;
+    if (!reviewerRole) {
+      throw new Error('Team has no reviewer role configured.');
+    }
+
+    const diff = await this.readWorkspaceDiff();
+    const reviewerInstructions = entry.pipeline.primitives.reviewer.prompt
+      .split('\n')
+      .filter(line => !line.includes('{{'))
+      .join('\n')
+      .trim();
+    const reviewerPrompt = [
+      reviewerInstructions,
+      '',
+      'Original request:',
+      '(see archived team run)',
+      '',
+      'Approved plan:',
+      snapshot.approvedPlan,
+      '',
+      'Implementation output:',
+      snapshot.implementOutput,
+      '',
+      'Current workspace diff (git diff HEAD):',
+      diff || '(no diff detected)',
+    ].join('\n');
+
+    this.reviewerRerunAbortController?.abort();
+    const abortController = new AbortController();
+    this.reviewerRerunAbortController = abortController;
+
+    const runner = new AcpAgentRunner(this.workspaceCwd);
+    const collected: SessionNotification[] = [];
+    try {
+      const output = await runner.run(reviewerRole, reviewerPrompt, {
+        signal: abortController.signal,
+        onSessionUpdate: update => {
+          collected.push(update);
+          this.emit('session-update', {
+            sessionId: snapshot.sessionId,
+            phase: 'reviewer-rerun',
+            update,
+            stepId: 'reviewer',
+            role: 'reviewer',
+            agentName: reviewerRole,
+            teamId: snapshot.teamId,
+          } satisfies PipelineSessionUpdateEvent);
+        },
+      });
+      return output;
+    } finally {
+      if (this.reviewerRerunAbortController === abortController) {
+        this.reviewerRerunAbortController = null;
+      }
+    }
+  }
+
+  private async readWorkspaceDiff(): Promise<string> {
+    try {
+      const result = await defaultGitCommandRunner.exec(this.workspaceCwd(), ['diff', 'HEAD']);
+      return result.stdout.trim();
+    } catch {
+      return '';
+    }
+  }
+
   private compileGraph(sessionId: string, pipeline: PipelineDefinition): CompiledPipelineGraph {
+    const teamContext = this.readTeamContext(pipeline);
     const compiler = new PipelineGraphCompiler(
-      async (kind, promptText, onSessionUpdate) =>
-        this.runConfiguredAcpAgent(sessionId, kind, promptText, onSessionUpdate),
+      async (kind, promptText, onSessionUpdate) => {
+        const output = await this.runConfiguredAcpAgent(sessionId, kind, promptText, onSessionUpdate);
+        const state = this.runs.get(sessionId);
+        if (state) {
+          state.stepOutputs.set(kind, output);
+          if (kind === 'implementer') {
+            state.implementOutput = output;
+          }
+        }
+        return output;
+      },
       {
         onStepStart: (stepId, primitive, branchId) => {
           const phase = this.getStepPhase(pipeline, stepId);
+          const role = teamContext?.roleByStepId[stepId];
+          const statusMessage = role
+            ? `${this.formatRoleLabel(role)} (${primitive.agent})…`
+            : `Running ${branchId ? `${stepId}/${branchId}` : stepId} with ${primitive.agent}...`;
           this.emitStatus(
             sessionId,
             phase,
-            `Running ${branchId ? `${stepId}/${branchId}` : stepId} with ${primitive.agent}...`,
+            statusMessage,
             stepId,
             branchId,
+            teamContext,
+            role,
+            primitive.agent,
           );
         },
         onStepSessionUpdate: (stepId, update, branchId) => {
+          const role = teamContext?.roleByStepId[stepId];
+          const agentName = role ? teamContext?.agentByRole[role] : undefined;
           this.emit('session-update', {
             sessionId,
             phase: branchId ? `${stepId}/${branchId}` : stepId,
             update,
             stepId,
             branchId,
+            role,
+            agentName,
+            teamId: teamContext?.teamId,
           } satisfies PipelineSessionUpdateEvent);
         },
       },
@@ -219,16 +369,22 @@ export class PipelineService extends EventEmitter {
     if (interrupt) {
       assertSingleProposedPlan(interrupt.plan);
       state.pendingApproval = interrupt;
+      const teamContext = this.readTeamContext(state.pipeline);
+      const plannerRole = teamContext?.roleByStepId[interrupt.stepId];
       this.emit('plan-ready', {
         sessionId,
         plan: interrupt.plan,
         stepId: interrupt.stepId,
+        role: plannerRole,
+        agentName: plannerRole ? teamContext?.agentByRole[plannerRole] : undefined,
+        teamId: teamContext?.teamId,
       } satisfies PipelinePlanReadyEvent);
-      this.emitStatus(sessionId, 'awaiting_approval', 'Plan ready for review.', interrupt.stepId);
+      this.emitStatus(sessionId, 'awaiting_approval', 'Plan ready for review.', interrupt.stepId, undefined, teamContext);
       return interrupt.plan;
     }
 
-    this.emitStatus(sessionId, 'completed', completionMessage);
+    this.persistTeamSnapshot(sessionId, state, result);
+    this.emitStatus(sessionId, 'completed', completionMessage, undefined, undefined, this.readTeamContext(state.pipeline));
     this.runs.delete(sessionId);
     return typeof result?.lastOutput === 'string' ? result.lastOutput : '';
   }
@@ -249,9 +405,19 @@ export class PipelineService extends EventEmitter {
   }
 
   private getStepPhase(pipeline: PipelineDefinition, stepId: string): PipelineStatus {
+    if (stepId === 'reviewer') {
+      return 'reviewing';
+    }
+    if (stepId === 'tester') {
+      return 'testing';
+    }
+
     let approvalSeen = false;
     for (const step of pipeline.steps) {
       if (step.id === stepId) {
+        if (stepId === 'implementer' || (approvalSeen && stepId !== 'planner')) {
+          return 'implementing';
+        }
         return approvalSeen ? 'implementing' : 'planning';
       }
       if ('type' in step && step.type === 'approval') {
@@ -259,6 +425,50 @@ export class PipelineService extends EventEmitter {
       }
     }
     return 'planning';
+  }
+
+  private readTeamContext(pipeline: PipelineDefinition): CompiledTeamMetadata | undefined {
+    return pipeline.metadata?.sourceKind === 'team' ? pipeline.metadata : undefined;
+  }
+
+  private formatRoleLabel(role: TeamRoleId): string {
+    switch (role) {
+      case 'planner':
+        return 'Planning';
+      case 'implementer':
+        return 'Implementing';
+      case 'reviewer':
+        return 'Reviewing';
+      case 'tester':
+        return 'Testing';
+    }
+  }
+
+  private persistTeamSnapshot(sessionId: string, state: PipelineRunState, result: any): void {
+    const metadata = state.pipeline.metadata;
+    if (!metadata || metadata.sourceKind !== 'team') {
+      return;
+    }
+
+    const approvedPlan = state.approvedPlan
+      ?? result?.stepOutputs?.approval?.output
+      ?? '';
+    const implementOutput = state.implementOutput
+      ?? result?.stepOutputs?.implementer?.output
+      ?? '';
+
+    if (!approvedPlan || !implementOutput) {
+      return;
+    }
+
+    this.lastTeamRunSnapshot = {
+      sessionId,
+      teamId: metadata.teamId,
+      teamTitle: state.pipeline.title,
+      approvedPlan,
+      implementOutput,
+      completedAt: new Date().toISOString(),
+    };
   }
 
   private async runConfiguredAcpAgent(
@@ -367,6 +577,9 @@ export class PipelineService extends EventEmitter {
     message: string,
     stepId?: string,
     branchId?: string,
+    teamContext?: CompiledTeamMetadata,
+    role?: TeamRoleId,
+    agentName?: string,
   ): void {
     this.emit('status', {
       sessionId,
@@ -374,6 +587,9 @@ export class PipelineService extends EventEmitter {
       message,
       stepId,
       branchId,
+      role,
+      agentName,
+      teamId: teamContext?.teamId,
     } satisfies PipelineStatusEvent);
   }
 

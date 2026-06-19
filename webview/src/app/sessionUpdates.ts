@@ -19,8 +19,9 @@ export function mapSessionUpdateToActions(update: SessionUpdate, phase?: Pipelin
     return [];
   }
 
+  const isPlannerPhase = phase === 'planner';
   if (
-    phase === 'planner' &&
+    isPlannerPhase &&
     update.sessionUpdate !== 'agent_message_chunk' &&
     update.sessionUpdate !== 'agent_thought_chunk' &&
     update.sessionUpdate !== 'tool_call' &&
@@ -36,7 +37,7 @@ export function mapSessionUpdateToActions(update: SessionUpdate, phase?: Pipelin
         return [];
       }
       return [
-        phase === 'planner'
+        isPlannerPhase
           ? { type: 'appendPlanningDraftChunk', text: contentText }
           : { type: 'appendAssistantChunk', text: contentText },
       ];

@@ -3,6 +3,7 @@ import type {
   MarkdownRenderItem,
   MessageHistoryItem,
   PipelinePlanHistoryItem,
+  PipelineRoleOutputHistoryItem,
   PlanHistoryItem,
   ThoughtHistoryItem,
   ToolCallHistoryItem,
@@ -22,10 +23,11 @@ export type HistoryBlock =
   | { kind: 'message'; item: MessageHistoryItem; historyIndex: number }
   | { kind: 'plan'; item: PlanHistoryItem; historyIndex: number }
   | { kind: 'pipelinePlan'; item: PipelinePlanHistoryItem; historyIndex: number }
+  | { kind: 'pipelineRoleOutput'; item: PipelineRoleOutputHistoryItem; historyIndex: number }
   | HistoryTurnBlock;
 
 function hasTurnAssociation(item: ChatHistoryItem): item is ThoughtHistoryItem | ToolCallHistoryItem | MessageHistoryItem {
-  if (item.kind === 'plan' || item.kind === 'pipelinePlan') {
+  if (item.kind === 'plan' || item.kind === 'pipelinePlan' || item.kind === 'pipelineRoleOutput') {
     return false;
   }
 
@@ -155,6 +157,11 @@ export function buildHistoryBlocks(chatHistory: ChatHistoryItem[], excludedIndex
       case 'pipelinePlan':
         flushFallbackTurn();
         blocks.push({ kind: 'pipelinePlan', item, historyIndex: index });
+        break;
+
+      case 'pipelineRoleOutput':
+        flushFallbackTurn();
+        blocks.push({ kind: 'pipelineRoleOutput', item, historyIndex: index });
         break;
     }
   }

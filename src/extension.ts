@@ -11,7 +11,7 @@ import { SessionTreeProvider } from './ui/SessionTreeProvider';
 import { StatusBarManager } from './ui/StatusBarManager';
 import { ChatWebviewProvider } from './ui/ChatWebviewProvider';
 import { DebugWebviewPanel } from './ui/DebugWebviewPanel';
-import { captureEditorContext, captureOpenEditorPaths, initializeOpenEditorsTracker } from './ui/EditorContext';
+import { getEditorContextSnapshot, initializeOpenEditorsTracker, trackLastKnownEditorContext } from './ui/EditorContext';
 import { PipelineService } from './pipeline/PipelineService';
 import {
   PromotionGate,
@@ -44,6 +44,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // --- Core services ---
   context.subscriptions.push(...initializeOpenEditorsTracker());
+  context.subscriptions.push(trackLastKnownEditorContext());
   const debugTraceStore = new DebugTraceStore();
   const sessionUpdateHandler = new SessionUpdateHandler(debugTraceStore);
   const agentManager = new AgentManager();
@@ -102,10 +103,7 @@ export function activate(context: vscode.ExtensionContext): void {
     sessionManager,
     sessionUpdateHandler,
     pipelineService,
-    () => captureEditorContext(
-      vscode.window.activeTextEditor,
-      captureOpenEditorPaths(vscode.window.tabGroups.all),
-    ),
+    () => getEditorContextSnapshot(),
     debugTraceStore,
     (chatState) => debugWebviewPanel.open(chatState),
   );
@@ -129,6 +127,14 @@ export function activate(context: vscode.ExtensionContext): void {
   const refreshPipelineAgents = () => {
     sessionTreeProvider.invalidate();
   };
+  const teamYamlWatcher = vscode.workspace.createFileSystemWatcher('**/.acp/teams/*.yaml');
+  const teamYmlWatcher = vscode.workspace.createFileSystemWatcher('**/.acp/teams/*.yml');
+  teamYamlWatcher.onDidCreate(refreshPipelineAgents);
+  teamYamlWatcher.onDidChange(refreshPipelineAgents);
+  teamYamlWatcher.onDidDelete(refreshPipelineAgents);
+  teamYmlWatcher.onDidCreate(refreshPipelineAgents);
+  teamYmlWatcher.onDidChange(refreshPipelineAgents);
+  teamYmlWatcher.onDidDelete(refreshPipelineAgents);
   pipelineYamlWatcher.onDidCreate(refreshPipelineAgents);
   pipelineYamlWatcher.onDidChange(refreshPipelineAgents);
   pipelineYamlWatcher.onDidDelete(refreshPipelineAgents);
@@ -140,6 +146,7 @@ export function activate(context: vscode.ExtensionContext): void {
       event.affectsConfiguration('acp.agents')
       || event.affectsConfiguration('acp.pipeline.enabled')
       || event.affectsConfiguration('acp.defaultWorkingDirectory')
+      || event.affectsConfiguration('acp.instructions.maxBytes')
       || event.affectsConfiguration('acp.sandbox.enabled')
     ) {
       void vscode.commands.executeCommand('setContext', PIPELINE_ENABLED_CONTEXT_KEY, isPipelineEnabled());
@@ -214,6 +221,7 @@ export function activate(context: vscode.ExtensionContext): void {
     historyStore,
     sandboxService,
     sandboxPromotionPanel,
+    pipelineService,
   });
   const openDebugSnapshotCmd = vscode.commands.registerCommand('acp.openDebugSnapshot', async () => {
     sendEvent('command/openDebugSnapshot');
@@ -230,6 +238,8 @@ export function activate(context: vscode.ExtensionContext): void {
     statusBarManager,
     pipelineYamlWatcher,
     pipelineYmlWatcher,
+    teamYamlWatcher,
+    teamYmlWatcher,
     pipelineConfigWatcher,
     openDebugSnapshotCmd,
     openInlineChatCmd,

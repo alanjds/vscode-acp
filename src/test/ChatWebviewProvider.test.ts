@@ -12,6 +12,7 @@ suite('ChatWebviewProvider', () => {
   async function createProvider(editorContext: EditorContext | null = null) {
     const sentPrompts: string[] = [];
     const recordedPrompts: string[] = [];
+    const recordedAssistantChunks: string[] = [];
     const messages: any[] = [];
     const touchedSessions: string[] = [];
     const sessions = new Map<string, any>([
@@ -39,7 +40,9 @@ suite('ChatWebviewProvider', () => {
       },
       recordUserMessage: () => undefined,
       recordUserMessageChunk: () => undefined,
-      recordAssistantMessageChunk: () => undefined,
+      recordAssistantMessageChunk: (_sessionId: string, text: string) => {
+        recordedAssistantChunks.push(text);
+      },
       sendPrompt: async (_sessionId: string, prompt: string) => {
         sentPrompts.push(prompt);
         return { stopReason: 'end_turn' };
@@ -114,7 +117,7 @@ suite('ChatWebviewProvider', () => {
     // Send ready message
     await messageHandler({ type: 'ready' });
 
-    return { provider, sentPrompts, recordedPrompts, messages, touchedSessions, triggerMessage: (m: any) => messageHandler(m), sessionManager };
+    return { provider, sentPrompts, recordedPrompts, recordedAssistantChunks, messages, touchedSessions, triggerMessage: (m: any) => messageHandler(m), sessionManager };
     }
 
   const editorContext: EditorContext = {
@@ -437,7 +440,7 @@ suite('ChatWebviewProvider', () => {
   });
 
   test('handlePipelinePlanReady forwards events from active session', async () => {
-    const { provider, messages } = await createProvider();
+    const { provider, messages, recordedAssistantChunks } = await createProvider();
     (provider as any).isViewReady = true;
     (provider as any).sessionManager.getActiveSessionId = () => 'active_s1';
 
@@ -453,6 +456,37 @@ suite('ChatWebviewProvider', () => {
     const planMessage = messages.find(m => m.type === 'pipelinePlanReady');
     assert.ok(planMessage);
     assert.strictEqual(planMessage.plan, '<proposed_plan>\nTest\n</proposed_plan>');
+    assert.deepStrictEqual(recordedAssistantChunks, ['<proposed_plan>\nTest\n</proposed_plan>']);
+  });
+
+  test('handlePipelinePlanReady persists plan even when session is inactive', async () => {
+    const { provider, recordedAssistantChunks } = await createProvider();
+    (provider as any).sessionManager.getActiveSessionId = () => 'active_s1';
+
+    (provider as any).handlePipelinePlanReady({
+      sessionId: 'background_s1',
+      plan: 'background plan',
+    });
+
+    assert.deepStrictEqual(recordedAssistantChunks, ['background plan']);
+  });
+
+  test('handlePipelineSessionUpdate persists assistant chunks', async () => {
+    const { provider, recordedAssistantChunks } = await createProvider();
+    (provider as any).sessionManager.getActiveSessionId = () => 'active_s1';
+
+    (provider as any).handlePipelineSessionUpdate({
+      sessionId: 'active_s1',
+      phase: 'implementer',
+      update: {
+        update: {
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: 'Implemented changes' },
+        },
+      },
+    });
+
+    assert.deepStrictEqual(recordedAssistantChunks, ['Implemented changes']);
   });
 
   test('handlePipelineSessionUpdate ignores events from other sessions', async () => {

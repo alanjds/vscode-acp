@@ -4,7 +4,7 @@ title: Plan Execute Verify
 
 primitives:
   planner:
-    agent: Cursor CLI
+    agent: Gemini CLI
     output: proposed_plan
     sideEffects: none
     prompt: |
@@ -15,7 +15,7 @@ primitives:
       {{userPrompt}}
 
   implementer:
-    agent: Cursor CLI
+    agent: Vibe
     output: markdown
     sideEffects: workspace
     prompt: |
@@ -28,7 +28,7 @@ primitives:
       {{steps.approval.output}}
 
   verifier:
-    agent: Vibe
+    agent: Gemini CLI
     output: markdown
     sideEffects: none
     prompt: |

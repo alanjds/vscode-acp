@@ -6,14 +6,19 @@ import {
   buildEditorContextSection,
   buildPromptWithEditorContext,
   captureEditorContext,
+  captureEditorContextFromOpenDocument,
   captureOpenEditorPaths,
   formatEditorContextPath,
+  getActiveTabFilePath,
+  getEditorContextSnapshot,
   getFilePathsFromTabInput,
   getSafeFenceMarker,
   MAX_CONTEXT_LENGTH,
   MAX_CONTEXT_PATH_LENGTH,
   MAX_OPEN_EDITORS,
   normalizeOpenEditorPaths,
+  rememberLastKnownEditorContext,
+  resolveTextEditorForContext,
   truncateText,
   type EditorContext,
   type OpenEditorFile,
@@ -611,5 +616,74 @@ suite('EditorContext', () => {
 
     assert.strictEqual(result.length, MAX_CONTEXT_PATH_LENGTH);
     assert.ok(result.endsWith('… [truncated]'));
+  });
+
+  test('resolveTextEditorForContext falls back to visible editor for active tab', () => {
+    const filePath = workspacePath('src', 'active.ts');
+    const activeEditor = {
+      document: { uri: { scheme: 'output', fsPath: 'output://x' } },
+    } as any;
+    const visibleEditor = {
+      document: { uri: { scheme: 'file', fsPath: filePath } },
+    } as any;
+    const tabGroups = [{
+      isActive: true,
+      activeTab: { input: new vscode.TabInputText(vscode.Uri.file(filePath)) },
+      tabs: [],
+    }] as any;
+
+    const resolved = resolveTextEditorForContext(activeEditor, [visibleEditor], tabGroups);
+
+    assert.strictEqual(resolved, visibleEditor);
+  });
+
+  test('getActiveTabFilePath returns active tab file path', () => {
+    const filePath = workspacePath('src', 'active.ts');
+    const tabGroups = [{
+      isActive: true,
+      activeTab: { input: new vscode.TabInputText(vscode.Uri.file(filePath)) },
+      tabs: [],
+    }] as any;
+
+    assert.strictEqual(getActiveTabFilePath(tabGroups), filePath);
+  });
+
+  test('captureEditorContextFromOpenDocument builds context from an open document', () => {
+    const filePath = workspacePath('src', 'open.ts');
+    const document = {
+      uri: { scheme: 'file', fsPath: filePath },
+      languageId: 'typescript',
+      lineAt: () => ({ text: 'export const value = 1;' }),
+    } as any;
+
+    const context = captureEditorContextFromOpenDocument(filePath, [], [document]);
+
+    assert.ok(context);
+    assert.strictEqual(context?.filePath, filePath);
+    assert.strictEqual(context?.currentLine?.text, 'export const value = 1;');
+  });
+
+  test('getEditorContextSnapshot uses last known context when editor focus is lost', () => {
+    const filePath = workspacePath('src', 'remembered.ts');
+    rememberLastKnownEditorContext({
+      filePath,
+      cursorLine: 12,
+      cursorCharacter: 4,
+      language: 'ts',
+      selection: null,
+      currentLine: { line: 12, text: 'remembered line' },
+      openEditors: [{ path: filePath, openedAt: 1 }],
+    });
+    const tabGroups = [{
+      isActive: true,
+      activeTab: { input: new vscode.TabInputText(vscode.Uri.file(filePath)) },
+      tabs: [{ input: new vscode.TabInputText(vscode.Uri.file(filePath)) }],
+    }] as any;
+
+    const snapshot = getEditorContextSnapshot(tabGroups, []);
+
+    assert.ok(snapshot);
+    assert.strictEqual(snapshot?.filePath, filePath);
+    assert.strictEqual(snapshot?.currentLine?.text, 'remembered line');
   });
 });

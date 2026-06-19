@@ -141,13 +141,36 @@ export type PipelinePlanStatus =
   | 'error'
   | 'cancelled';
 
-export type PipelinePhase = 'planner' | 'implementer';
+export type PipelinePhase = 'planner' | 'implementer' | 'reviewer' | 'tester' | 'reviewer-rerun';
+
+export type PipelineTimelineStepStatus = 'pending' | 'running' | 'done' | 'error' | 'skipped';
+
+export type PipelineTimelineStep = {
+  id: string;
+  label: string;
+  status: PipelineTimelineStepStatus;
+};
+
+export type PipelineTimelineState = {
+  steps: PipelineTimelineStep[];
+  teamId?: string;
+};
 
 export type PipelinePlanHistoryItem = {
   kind: 'pipelinePlan';
   plan: string;
   status: PipelinePlanStatus;
   message?: string;
+  role?: PipelinePhase;
+  agentName?: string;
+};
+
+export type PipelineRoleOutputHistoryItem = {
+  kind: 'pipelineRoleOutput';
+  role: PipelinePhase;
+  agentName?: string;
+  text: string;
+  title: string;
 };
 
 export type ChatHistoryItem =
@@ -155,7 +178,8 @@ export type ChatHistoryItem =
   | ThoughtHistoryItem
   | ToolCallHistoryItem
   | PlanHistoryItem
-  | PipelinePlanHistoryItem;
+  | PipelinePlanHistoryItem
+  | PipelineRoleOutputHistoryItem;
 
 export type PersistedWebviewState = {
   chatHistory: ChatHistoryItem[];

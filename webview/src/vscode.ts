@@ -17,7 +17,7 @@ export type HostToWebviewMessage =
       activeSessionId?: string | null;
       session?: SessionSnapshot | null;
     }
-  | { type: 'sessionUpdate'; update: SessionUpdate; sessionId?: string; phase?: PipelinePhase }
+  | { type: 'sessionUpdate'; update: SessionUpdate; sessionId?: string; phase?: PipelinePhase; role?: PipelinePhase; agentName?: string; teamId?: string }
   | { type: 'promptStart' }
   | { type: 'promptEnd'; stopReason?: string; usage?: unknown }
   | { type: 'clearChat' }
@@ -31,8 +31,9 @@ export type HostToWebviewMessage =
   | { type: 'sessionInfoUpdate'; title?: string | null }
   | { type: 'externalUserMessage'; text: string }
   | { type: 'fileSearchResults'; requestId: number; results: FileSearchResult[] }
-  | { type: 'pipelinePlanReady'; plan: string }
-  | { type: 'pipelineStatus'; status?: string; message?: string }
+  | { type: 'pipelinePlanReady'; plan: string; role?: PipelinePhase; agentName?: string; teamId?: string }
+  | { type: 'pipelineStatus'; status?: string; message?: string; stepId?: string; role?: PipelinePhase; agentName?: string; teamId?: string }
+  | { type: 'reviewerRerunReady'; output: string }
   | { type: 'markdownRendered'; items: MarkdownRenderedItem[] }
   | { type: 'debugSnapshot'; snapshot: DebugSnapshot }
   | { type: string; [key: string]: unknown };

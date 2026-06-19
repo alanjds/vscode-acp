@@ -11,6 +11,7 @@ Cette roadmap regroupe les idées d'évolution et les possibilités pour ACP Cli
 
 ## Priorités Court Terme
 
+- Refaire le sandbox : repenser l'architecture git worktree, les handlers terminal/fichier, le flux Apply/Reject et les garde-fous applicatifs (policies, allowlist réseau, limites explicites dans l'UI) pour une isolation workspace plus fiable.
 - Stabiliser la liste des sessions et les mécanismes de reprise selon les capacités réellement exposées par chaque agent.
 - Améliorer le contexte VS Code envoyé aux agents avec des contrôles plus visibles et une meilleure prévisibilité pour l'utilisateur.
 - Finaliser l'expérience des mentions de fichiers dans le composer afin de remplacer complètement l'ancien flux d'attachement.
@@ -310,11 +311,7 @@ Exemples à créer :
 
 ## Priorités Suggérées
 
-1. Fiabiliser les fonctionnalités déjà visibles : sessions, contexte VS Code, mentions de fichiers et erreurs de connexion.
-2. Documenter les nouveaux workflows, en particulier le pipeline A2A et les options `acp.pipeline.*`.
-3. Améliorer l'ergonomie du chat avant d'ajouter des scénarios multi-agents plus avancés.
-4. Étendre les tests automatisés sur les comportements qui dépendent des capacités variables des agents.
-
+1. Refaire le sandbox : architecture git worktree, handlers terminal/fichier, promotion Apply/Reject, policies applicatives et UX des limites (voir section 8 et `docs/plans/omnigent/08-stronger-sandboxing.md`).
 
 1 trouver un moyen de partager les skill 
 2 click stop dois tout stopper et ne pas laisser les agents continuer à répondre

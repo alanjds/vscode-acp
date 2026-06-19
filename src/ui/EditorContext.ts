@@ -142,6 +142,145 @@ export function captureEditorContext(
     return null;
   }
 
+  return buildEditorContextFromDocument(document, selection, openEditors);
+}
+
+export function getActiveTabFilePath(
+  tabGroups: readonly vscode.TabGroup[] = vscode.window.tabGroups.all,
+): string | null {
+  const activeGroup = tabGroups.find(group => group.isActive);
+  const paths = activeGroup?.activeTab
+    ? getFilePathsFromTabInput(activeGroup.activeTab.input)
+    : [];
+  return paths[0] ?? null;
+}
+
+export function resolveTextEditorForContext(
+  activeEditor: vscode.TextEditor | undefined = vscode.window.activeTextEditor,
+  visibleEditors: readonly vscode.TextEditor[] = vscode.window.visibleTextEditors,
+  tabGroups: readonly vscode.TabGroup[] = vscode.window.tabGroups.all,
+): vscode.TextEditor | undefined {
+  if (activeEditor?.document?.uri?.scheme === 'file') {
+    return activeEditor;
+  }
+
+  const activeTabPath = getActiveTabFilePath(tabGroups);
+  if (activeTabPath) {
+    const normalizedActiveTab = path.normalize(activeTabPath);
+    const matchingVisible = visibleEditors.find(
+      editor => editor.document.uri.scheme === 'file'
+        && path.normalize(editor.document.uri.fsPath) === normalizedActiveTab,
+    );
+    if (matchingVisible) {
+      return matchingVisible;
+    }
+  }
+
+  return visibleEditors.find(editor => editor.document.uri.scheme === 'file');
+}
+
+export function captureEditorContextFromOpenDocument(
+  filePath: string,
+  openEditors: OpenEditorFile[] = [],
+  textDocuments: readonly vscode.TextDocument[] = vscode.workspace.textDocuments,
+): EditorContext | null {
+  const normalizedPath = path.normalize(filePath);
+  const document = textDocuments.find(
+    doc => doc.uri.scheme === 'file' && path.normalize(doc.uri.fsPath) === normalizedPath,
+  );
+  if (!document) {
+    return null;
+  }
+
+  return buildEditorContextFromDocument(
+    document,
+    new vscode.Selection(0, 0, 0, 0),
+    openEditors,
+  );
+}
+
+let lastKnownEditorContext: EditorContext | null = null;
+
+export function rememberLastKnownEditorContext(context: EditorContext | null): void {
+  if (context) {
+    lastKnownEditorContext = context;
+  }
+}
+
+export function getLastKnownEditorContext(
+  openEditors: readonly OpenEditorFile[] = [],
+): EditorContext | null {
+  if (!lastKnownEditorContext) {
+    return null;
+  }
+
+  const openPaths = new Set(
+    openEditors.map(file => path.normalize(file.path)),
+  );
+  if (!openPaths.has(path.normalize(lastKnownEditorContext.filePath))) {
+    return null;
+  }
+
+  return {
+    ...lastKnownEditorContext,
+    openEditors: normalizeOpenEditorPaths(openEditors),
+  };
+}
+
+export function trackLastKnownEditorContext(): vscode.Disposable {
+  const refresh = () => {
+    const context = captureEditorContext(
+      vscode.window.activeTextEditor,
+      captureOpenEditorPaths(vscode.window.tabGroups.all),
+    );
+    rememberLastKnownEditorContext(context);
+  };
+
+  refresh();
+  return vscode.Disposable.from(
+    vscode.window.onDidChangeActiveTextEditor(() => refresh()),
+    vscode.window.onDidChangeTextEditorSelection(() => refresh()),
+  );
+}
+
+export function getEditorContextSnapshot(
+  tabGroups: readonly vscode.TabGroup[] = vscode.window.tabGroups.all,
+  textDocuments: readonly vscode.TextDocument[] = vscode.workspace.textDocuments,
+): EditorContext | null {
+  const openEditors = captureOpenEditorPaths(tabGroups);
+  const editor = resolveTextEditorForContext(
+    vscode.window.activeTextEditor,
+    vscode.window.visibleTextEditors,
+    tabGroups,
+  );
+  const fromEditor = captureEditorContext(editor, openEditors);
+  if (fromEditor) {
+    rememberLastKnownEditorContext(fromEditor);
+    return fromEditor;
+  }
+
+  const activeTabPath = getActiveTabFilePath(tabGroups);
+  if (activeTabPath) {
+    const fromDocument = captureEditorContextFromOpenDocument(activeTabPath, openEditors, textDocuments);
+    if (fromDocument) {
+      rememberLastKnownEditorContext(fromDocument);
+      return fromDocument;
+    }
+  }
+
+  const fromMemory = getLastKnownEditorContext(openEditors);
+  if (fromMemory) {
+    return fromMemory;
+  }
+
+  return null;
+}
+
+function buildEditorContextFromDocument(
+  document: vscode.TextDocument,
+  selection: vscode.Selection,
+  openEditors: OpenEditorFile[],
+): EditorContext {
   return {
     filePath: document.uri.fsPath,
     cursorLine: selection.active.line + 1,

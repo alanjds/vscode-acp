@@ -830,6 +830,12 @@ suite('SessionManager', () => {
   test('connectToAgent creates pipeline session for pipeline virtual agent', async () => {
     const pipelineService = {};
     const manager = createPipelineManager(pipelineService);
+    const upsertCalls: Array<[string, string, string]> = [];
+    Object.assign((manager as any).discussionContextHandler.getHistoryStore(), {
+      upsertNew: (agentName: string, workspace: string, sessionId: string) => {
+        upsertCalls.push([agentName, workspace, sessionId]);
+      },
+    });
 
     const result = await manager.connectToAgent('Plan Execute Verify');
 
@@ -838,6 +844,40 @@ suite('SessionManager', () => {
     assert.strictEqual(manager.getActiveSessionId(), result.sessionId);
     assert.strictEqual((manager as any).sessionState.getAgentSession('Plan Execute Verify'), result.sessionId);
     assert.strictEqual(manager.isPipelineSession(result.sessionId), true);
+    assert.strictEqual(upsertCalls.length, 1);
+    assert.deepStrictEqual(upsertCalls[0], ['Plan Execute Verify', '/test', result.sessionId]);
+  });
+
+  test('connectToAgent can share discussion context from a pipeline session', async () => {
+    const pipelineService = { cancel: () => undefined };
+    const manager = createPipelineManager(pipelineService);
+    const linked: any[] = [];
+    Object.assign((manager as any).discussionContextHandler.getHistoryStore(), {
+      buildDiscussionContext: (agentName: string, sessionId: string) =>
+        agentName === 'Plan Execute Verify' && sessionId === 'pipeline_source'
+          ? 'Pipeline plan and outputs'
+          : null,
+      linkContextFamily: (...args: any[]) => {
+        linked.push(args);
+        return { contextFamilyId: 'ctx-pipeline' };
+      },
+    });
+    registerSession(manager, {
+      sessionId: 'pipeline_source',
+      agentName: 'Plan Execute Verify',
+      agentId: 'pipeline_agent_source',
+      active: true,
+    });
+
+    await manager.connectToAgent('New Agent', { shareCurrentContext: true });
+
+    assert.strictEqual(manager.hasPendingSharedDiscussionContext('s1'), true);
+    assert.deepStrictEqual(linked[0].slice(0, 4), [
+      'Plan Execute Verify',
+      'pipeline_source',
+      'New Agent',
+      's1',
+    ]);
   });
 
   test('connectToAgent reuses existing pipeline session', async () => {

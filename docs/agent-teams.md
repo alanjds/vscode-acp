@@ -1,15 +1,45 @@
 # Agent Teams
 
-Agent teams let you declare a multi-role workflow in `.acp/teams/*.yaml` instead of writing a pipeline v2 file by hand.
+Agent Teams provide a declarative way to define multi-role workflows that compile to [pipeline v2](./pipeline-a2a.md) at runtime. Instead of writing complex pipeline YAML by hand, you define roles with their agents and instruction files, and ACP Client generates the orchestration automatically.
 
-## Format (v1)
+## Overview
+
+### What Agent Teams Are
+
+- **Declarative workflows**: Define what roles do, not how the orchestration works
+- **Role-based**: Each role (`planner`, `implementer`, `reviewer`, `tester`) uses a configured ACP agent
+- **Compiled to pipeline v2**: Teams are transformed into standard pipeline YAML internally
+- **First-class virtual agents**: Teams appear in the Agents tree alongside regular agents and pipeline agents
+
+### When to Use Agent Teams
+
+Use Agent Teams when you want:
+- A simple way to create "plan-implement-review" workflows
+- Different agents for different phases (e.g., Claude for planning, Vibe for coding, Code for reviewing)
+- Reusable role definitions across your workspace
+- Quick setup without learning the full pipeline DSL
+
+Use raw [pipeline v2 YAML](./pipeline-a2a.md) when you need:
+- Custom step orchestration beyond the fixed role order
+- Parallel branches
+- Complex conditional logic
+- Multiple planners or implementers
+
+## Quick Start
+
+1. Create a team definition file in `.acp/teams/`:
+
+```bash
+mkdir -p .acp/teams
+# Create your team file, e.g., feature-team.yaml
+```
+
+2. Define your team (minimum required roles: planner, implementer, reviewer):
 
 ```yaml
 version: 1
 id: feature-team
 title: Feature Team
-orchestrator:
-  agent: Codex CLI   # metadata only in v1
 roles:
   planner:
     agent: Codex CLI
@@ -20,34 +50,450 @@ roles:
   reviewer:
     agent: Claude Code
     instructions: .acp/agents/reviewer.md
-  tester:            # optional
+```
+
+3. Create instruction files for each role (optional but recommended):
+
+```bash
+mkdir -p .acp/agents
+# Create planner.md, implementer.md, reviewer.md with role-specific prompts
+```
+
+4. Ensure all referenced agents exist in your VS Code settings `acp.agents`
+5. Reload VS Code if the team doesn't appear immediately
+6. Connect to the "Feature Team" virtual agent from the Agents view
+7. Send your request — the team will plan, seek approval, implement, and review
+
+## File Location
+
+Team definitions are loaded from:
+```
+.acp/teams/*.yaml
+.acp/teams/*.yml
+```
+
+Files must have `.yaml` or `.yml` extension and be valid YAML.
+
+## Format Specification (v1)
+
+### Complete Schema
+
+```yaml
+version: 1              # Required: must be 1
+id: feature-team        # Required: unique identifier (alphanumeric + hyphens/underscores)
+title: Feature Team     # Required: display name in Agents view
+orchestrator:           # Optional: metadata only in v1
+  agent: Codex CLI      # Metadata field; does NOT run as an orchestrator LLM
+roles:                  # Required
+  planner:             # Required role
+    agent: Codex CLI    # Required: must exist in acp.agents
+    instructions: .acp/agents/planner.md  # Required: path to markdown instructions
+  implementer:          # Required role
+    agent: Vibe
+    instructions: .acp/agents/implementer.md
+  reviewer:            # Required role
+    agent: Claude Code
+    instructions: .acp/agents/reviewer.md
+  tester:               # Optional role
     agent: Codex CLI
     instructions: .acp/agents/tester.md
 ```
 
-## Execution model
+### Field Reference
 
-Teams compile to the existing pipeline engine:
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `version` | number | Yes | Must be `1` for v1 teams |
+| `id` | string | Yes | Unique identifier, used internally. Alphanumeric, hyphens, underscores recommended. |
+| `title` | string | Yes | Display name shown in the Agents tree |
+| `orchestrator.agent` | string | No | Metadata field in v1. Documents intent but does NOT run as an active LLM. |
+| `roles` | object | Yes | Container for role definitions |
+| `roles.planner` | object | Yes | Planning role. Generates a `proposed_plan` output. |
+| `roles.implementer` | object | Yes | Implementation role. May modify workspace. |
+| `roles.reviewer` | object | Yes | Review role. Analyzes implementation output. |
+| `roles.tester` | object | No | Optional test role. Runs after reviewer. |
+| `roles.<role>.agent` | string | Yes | Name of an ACP agent configured in `acp.agents` |
+| `roles.<role>.instructions` | string | Yes | Path to markdown file with role-specific instructions |
 
-1. `planner` → `approval` → `implementer` → `reviewer` → optional `tester`
-2. Only `implementer` may change the workspace (`sideEffects: workspace`)
-3. Sandbox mode applies automatically to `implementer` when `acp.sandbox.enabled` is true
+### Forbidden Fields in Role Definitions
 
-## UI
+Do NOT include these in role definitions — they are generated by the compiler:
+- `sideEffects`
+- `output`
+- `prompt`
 
-- Teams appear in the Agents tree with an organization icon
-- Chat shows a role timeline and isolated role output sections
-- Invalid team YAML appears as `Team Title (invalid)` with the validation error in the tooltip
+These will cause validation errors.
+
+## Validation Rules
+
+### Required Roles
+- `planner` — required
+- `implementer` — required
+- `reviewer` — required
+- `tester` — optional (can be omitted)
+
+### Agent References
+- Every agent named in `roles.<role>.agent` MUST exist in `acp.agents` settings
+- The `orchestrator.agent` field (if present) must also reference an existing agent
+
+### Instruction Files
+- Instruction file paths are resolved relative to the workspace root
+- Paths must be within the workspace (cannot reference paths outside the project)
+- Files must be readable and valid UTF-8 Markdown
+- Maximum instruction file size: `acp.instructions.maxBytes` (default: 262144 bytes ≈ 256KB)
+- If an instruction file cannot be read, the team validation fails
+
+### ID and Title Constraints
+- Team `id` must be unique across all teams and pipelines
+- Team `title` appears as the virtual agent name in the Agents view
+- Titles should not conflict with existing `.acp/pipelines/*.yaml` titles
+
+## Instruction Files
+
+### Purpose
+
+Instruction files contain the role-specific prompts that guide each agent's behavior. Separating instructions from the team YAML allows:
+
+- Reusing the same instructions across multiple teams
+- Version controlling prompts with your code
+- Keeping team definitions concise
+
+### Example: planner.md
+
+```markdown
+# Planner Instructions
+
+You are the planning expert for this codebase. Your job is to create complete, decision-ready implementation plans.
+
+## Guidelines
+
+1. Analyze the user request thoroughly
+2. Break it into discrete, ordered steps
+3. Identify dependencies and risks
+4. Return exactly ONE `<proposed_plan>` block
+
+## Format
+
+```
+<proposed_plan>
+1. [Step 1 description]
+2. [Step 2 description]
+...
+</proposed_plan>
+```
+
+## Context
+
+- Current directory: {{userPrompt}}
+- Workspace: [workspace root]
+```
+
+### Template Variables
+
+When ACP Client compiles the team to a pipeline, instruction file contents are embedded into generated prompts with additional context. The compiler adds:
+
+- **For planner**: User prompt is appended after instructions
+- **For implementer**: User prompt and approved plan are appended
+- **For reviewer**: User prompt, approved plan, and implementation output are appended
+- **For tester**: User prompt, approved plan, implementation output, and review output are appended
+
+## Execution Model
+
+### Role Order
+
+Teams execute roles in this fixed order:
+
+```
+planner → approval → implementer → reviewer → tester (optional)
+```
+
+### Generated Pipeline Steps
+
+Each team compiles to a pipeline v2 with these steps:
+
+1. **plan**: Runs the planner role, expects `output: proposed_plan`
+2. **approval**: Human review gate — you must approve the plan to continue
+3. **implement**: Runs the implementer role with `sideEffects: workspace`
+4. **review**: Runs the reviewer role to analyze the implementation
+5. **test** (if tester role exists): Runs the tester role for additional validation
+
+### Side Effects and Sandbox
+
+- **Only `implementer` can modify the workspace** (`sideEffects: workspace`)
+- If `acp.sandbox.enabled` is `true`, the implementer runs in an isolated git worktree
+- The promotion gate applies: you can View Diff, Apply, or Reject changes
+- All other roles (`planner`, `reviewer`, `tester`) are read-only (`sideEffects: none`)
+
+### Approval Flow
+
+1. Planner generates a proposed plan
+2. Plan is displayed in the chat with approval UI
+3. You can edit the plan text before approving
+4. On approval, the plan is passed to the implementer
+5. On rejection, the team run stops
+
+## User Interface
+
+### Agents View
+
+- Teams appear as virtual agents with an organization icon (🏢)
+- The display name matches the team's `title` field
+- Invalid teams appear as `Title (invalid)` with the validation error in the tooltip
+
+### Chat Display
+
+- Shows a role timeline indicating current step
+- Output from each role appears in isolated sections
+- Approval steps show the plan in a `<proposed_plan>` block with approve/reject buttons
+- Team runs maintain a single session; internal role runs are implementation details
+
+### Example Chat Flow
+
+```
+User: Add a new API endpoint for user profiles
+
+Feature Team (planning...)
+├── planner: Codex CLI
+│   ✓ Plan generated
+│
+Feature Team
+└── Approval Required
+    
+    <proposed_plan>
+    1. Create user profile model in src/models/UserProfile.ts
+    2. Add API route in src/routes/userProfile.ts
+    3. Add tests in tests/userProfile.test.ts
+    </proposed_plan>
+    
+    [Edit Plan] [Approve] [Reject]
+
+User clicks Approve
+
+Feature Team (implementing...)
+├── planner: Codex CLI ✓
+├── approval: Approved ✓
+└── implementer: Vibe
+    Running in sandbox...
+
+Feature Team (reviewing...)
+├── planner: Codex CLI ✓
+├── approval: Approved ✓
+├── implementer: Vibe ✓
+└── reviewer: Claude Code
+    Analyzing changes...
+
+Feature Team
+All steps completed. Changes ready for promotion.
+[View Diff] [Apply] [Reject]
+```
 
 ## Commands
 
-- `ACP: Show Compiled Team Pipeline` — inspect the generated pipeline v2 JSON
-- `ACP: Re-run Team Reviewer` — run reviewer only on the latest completed team run and current git diff
+| Command | Description |
+|---------|-------------|
+| `ACP: Show Compiled Team Pipeline` | Inspect the generated pipeline v2 JSON for a team. Useful for debugging and understanding how your team compiles. |
+| `ACP: Re-run Team Reviewer` | Run only the reviewer role on the latest completed team run and the current git diff. Allows re-reviewing changes without re-running the entire team. |
+
+## Settings
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `acp.pipeline.enabled` | `true` | Must be enabled for teams to appear as virtual agents |
+| `acp.instructions.maxBytes` | `262144` | Maximum size in bytes for instruction markdown files |
+| `acp.sandbox.enabled` | `false` | When enabled, implementer runs in isolated git worktrees |
+| `acp.sandbox.directory` | `.acp/sandboxes` | Where sandbox worktrees are created |
+
+## Complete Example
+
+### Directory Structure
+
+```
+my-project/
+├── .acp/
+│   ├── teams/
+│   │   └── feature-team.yaml
+│   └── agents/
+│       ├── planner.md
+│       ├── implementer.md
+│       └── reviewer.md
+└── src/
+    └── ...
+```
+
+### .acp/teams/feature-team.yaml
+
+```yaml
+version: 1
+id: feature-team
+title: Feature Team
+orchestrator:
+  agent: Codex CLI
+roles:
+  planner:
+    agent: Codex CLI
+    instructions: .acp/agents/planner.md
+  implementer:
+    agent: Vibe
+    instructions: .acp/agents/implementer.md
+  reviewer:
+    agent: Claude Code
+    instructions: .acp/agents/reviewer.md
+```
+
+### .acp/agents/planner.md
+
+```markdown
+# Feature Planner
+
+Create concise, actionable implementation plans.
+
+Rules:
+- Return EXACTLY ONE `<proposed_plan>` block
+- Each step must be specific and testable
+- Identify file paths precisely
+- Note any dependencies or prerequisites
+
+User request will be provided after these instructions.
+```
+
+### .acp/agents/implementer.md
+
+```markdown
+# Feature Implementer
+
+Implement the approved plan precisely.
+
+Guidelines:
+- Follow the plan exactly
+- Write clean, idiomatic code
+- Include appropriate tests
+- Commit messages should reference the feature
+
+Approved plan will be provided after user request.
+```
+
+### .acp/agents/reviewer.md
+
+```markdown
+# Feature Reviewer
+
+Review the implementation against the approved plan.
+
+Checklist:
+- Does the code match the plan?
+- Are there any issues or bugs?
+- Is the code well-structured?
+- Are tests adequate?
+
+Provide clear feedback on any discrepancies.
+```
 
 ## Limits (v1)
 
-- Required roles: `planner`, `implementer`, `reviewer`
-- No custom roles, parallel implementers, or active orchestrator LLM
-- Team titles must not conflict with `.acp/pipelines/*.yaml` titles
+### Role Constraints
+- Only 4 roles supported: `planner`, `implementer`, `reviewer`, `tester`
+- `tester` is optional; the other 3 are required
+- No custom role names in v1
+- Role order is fixed: planner → approval → implementer → reviewer → tester
 
-See also: [pipeline-a2a.md](./pipeline-a2a.md)
+### Orchestration Constraints
+- No custom step ordering — roles always execute in the fixed order
+- No parallel role execution — each role runs sequentially
+- No conditional branches — all roles run in sequence (except tester, which is optional)
+- The `orchestrator.agent` field is metadata only — it does NOT run as an active LLM
+
+### Pipeline Constraints
+- Teams compile to pipeline v2, not a separate orchestration engine
+- All pipeline v2 rules apply: workspace side effects require prior approval
+- Teams cannot reference other teams (no nesting)
+- Maximum instruction size applies to all role instruction files
+
+### Naming Constraints
+- Team IDs must not conflict with `.acp/pipelines/*.yaml` IDs
+- Team titles must be unique in the Agents view
+
+## Common Errors
+
+| Error | Cause | Fix |
+|-------|-------|-----|
+| `Team Title (invalid)` in Agents view | YAML validation failed | Check the tooltip for specific error, fix the YAML |
+| Team doesn't appear | `acp.pipeline.enabled` is false, or file not in `.acp/teams/` | Enable setting, move file to correct location |
+| `roles.<role> is required` | Missing required role | Add the missing role to your team definition |
+| `roles.<role>.agent references missing ACP agent` | Agent not configured | Add the agent to `acp.agents` in settings |
+| `roles.<role>.instructions could not be resolved` | Instruction file not found | Create the file or fix the path |
+| `version must be 1` | Wrong version number | Set `version: 1` |
+| `roles.<role> is not an allowed role` | Invalid role name | Use only: planner, implementer, reviewer, tester |
+| `roles.<role>.sideEffects is not allowed` | Forbidden field in team YAML | Remove `sideEffects` — it's generated by compiler |
+
+## Relationship to Pipeline v2
+
+Agent Teams are a convenience layer on top of pipeline v2:
+
+- **Team YAML** → `AgentTeamCompiler` → **Pipeline v2 JSON**
+- The generated pipeline has primitives and steps matching the team's roles
+- All pipeline v2 features are available, but teams expose a simpler interface
+- You can inspect the generated pipeline with `ACP: Show Compiled Team Pipeline`
+
+For advanced use cases, write pipeline v2 YAML directly. For standard plan-implement-review workflows, teams provide a simpler authoring experience.
+
+## Migration from Raw Pipelines
+
+If you have an existing pipeline v2 YAML like:
+
+```yaml
+version: 2
+id: my-flow
+title: My Flow
+primitives:
+  planner:
+    agent: Codex CLI
+    output: proposed_plan
+    sideEffects: none
+    prompt: ...
+  implementer:
+    agent: Vibe
+    output: markdown
+    sideEffects: workspace
+    prompt: ...
+  reviewer:
+    agent: Claude Code
+    output: markdown
+    sideEffects: none
+    prompt: ...
+steps:
+  - id: plan
+    use: planner
+  - id: approval
+    type: approval
+    input: "{{steps.plan.output}}"
+  - id: implement
+    use: implementer
+  - id: review
+    use: reviewer
+```
+
+You can simplify to a team:
+
+```yaml
+version: 1
+id: my-flow
+title: My Flow
+roles:
+  planner:
+    agent: Codex CLI
+    instructions: .acp/agents/planner.md
+  implementer:
+    agent: Vibe
+    instructions: .acp/agents/implementer.md
+  reviewer:
+    agent: Claude Code
+    instructions: .acp/agents/reviewer.md
+```
+
+The team compiler generates the equivalent pipeline automatically.
+
+## See Also
+
+- [Pipeline v2 DSL](./pipeline-a2a.md) — The underlying orchestration layer
+- [ADR-0012: Agent Teams Architecture](../adr/0012-agent-teams.md) — Design decisions and rationale
+- [Agent Sandbox](../adr/0011-agent-sandbox-worktree.md) — How workspace isolation works

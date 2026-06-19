@@ -1,16 +1,18 @@
 # Pipeline LangGraph Workflow
 
-ACP Client exposes optional virtual agents from workspace pipeline files in `.acp/pipelines/*.yaml`.
+ACP Client exposes optional virtual agents from workspace pipeline files in `.acp/pipelines/*.yaml` and from Agent Team definitions in `.acp/teams/*.yaml`.
 
 Each pipeline is compiled into a local LangGraph graph. Graph nodes call configured ACP agents, approval steps pause execution for human review, and approved runs resume from the same VS Code pipeline session.
+
+> **Note**: Agent Teams provide a declarative way to define role-based workflows (planner, implementer, reviewer, tester) that compile to pipeline v2. See [agent-teams.md](./agent-teams.md) for the team format.
 
 ## Settings
 
 | Setting | Default | Purpose |
 |---------|---------|---------|
-| `acp.pipeline.enabled` | `true` | Shows or hides workspace-defined pipeline virtual agents. |
+| `acp.pipeline.enabled` | `true` | Shows or hides workspace-defined pipeline virtual agents from `.acp/pipelines/*.yaml` and agent teams from `.acp/teams/*.yaml`. |
 
-Every `primitives.*.agent` value in a pipeline file must exist in `acp.agents`. The pipeline system does not install agents automatically.
+Every `primitives.*.agent` value in a pipeline file must exist in `acp.agents`. For Agent Teams, every `roles.<role>.agent` value must exist in `acp.agents`. The pipeline system does not install agents automatically.
 
 ## DSL v2
 

@@ -19,8 +19,10 @@ plan -> recherches parallèles -> synthèse -> approbation -> exécution -> vér
 ACP et LangGraph ont deux rôles distincts :
 
 - ACP reste le protocole de communication avec les agents de coding.
-- LangGraph orchestre le workflow : ordre des étapes, parallélisation, état, approbation humaine et reprise après approbation.
+- LangGraph orchestrate le workflow : ordre des étapes, parallélisation, état, approbation humaine et reprise après approbation.
 - Le DSL YAML décrit le workflow de façon lisible dans le repo.
+
+> **Note** : Les **Équipes d'agents** (Agent Teams) offrent une manière déclarative de définir des workflows basés sur des rôles qui se compilent en pipeline v2. Voir [agent-teams.md](./agent-teams.md) pour le format complet.
 
 Le flux global est :
 
@@ -577,6 +579,49 @@ steps:
 | `workspace side effects before an approval step` | Une étape qui modifie le workspace est placée avant approbation. | Déplacer cette étape après `type: approval`. |
 | `cannot use workspace side effects` dans un parallèle | Une branche parallèle essaie de modifier le workspace. | Garder les branches parallèles en read-only. |
 | `expected exactly one proposed_plan` | L'agent n'a pas retourné un seul bloc `<proposed_plan>`. | Renforcer le prompt ou changer `output` en `markdown` si ce n'est pas un plan. |
+
+## Équipes d'agents (Agent Teams)
+
+Pour les workflows orientés rôles (planifier → implémenter → relire), les **Équipes d'agents** fournissent une syntaxe plus simple que le DSL pipeline complet.
+
+### Avantages des équipes
+
+- Définition déclarative des rôles dans `.acp/teams/*.yaml`
+- Compilation automatique vers pipeline v2
+- Pas besoin d'apprendre tout le DSL pipeline
+- Instructions séparées par fichier pour chaque rôle
+
+### Exemple minimal
+
+```yaml
+version: 1
+id: mon-equipe
+title: Mon Équipe
+roles:
+  planner:
+    agent: Codex CLI
+    instructions: .acp/agents/planner.md
+  implementer:
+    agent: Vibe
+    instructions: .acp/agents/implementer.md
+  reviewer:
+    agent: Claude Code
+    instructions: .acp/agents/reviewer.md
+```
+
+Les équipes apparaissent comme des agents virtuels dans la vue Agents, avec une icône d'organisation.
+
+### Erreurs fréquentes avec les équipes
+
+| Message ou symptôme | Cause probable | Correction |
+|---------------------|----------------|------------|
+| `Titre (invalide)` dans la vue Agents | YAML invalide ou rôle manquant | Vérifier l'infobulle pour l'erreur, corriger le fichier team |
+| Équipe n'apparaît pas | `acp.pipeline.enabled` à `false` ou fichier hors `.acp/teams/` | Activer le setting, déplacer le fichier |
+| `roles.planner is required` | Rôle planner manquant | Ajouter le rôle planner avec agent et instructions |
+| `roles.<rôle>.agent references missing ACP agent` | Agent non configuré dans `acp.agents` | Ajouter l'agent dans les paramètres |
+| `roles.<rôle>.instructions could not be resolved` | Fichier d'instructions introuvable | Créer le fichier ou corriger le chemin |
+
+Voir la [documentation complète des Équipes d'agents](./agent-teams.md) pour plus de détails.
 
 ## Quand créer plusieurs pipelines
 

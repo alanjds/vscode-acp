@@ -20,6 +20,7 @@ Cette roadmap regroupe les idées d'évolution et les possibilités pour ACP Cli
 
 ## Possibilités Moyen Terme
 
+- Permettre d'ouvrir la fenêtre de chat dans un onglet de la zone éditeur, en complément de la vue latérale actuelle. Une commande doit pouvoir ouvrir ou déplacer le chat sans perdre la session, l'historique, le brouillon ni le run en cours. L'implémentation devra utiliser les API VS Code stables (`WebviewPanel` et restauration via serializer), partager le même état avec la `WebviewView` existante et être testée sous VS Code et Cursor lorsque leurs API sont compatibles.
 - Ajouter des profils d'agents pour sauvegarder des combinaisons de modèle, mode, niveau de raisonnement, permissions et répertoire de travail.
 - Proposer une recherche dans l'historique des sessions, avec filtres par agent, date, titre et contenu.
 - Permettre l'export et l'import de sessions pour faciliter le partage ou l'archivage.
@@ -118,24 +119,30 @@ Travail à prévoir :
 - Afficher dans l'UI quel fichier d'instructions sera injecté.
 - Prévoir une prévisualisation du prompt final avant lancement.
 
-### 3. Sous-agents et reviewers déclaratifs
+### 3. Sous-agents et reviewers déclaratifs (v1 implémentée ✅)
 
-Omnigent autorise un agent à déclarer des sous-agents comme outils. ACP Client a déjà les pipelines LangGraph, mais pas encore une syntaxe simple pour définir un orchestrateur avec ses rôles.
+**Statut** : Implémenté dans ACP Client via la feature **Agent Teams** / **Équipes d'agents**.
 
-Objectif :
+Omnigent autorise un agent à déclarer des sous-agents comme outils. ACP Client a implémenté une approche similaire via `.acp/teams/*.yaml` qui compile vers le DSL pipeline v2 existant.
 
-- Définir un agent coordinateur avec des rôles `planner`, `implementer`, `reviewer`, `tester`.
-- Permettre à chaque rôle d'utiliser un agent ACP différent.
-- Rendre les workflows type "planifier, implémenter, relire, tester" plus faciles à configurer.
+#### Fonctionnalités v1 livrées
 
-Exemple cible :
+- Définition d'équipes avec rôles `planner`, `implementer`, `reviewer`, et `tester` optionnel
+- Chaque rôle peut utiliser un agent ACP différent
+- Workflows "planifier → approuver → implémenter → relire → tester" configurables via YAML simple
+- Compilation automatique vers pipeline v2 avec étapes d'approbation intégrées
+- Affichage des rôles comme timeline dans le chat
+- Commandes dédiées : `ACP: Show Compiled Team Pipeline` et `ACP: Re-run Team Reviewer`
+- Intégration au sandbox : `implementer` s'exécute dans un worktree isolé si `acp.sandbox.enabled` est actif
+
+Exemple v1 :
 
 ```yaml
 version: 1
 id: feature-team
 title: Feature Team
 orchestrator:
-  agent: Codex CLI
+  agent: Codex CLI   # métadonnée v1, pas un agent LLM actif
 roles:
   planner:
     agent: Codex CLI
@@ -143,18 +150,23 @@ roles:
   implementer:
     agent: Vibe
     instructions: .acp/agents/implementer.md
-    sideEffects: workspace
   reviewer:
     agent: Claude Code
     instructions: .acp/agents/reviewer.md
+  tester:            # optionnel
+    agent: Codex CLI
+    instructions: .acp/agents/tester.md
 ```
 
-Travail à prévoir :
+Voir la documentation complète : [doc_fr/agent-teams.md](../doc_fr/agent-teams.md)
 
-- Etendre le DSL pipeline ou ajouter une couche de compilation `agent profile -> pipeline`.
-- Afficher les sous-runs dans le chat avec statut, agent utilisé et sortie.
-- Permettre la revue humaine entre les étapes critiques.
-- Empêcher les étapes avec effets workspace avant approbation.
+#### Évolutions futures possibles
+
+- Rôles personnalisables au-delà des 4 rôles v1
+- Implémentateurs parallèles pour tâches simultanées
+- Orchestrateur LLM actif au lieu de compilation statique
+- Intégration plus poussée avec le registre d'agents
+- Gestion des dépendances entre équipes
 
 ### 4. Comparaison multi-agent
 

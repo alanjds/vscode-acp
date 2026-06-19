@@ -21,6 +21,7 @@ A [Visual Studio Code extension](https://marketplace.visualstudio.com/items?item
 - **Debug Snapshots**: In-memory ACP/client traces can be viewed, refreshed, copied, or exported from the debug snapshot panel.
 - **Interactive Chat**: Built-in chat panel with Markdown rendering, inline tool call display, and collapsible tool sections
 - **LangGraph Pipelines**: Optional virtual agents can orchestrate ACP agents from workspace YAML workflows with reviewable approvals.
+- **Agent Teams**: Declarative multi-role workflows in `.acp/teams/*.yaml` that compile to pipeline v2 — define `planner`, `implementer`, `reviewer`, and optional `tester` roles, each using a different ACP agent.
 - **Agent Sandbox**: Optional git worktree isolation for workspace-changing pipeline steps, with diff review and promotion gate before applying changes to the main workspace.
 - **Thinking Display**: See agent reasoning in a collapsible block with streaming animation and elapsed time
 - **Slash Commands**: Autocomplete popup for agent-provided commands with keyboard navigation
@@ -80,7 +81,8 @@ You can add custom agent configurations in settings.
 | `acp.autoApprovePermissions` | `ask` | How agent permission requests are handled: `ask` or `allowAll`. |
 | `acp.defaultWorkingDirectory` | `""` | Default working directory for agent sessions. Empty uses current workspace. |
 | `acp.logTraffic` | `true` | Log all ACP protocol traffic to the ACP Traffic output channel. |
-| `acp.pipeline.enabled` | `true` | Enable virtual pipeline agents loaded from `.acp/pipelines/*.yaml`. |
+| `acp.pipeline.enabled` | `true` | Enable virtual pipeline agents from `.acp/pipelines/*.yaml` and agent teams from `.acp/teams/*.yaml`. |
+| `acp.instructions.maxBytes` | `262144` | Maximum size in bytes for Markdown instruction files referenced by agent teams. |
 | `acp.sandbox.enabled` | `false` | Run workspace-changing pipeline steps in isolated git worktrees with promotion gate. |
 | `acp.sandbox.directory` | `.acp/sandboxes` | Relative path where sandbox worktrees are created. |
 | `acp.sandbox.promotion.lintCommand` | `""` | Optional lint command run in the sandbox before promotion. |
@@ -136,6 +138,8 @@ Main commands are available from the Command Palette, view title buttons, or con
 | `ACP: Promote Sandbox Changes` | Open the promotion gate for the active sandbox. |
 | `ACP: Discard Sandbox` | Discard the active sandbox worktree. |
 | `ACP: Cleanup Stale Sandboxes` | Remove sandbox worktrees older than the configured TTL. |
+| `ACP: Show Compiled Team Pipeline` | Inspect the generated pipeline v2 JSON for an agent team. |
+| `ACP: Re-run Team Reviewer` | Run reviewer only on the latest completed team run and current git diff. |
 | `ACP: Refresh Sessions` | Re-fetch the session list for an agent (also on the agent's right-click menu) |
 | `ACP: Show Log` | Open the ACP Client log output channel |
 | `ACP: Show Protocol Traffic` | Open the ACP Traffic output channel |
@@ -195,7 +199,7 @@ The extension follows a modular architecture:
 - **Handlers**: `FileSystemHandler`, `TerminalHandler`, `PermissionHandler`, `SessionUpdateHandler`
 - **UI**: `SessionTreeProvider`, `ChatWebviewProvider`, `StatusBarManager`, `EditorContext`, `DebugWebviewPanel`
 - **Config**: `AgentConfig`, `RegistryClient`, `PipelineConfig`
-- **Pipeline**: `PipelineService`, `PipelineGraphCompiler`, `AcpAgentRunner`, `ProposedPlan`
+- **Pipeline**: `PipelineService`, `PipelineGraphCompiler`, `AcpAgentRunner`, `ProposedPlan`, `AgentTeamCompiler`, `AgentTeamCatalog`
 - **Utils**: `Logger`
 
 Communication with agents uses the ACP protocol (JSON-RPC 2.0 over stdio).
@@ -205,6 +209,7 @@ Communication with agents uses the ACP protocol (JSON-RPC 2.0 over stdio).
 - Agents must be available via the system PATH or `npx`
 - Some agents may require additional authentication setup
 - Pipeline virtual agents require both planner and implementer agents to be configured in `acp.agents`
+- Agent team roles reference agents by name; all referenced agents must exist in `acp.agents`
 
 ## Links
 

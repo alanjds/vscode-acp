@@ -55,6 +55,259 @@ Cette roadmap regroupe les idées d'évolution et les possibilités pour ACP Cli
 - Proposer des politiques de permissions par workspace ou par profil d'agent.
 - Améliorer le registre d'agents avec des contrôles de disponibilité, installation et authentification.
 
+## Fonctionnalités Inspirées d'Omnigent
+
+Cette section détaille les fonctionnalités observées dans Omnigent qui peuvent être adaptées à ACP Client. Le périmètre volontairement retenu reste local et centré VS Code : les fonctions cloud, serveur déployé, comptes multi-utilisateurs, invitation de teammates, co-drive distant et partage d'agents entre utilisateurs sont hors scope pour cette roadmap.
+
+### 1. Agents déclaratifs en YAML
+
+Omnigent permet de définir un agent dans un fichier YAML unique : nom, prompt ou fichier d'instructions, runtime, modèle, outils, sous-agents, accès OS, terminaux et politiques. ACP Client devrait proposer un équivalent local via `.acp/agents/*.yaml`.
+
+Objectif :
+
+- Créer des agents réutilisables versionnés avec le workspace.
+- Eviter de tout configurer dans les settings VS Code globaux.
+- Permettre à un projet de fournir ses propres agents spécialisés.
+- Faire apparaître ces agents dans la vue Agents comme des agents virtuels locaux.
+
+Exemple cible :
+
+```yaml
+version: 1
+id: code-reviewer
+title: Code Reviewer
+agent: Codex CLI
+instructions: .acp/agents/code-reviewer.md
+model: gpt-5
+mode: review
+workingDirectory: .
+permissions:
+  fileSystem: ask
+  terminal: ask
+sandbox:
+  enabled: true
+```
+
+Travail à prévoir :
+
+- Ajouter un `AgentProfileCatalog` qui charge `.acp/agents/*.yaml`.
+- Valider le schéma YAML et remonter les erreurs dans le log ACP.
+- Fusionner profil local, configuration agent existante et options de session ACP.
+- Ajouter un watcher sur `.acp/agents/*.yaml`.
+- Documenter le format dans `docs/agent-profiles.md`.
+
+Remarque v1 :
+
+- Si ces profils exigent une forte customisation du comportement agent, par exemple modifier le prompt système natif plutôt que seulement injecter un fichier `instructions`, la v1 sera cadrée autour de `pi Agent`. Le CLI `pi` expose déjà `--system-prompt` et `--append-system-prompt`, ce qui permet de tester proprement les profils spécialisés sans imposer immédiatement un adaptateur profond à tous les agents ACP.
+
+### 2. Instructions partagées par agent
+
+Omnigent permet de référencer un fichier d'instructions plutôt que d'intégrer tout le prompt dans le YAML. ACP Client devrait supporter `instructions: path/to/file.md` pour partager des consignes longues entre agents, pipelines et sessions.
+
+Objectif :
+
+- Factoriser les prompts longs.
+- Versionner les rôles d'agents avec le code.
+- Préparer un mécanisme propre de partage local des skills ou consignes projet.
+
+Travail à prévoir :
+
+- Résoudre les chemins relatifs depuis le fichier YAML.
+- Refuser les chemins hors workspace sauf autorisation explicite.
+- Afficher dans l'UI quel fichier d'instructions sera injecté.
+- Prévoir une prévisualisation du prompt final avant lancement.
+
+### 3. Sous-agents et reviewers déclaratifs
+
+Omnigent autorise un agent à déclarer des sous-agents comme outils. ACP Client a déjà les pipelines LangGraph, mais pas encore une syntaxe simple pour définir un orchestrateur avec ses rôles.
+
+Objectif :
+
+- Définir un agent coordinateur avec des rôles `planner`, `implementer`, `reviewer`, `tester`.
+- Permettre à chaque rôle d'utiliser un agent ACP différent.
+- Rendre les workflows type "planifier, implémenter, relire, tester" plus faciles à configurer.
+
+Exemple cible :
+
+```yaml
+version: 1
+id: feature-team
+title: Feature Team
+orchestrator:
+  agent: Codex CLI
+roles:
+  planner:
+    agent: Codex CLI
+    instructions: .acp/agents/planner.md
+  implementer:
+    agent: Vibe
+    instructions: .acp/agents/implementer.md
+    sideEffects: workspace
+  reviewer:
+    agent: Claude Code
+    instructions: .acp/agents/reviewer.md
+```
+
+Travail à prévoir :
+
+- Etendre le DSL pipeline ou ajouter une couche de compilation `agent profile -> pipeline`.
+- Afficher les sous-runs dans le chat avec statut, agent utilisé et sortie.
+- Permettre la revue humaine entre les étapes critiques.
+- Empêcher les étapes avec effets workspace avant approbation.
+
+### 4. Comparaison multi-agent
+
+Omnigent met en avant des agents qui interrogent plusieurs modèles ou harnesses et comparent leurs réponses. ACP Client pourrait ajouter un mode local de comparaison.
+
+Objectif :
+
+- Envoyer le même prompt à plusieurs agents ACP.
+- Afficher les réponses côte à côte.
+- Permettre une étape de synthèse ou de débat.
+- Utiliser ce mode pour brainstorming, revue de plan, diagnostic et choix d'implémentation.
+
+Travail à prévoir :
+
+- Ajouter un profil `comparison` dans les pipelines.
+- Créer un bloc UI côte à côte dans la webview.
+- Gérer l'annulation simultanée de toutes les branches.
+- Ajouter une synthèse optionnelle par un agent choisi.
+
+### 5. Politiques déclaratives de sécurité
+
+Omnigent possède un système de politiques avec verdicts `ALLOW`, `DENY` et `ASK`, applicable aux actions shell, fichiers, outils, budget et risques. ACP Client a déjà les permissions ACP et le sandbox, mais doit gagner en granularité.
+
+Objectif :
+
+- Remplacer progressivement le simple `ask` ou `allowAll` par des règles composables.
+- Définir des politiques par workspace, profil d'agent, pipeline ou session.
+- Bloquer ou demander confirmation pour les commandes risquées.
+- Encadrer les accès fichiers, les commandes git, les changements de répertoire et le réseau.
+
+Exemple cible :
+
+```yaml
+policies:
+  shell:
+    default: ask
+    deny:
+      - "rm -rf"
+      - "git reset --hard"
+  files:
+    writable:
+      - .
+    readonly:
+      - docs
+  network:
+    allow:
+      - github.com
+      - registry.npmjs.org
+```
+
+Travail à prévoir :
+
+- Créer un moteur local de verdict `allow`, `deny`, `ask`.
+- L'appliquer aux handlers `FileSystemHandler`, `TerminalHandler` et aux runs sandbox.
+- Ajouter une UI de session pour voir les politiques actives.
+- Journaliser les décisions dans les debug snapshots.
+
+### 6. Budget et limites d'exécution
+
+Omnigent propose des limites de coût et de nombre d'appels outils. Dans ACP Client, l'information coût dépend des agents ACP, mais des limites locales restent utiles.
+
+Objectif :
+
+- Limiter le nombre d'appels terminal/fichier par session.
+- Limiter la durée maximale d'un run.
+- Afficher un compteur d'actions et un état de budget de contexte.
+- Stopper proprement les agents quand une limite est atteinte.
+
+Travail à prévoir :
+
+- Ajouter des compteurs par session dans `SessionState`.
+- Définir des seuils configurables par workspace et profil.
+- Envoyer un message clair à l'agent quand une limite bloque une action.
+- Ajouter des tests sur annulation, timeout et blocage d'action.
+
+### 7. Gestion des credentials et modèles par profil
+
+Omnigent distingue clé API, abonnement CLI, gateway compatible OpenAI/Anthropic et configuration par agent. ACP Client dépend surtout des agents ACP installés, mais peut mieux modéliser les prérequis.
+
+Objectif :
+
+- Décrire pour chaque agent les prérequis d'installation et d'authentification.
+- Associer un modèle, un mode et des options par profil.
+- Détecter les commandes absentes ou credentials probablement manquants.
+- Améliorer les messages d'erreur au lancement.
+
+Travail à prévoir :
+
+- Enrichir le registre d'agents avec `install`, `auth`, `healthCheck` et `models`.
+- Ajouter une commande "Diagnostiquer cet agent".
+- Afficher l'état prêt, absent, non authentifié ou erreur inconnue.
+- Conserver les overrides par workspace.
+
+### 8. Sandboxing renforcé
+
+Omnigent sélectionne un sandbox OS selon la plateforme. ACP Client dispose déjà d'un sandbox par git worktree, qui protège surtout le workspace principal mais ne fournit pas une isolation OS complète.
+
+Objectif :
+
+- Garder le git worktree comme UX principale.
+- Ajouter des garde-fous applicatifs plus stricts pour terminal, fichiers et réseau.
+- Préparer plus tard une isolation OS optionnelle si elle reste simple à utiliser.
+
+Travail à prévoir :
+
+- Finaliser l'allowlist réseau applicative.
+- Bloquer les chemins hors sandbox au niveau terminal quand c'est détectable.
+- Ajouter un résumé clair des limites du sandbox dans l'UI.
+- Evaluer une intégration macOS seatbelt ou container optionnel sans rendre le flux obligatoire.
+
+### 9. Sessions attachables localement
+
+Omnigent permet d'attacher une interface à une session existante. Sans aller vers le partage multi-user, ACP Client peut améliorer la reprise locale.
+
+Objectif :
+
+- Rendre la reprise de session plus fiable et visible.
+- Permettre de rattacher la vue chat à une session active ou historique.
+- Clarifier les sessions internes de pipeline et les sessions utilisateur.
+
+Travail à prévoir :
+
+- Ajouter une vue détaillée de session : agent, cwd, modèle, statut, dernier message.
+- Ajouter une commande "Attacher à cette session locale".
+- Mieux distinguer session active, session restaurée et session pipeline interne.
+- Ajouter une recherche dans l'historique.
+
+### 10. Exemples prêts à l'emploi
+
+Omnigent fournit des exemples comme Polly et Debby pour montrer les workflows multi-agents. ACP Client devrait fournir des exemples locaux adaptés VS Code.
+
+Objectif :
+
+- Fournir des exemples concrets dans `.acp/examples` ou `docs/examples`.
+- Accélérer l'adoption des pipelines et profils agents.
+- Servir de tests manuels pour les scénarios multi-agents.
+
+Exemples à créer :
+
+- `plan-execute-review`: plan, approbation, implémentation sandbox, review.
+- `compare-agents`: même prompt envoyé à deux agents, synthèse finale.
+- `test-writer`: génération de tests puis validation.
+- `doc-writer`: résumé de code et mise à jour documentation.
+
+## Fonctionnalités Omnigent Hors Périmètre
+
+- Cloud sandboxes provisionnés par serveur.
+- Application web/mobile distante.
+- Comptes utilisateurs, invitations et administration d'équipe.
+- Partage public ou privé de sessions entre utilisateurs.
+- Co-drive distant sur la machine d'un autre utilisateur.
+- Fork distant d'une conversation vers une autre machine.
+- Déploiement Docker/Railway/Fly/Render du serveur.
+
 ## Priorités Suggérées
 
 1. Fiabiliser les fonctionnalités déjà visibles : sessions, contexte VS Code, mentions de fichiers et erreurs de connexion.

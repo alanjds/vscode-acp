@@ -1,4 +1,4 @@
-import { RunAbortedError } from '../../pipeline/RunAbortedError';
+import { RunAbortedError } from '../../core/RunAbortedError';
 import { InlineEditRequest, InlineEditResult } from '../InlineChatTypes';
 import { InlineEditAgent, InlineEditOptions } from './InlineEditAgent';
 

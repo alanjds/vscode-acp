@@ -1,7 +1,7 @@
 import * as assert from 'assert';
 
 import { PipelineService } from '../pipeline/PipelineService';
-import { RunAbortedError } from '../pipeline/RunAbortedError';
+import { RunAbortedError } from '../core/RunAbortedError';
 import type { PipelineDefinition } from '../config/PipelineCatalog';
 
 const PLAN_EXECUTE_VERIFY_PIPELINE: PipelineDefinition = {

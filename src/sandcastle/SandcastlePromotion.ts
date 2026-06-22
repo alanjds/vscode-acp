@@ -4,6 +4,7 @@ import { getAgentConfig, isSandcastleAgentConfig } from '../config/AgentConfig';
 import type { SessionManager } from '../core/SessionManager';
 import {
   SandcastlePromotionUi,
+  type SandcastleBridgeConnection,
   type SandcastlePreview,
   type SandcastlePromotionMode,
   type SandcastlePromotionOutcome,
@@ -15,10 +16,6 @@ export class SandcastleApplyError extends Error {
   constructor() {
     super('Sandcastle changes could not be applied.');
   }
-}
-
-interface SandcastleConnection {
-  extMethod(method: string, params: Record<string, unknown>): Promise<Record<string, unknown>>;
 }
 
 export interface FinishEphemeralRunOptions {
@@ -68,7 +65,7 @@ export class SandcastlePromotion {
    * @throws {@link SandcastleApplyError} Si apply échoue en mode autoApply ou après choix Apply.
    */
   async finishEphemeralRun(
-    connection: SandcastleConnection,
+    connection: SandcastleBridgeConnection,
     sessionId: string,
     options: FinishEphemeralRunOptions = {},
   ): Promise<SandcastlePromotionOutcome | undefined> {
@@ -88,7 +85,7 @@ export class SandcastlePromotion {
   /**
    * Exécute le flux Promotion post-run selon le mode configuré (ask, autoApply, autoReject).
    */
-  async promote(connection: SandcastleConnection, sessionId: string): Promise<SandcastlePromotionOutcome> {
+  async promote(connection: SandcastleBridgeConnection, sessionId: string): Promise<SandcastlePromotionOutcome> {
     const preview = await this.ui.preview(connection, sessionId);
     if (preview.filesChanged === 0) {
       await this.ui.discard(connection, sessionId);
@@ -120,7 +117,7 @@ export class SandcastlePromotion {
   }
 
   private async promptPromotionChoice(
-    connection: SandcastleConnection,
+    connection: SandcastleBridgeConnection,
     sessionId: string,
     preview: SandcastlePreview,
     allowViewDiff: boolean,

@@ -1,9 +1,8 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
 
-import { AcpAgentRunner } from '../pipeline/AcpAgentRunner';
-import { SandcastlePromotion } from '../sandcastle/SandcastlePromotion';
-import { isRunAbortedError, RunAbortedError } from '../pipeline/RunAbortedError';
+import { runEphemeralRun } from '../core/EphemeralRun';
+import { isRunAbortedError, RunAbortedError } from '../core/RunAbortedError';
 
 suite('RunAbortedError', () => {
   test('isRunAbortedError identifies RunAbortedError instances', () => {
@@ -12,7 +11,7 @@ suite('RunAbortedError', () => {
   });
 });
 
-suite('AcpAgentRunner abort', () => {
+suite('EphemeralRun abort', () => {
   let originalGetConfiguration: typeof vscode.workspace.getConfiguration;
 
   setup(() => {
@@ -33,14 +32,17 @@ suite('AcpAgentRunner abort', () => {
     vscode.workspace.getConfiguration = originalGetConfiguration;
   });
 
-  test('run throws RunAbortedError when signal is already aborted', async () => {
-    const promotion = new SandcastlePromotion({} as any);
-    const runner = new AcpAgentRunner(() => '/repo', promotion);
+  test('runEphemeralRun throws RunAbortedError when signal is already aborted', async () => {
     const controller = new AbortController();
     controller.abort();
 
     await assert.rejects(
-      () => runner.run('Codex', 'hello', { signal: controller.signal }),
+      () => runEphemeralRun({
+        workspaceCwd: '/repo',
+        agentName: 'Codex',
+        promptText: 'hello',
+        signal: controller.signal,
+      }),
       (error: unknown) => isRunAbortedError(error),
     );
   });

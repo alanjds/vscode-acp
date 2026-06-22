@@ -24,8 +24,7 @@ suite('OrchestrationRuntime', () => {
       },
       getActiveSessionId: () => 'virtual-1',
       isVirtualSession: (sessionId: string) => sessionId === 'virtual-1',
-      recordAssistantMessageChunk: () => undefined,
-      recordUserMessageChunk: () => undefined,
+      ingestSessionUpdate: () => undefined,
       isLoading: () => false,
       touchHistory: (sessionId: string) => calls.push(`touch:${sessionId}`),
     } as any;

@@ -18,6 +18,8 @@
     "src/**/*",
     "webview/src/chatTypes.ts",
     "webview/src/app/state.ts",
-    "webview/src/app/normalizers.ts"
+    "webview/src/app/normalizers.ts",
+    "webview/src/components/markdownEditableDom.ts",
+    "webview/src/app/composer.ts"
   ]
 }

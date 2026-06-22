@@ -1,0 +1,158 @@
+/* Shared lesson stylesheet — Tufte-inspired, print-friendly */
+:root {
+  --text: #1a1a1a;
+  --muted: #555;
+  --accent: #2563eb;
+  --accent-soft: #eff6ff;
+  --border: #e5e7eb;
+  --correct: #15803d;
+  --incorrect: #b91c1c;
+  --font-serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  --font-sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+* { box-sizing: border-box; }
+
+html {
+  font-size: 18px;
+  line-height: 1.55;
+}
+
+body {
+  margin: 0 auto;
+  max-width: 42rem;
+  padding: 2.5rem 1.5rem 4rem;
+  color: var(--text);
+  font-family: var(--font-serif);
+  background: #fafafa;
+}
+
+header {
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 2rem;
+  padding-bottom: 1rem;
+}
+
+h1, h2, h3 {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+h1 { font-size: 1.75rem; margin-top: 0; }
+h2 { font-size: 1.25rem; margin-top: 2rem; }
+h3 { font-size: 1.05rem; margin-top: 1.5rem; }
+
+p, li { color: var(--text); }
+.muted { color: var(--muted); font-size: 0.9rem; }
+
+a { color: var(--accent); }
+
+nav.lesson-nav {
+  font-family: var(--font-sans);
+  font-size: 0.85rem;
+  margin-bottom: 1.5rem;
+}
+
+nav.lesson-nav a { margin-right: 1rem; }
+
+code, .mono {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  background: #f3f4f6;
+  padding: 0.1em 0.35em;
+  border-radius: 3px;
+}
+
+pre {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  line-height: 1.45;
+  background: #111827;
+  color: #e5e7eb;
+  padding: 1rem 1.1rem;
+  border-radius: 6px;
+  overflow-x: auto;
+}
+
+figure.diagram {
+  margin: 1.5rem 0;
+  padding: 1rem;
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  line-height: 1.4;
+  white-space: pre;
+  overflow-x: auto;
+}
+
+.callout {
+  border-left: 3px solid var(--accent);
+  background: var(--accent-soft);
+  padding: 0.75rem 1rem;
+  margin: 1.25rem 0;
+  font-size: 0.95rem;
+}
+
+.quiz {
+  margin: 2rem 0;
+  padding: 1.25rem;
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.quiz-question {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  margin-bottom: 1rem;
+}
+
+.quiz-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.quiz-options button {
+  font-family: var(--font-sans);
+  font-size: 0.9rem;
+  text-align: left;
+  padding: 0.65rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: white;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.quiz-options button:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.quiz-options button:disabled { cursor: default; opacity: 0.85; }
+.quiz-options button.correct { border-color: var(--correct); background: #f0fdf4; }
+.quiz-options button.incorrect { border-color: var(--incorrect); background: #fef2f2; }
+
+.quiz-feedback {
+  margin-top: 0.75rem;
+  font-size: 0.9rem;
+  min-height: 1.4em;
+}
+
+footer {
+  margin-top: 3rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+@media print {
+  body { background: white; max-width: none; }
+  .quiz-options button { border: 1px solid #ccc; }
+}

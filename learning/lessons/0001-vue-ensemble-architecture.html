@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Leçon 1 — Vue d'ensemble de l'architecture</title>
+  <link rel="stylesheet" href="../assets/styles.css">
+</head>
+<body>
+  <header>
+    <nav class="lesson-nav">
+      <a href="../MISSION.md">Mission</a>
+      <a href="../reference/glossaire-acp-client.html">Glossaire</a>
+      <a href="../RESOURCES.md">Ressources</a>
+    </nav>
+    <h1>Vue d'ensemble : comment marche vscode-acp-perso</h1>
+    <p class="muted">Leçon 0001 · ~8 minutes · liée à la <a href="../MISSION.md">mission</a></p>
+  </header>
+
+  <main>
+    <section>
+      <h2>En une phrase</h2>
+      <p>
+        Cette extension VS Code est un <strong>client ACP</strong> : elle lance (ou isole) un agent IA,
+        envoie tes prompts via JSON-RPC, affiche les réponses dans une webview React, et indexe les
+        conversations passées dans l'arbre <em>Agents</em>.
+      </p>
+      <p class="muted">
+        Source : <a href="https://agentclientprotocol.com/">Agent Client Protocol</a> ·
+        <a href="../../README.fr.md">README.fr.md</a>
+      </p>
+    </section>
+
+    <section>
+      <h2>Les quatre contextes</h2>
+      <p>Le code est découpé en domaines qui <em>partagent</em> le vocabulaire Core sans le redéfinir :</p>
+      <figure class="diagram">┌─────────────────────────────────────────────────────────┐
+│  CORE — chat, connexion agent, sessions, handoff        │
+│  src/core/  ·  src/ui/  ·  src/handlers/                │
+└────────────┬───────────────────────────────┬────────────┘
+             │                               │
+    ┌────────▼────────┐             ┌────────▼────────┐
+    │ PIPELINE        │             │ SANDCASTLE      │
+    │ agents virtuels │             │ Docker + git    │
+    │ LangGraph YAML  │             │ worktree        │
+    └────────┬────────┘             └────────┬────────┘
+             │                               │
+             └───────────┬───────────────────┘
+                         │
+                ┌────────▼────────┐
+                │ INLINE CHAT     │
+                │ édition inset   │
+                │ (Cmd+I)         │
+                └─────────────────┘</figure>
+      <p>
+        La carte complète avec relations Mermaid vit dans
+        <a href="../../CONTEXT-MAP.md">CONTEXT-MAP.md</a>.
+      </p>
+    </section>
+
+    <section>
+      <h2>Démarrage de l'extension</h2>
+      <p>Quand VS Code charge l'extension, le chemin est court et linéaire :</p>
+      <pre>src/extension.ts
+  └─ activate() → startExtensionRuntime()
+       ├─ AgentManager, ConnectionManager, SessionManager
+       ├─ SessionTreeProvider  (vue arbre « Agents »)
+       ├─ ChatWebviewController + React webview  (panneau « Chat »)
+       ├─ registerCommands()  (Connect, Send, New Conversation…)
+       └─ plugins optionnels :
+            OrchestrationPlugin  (.acp/pipelines, .acp/teams)
+            SandcastlePlugin     (bridge Docker)
+            InlineChatPlugin     (Cmd+I)</pre>
+      <p>
+        <code>SessionManager</code> est le cœur runtime : il possède la
+        <strong>Conversation</strong> active, parle au <strong>ConnectedAgent</strong>, et émet des
+        événements que la webview écoute (<code>active-session-changed</code>,
+        <code>clear-chat</code>, etc.).
+      </p>
+    </section>
+
+    <section>
+      <h2>Parcours utilisateur typique</h2>
+      <ol>
+        <li>Tu choisis un <strong>ConfiguredAgent</strong> dans l'arbre (ex. « Claude Code »).</li>
+        <li><strong>Connect</strong> → <code>ConnectionManager</code> spawn le processus ACP (ou le bridge Sandcastle).</li>
+        <li>Tu envoies un prompt → le client ACP stream des <code>session/update</code>.</li>
+        <li><code>SessionUpdateHandler</code> transforme le flux en <strong>ChatHistory</strong> (UI riche).</li>
+        <li>En parallèle, un <strong>SessionRecord</strong> est mis à jour pour l'arbre et le handoff.</li>
+      </ol>
+
+      <div class="callout">
+        <strong>Piège fréquent — le mot « session »</strong><br>
+        Il désigne au moins quatre choses différentes. Voir le
+        <a href="../reference/glossaire-acp-client.html">glossaire</a> :
+        ProtocolSession, Conversation, SessionRecord, BridgeConversation.
+      </div>
+    </section>
+
+    <section>
+      <h2>Trois transports, une UI</h2>
+      <table style="width:100%; border-collapse:collapse; font-size:0.9rem;">
+        <thead>
+          <tr style="border-bottom:2px solid var(--border); text-align:left;">
+            <th style="padding:0.4rem 0;">Transport</th>
+            <th style="padding:0.4rem 0;">Exemple d'agent</th>
+            <th style="padding:0.4rem 0;">Où ça tourne</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr style="border-bottom:1px solid var(--border);">
+            <td style="padding:0.5rem 0;"><code>nativeAcp</code></td>
+            <td>Claude Code, Codex CLI</td>
+            <td>Processus sur l'hôte</td>
+          </tr>
+          <tr style="border-bottom:1px solid var(--border);">
+            <td style="padding:0.5rem 0;"><code>sandcastle</code></td>
+            <td>Codex Sandcastle</td>
+            <td>Docker + worktree git</td>
+          </tr>
+          <tr>
+            <td style="padding:0.5rem 0;"><code>virtual</code></td>
+            <td>Pipeline / équipe YAML</td>
+            <td>LangGraph in-process</td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="muted">ADR-0015 — transport virtual unifié via Core.</p>
+    </section>
+
+    <section>
+      <h2>Où chercher dans le code</h2>
+      <ul>
+        <li><strong>Bug d'affichage chat</strong> → <code>webview/</code>, <code>ChatWebviewController.ts</code></li>
+        <li><strong>Connexion / déconnexion agent</strong> → <code>ConnectionManager.ts</code></li>
+        <li><strong>Arbre sessions / load-resume</strong> → <code>SessionManager.ts</code>, <code>SessionTreeProvider.ts</code></li>
+        <li><strong>Pipeline planner → implementer</strong> → <code>src/pipeline/</code>, <code>plugins/orchestration/</code></li>
+        <li><strong>Apply / Reject Sandcastle</strong> → <code>src/sandcastle/</code></li>
+        <li><strong>Édition inline Cmd+I</strong> → <code>src/inlineChat/</code></li>
+      </ul>
+    </section>
+
+    <section class="quiz" id="quiz-1">
+      <h2>Pratique — retrieval</h2>
+      <p class="quiz-question">Quel composant possède la Conversation active et coordonne agent + UI ?</p>
+      <div class="quiz-options" data-correct="1">
+        <button type="button" data-index="0">ChatWebviewController seul</button>
+        <button type="button" data-index="1">SessionManager central</button>
+        <button type="button" data-index="2">OrchestrationPlugin YAML</button>
+        <button type="button" data-index="3">SessionHistoryStore seul</button>
+      </div>
+      <p class="quiz-feedback" aria-live="polite"></p>
+    </section>
+
+    <section>
+      <h2>Source recommandée</h2>
+      <p>
+        Lis ensuite <a href="../../CONTEXT-MAP.md">CONTEXT-MAP.md</a> en entier — c'est la carte
+        la plus fiable du dépôt, avec scénarios limites (handoff, Sandcastle, inline).
+      </p>
+    </section>
+  </main>
+
+  <footer>
+    <p>
+      Des questions ? Repose-les à l'agent dans Cursor — c'est ton professeur pour cette mission.
+      Prochaine leçon suggérée : le cycle de vie Conversation / SessionRecord.
+    </p>
+  </footer>
+
+  <script src="../assets/quiz.js"></script>
+</body>
+</html>

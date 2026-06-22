@@ -3,7 +3,7 @@ import { getInlineChatHtml } from './webview/inlineChatHtml';
 import { InlineEditAgent } from './agent/InlineEditAgent';
 import { PatchApplyService } from './patch/PatchApplyService';
 import { InlineChatMessage, InlineChatResponse, InlineEditRequest, InlineEditResult } from './InlineChatTypes';
-import { isRunAbortedError } from '../pipeline/RunAbortedError';
+import { RunAbortedError, isRunAbortedError } from '../core/RunAbortedError';
 
 // Import the proposed API types
 // This will be available when running in VS Code Insiders with enabled proposed APIs

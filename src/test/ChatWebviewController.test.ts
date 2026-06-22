@@ -38,8 +38,7 @@ suite('ChatWebviewController', () => {
       recordUserMessage: (_sessionId: string, prompt: string) => {
         recordedPrompts.push(prompt);
       },
-      recordUserMessageChunk: () => undefined,
-      recordAssistantMessageChunk: () => undefined,
+      ingestSessionUpdate: () => undefined,
       sendPrompt: async (_sessionId: string, prompt: string) => {
         sentPrompts.push(prompt);
         return { stopReason: 'end_turn' };

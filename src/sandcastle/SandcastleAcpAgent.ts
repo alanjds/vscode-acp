@@ -340,6 +340,9 @@ export class SandcastleAcpAgent implements Agent {
         await this.sendText(session.id, event.message);
         return;
       }
+      if (event.type !== 'toolCall') {
+        return;
+      }
       const toolCallId = `sandcastle-tool-${++this.toolCallSequence}`;
       await this.connection.sessionUpdate({
         sessionId: session.id,

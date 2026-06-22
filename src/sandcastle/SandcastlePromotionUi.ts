@@ -1,8 +1,12 @@
 import * as vscode from 'vscode';
 
-interface SandcastleConnection {
+/** Bridge ACP connection used for sandcastle/preview|apply|reject extMethods. */
+export interface SandcastleBridgeConnection {
   extMethod(method: string, params: Record<string, unknown>): Promise<Record<string, unknown>>;
 }
+
+/** @deprecated Use SandcastleBridgeConnection */
+export type SandcastleConnection = SandcastleBridgeConnection;
 
 /** Aperçu des modifications sandbox avant promotion (diff, métadonnées branche/worktree). */
 export interface SandcastlePreview {
@@ -20,7 +24,7 @@ export type SandcastlePromotionOutcome = 'applied' | 'no_changes' | 'rejected' |
  * Adapter VS Code + bridge ACP pour les opérations Promotion (preview, apply, reject, diff).
  */
 export class SandcastlePromotionUi {
-  async preview(connection: SandcastleConnection, sessionId: string): Promise<SandcastlePreview> {
+  async preview(connection: SandcastleBridgeConnection, sessionId: string): Promise<SandcastlePreview> {
     const response = await connection.extMethod('sandcastle/preview', { sessionId });
     return {
       diff: String(response.diff ?? ''),
@@ -48,7 +52,7 @@ export class SandcastlePromotionUi {
     });
   }
 
-  async apply(connection: SandcastleConnection, sessionId: string): Promise<boolean> {
+  async apply(connection: SandcastleBridgeConnection, sessionId: string): Promise<boolean> {
     const result = await connection.extMethod('sandcastle/apply', { sessionId });
     const success = result.success === true;
     const message = String(result.message ?? (success ? 'Sandcastle changes applied.' : 'Apply failed.'));
@@ -60,12 +64,12 @@ export class SandcastlePromotionUi {
     return success;
   }
 
-  async reject(connection: SandcastleConnection, sessionId: string): Promise<void> {
+  async reject(connection: SandcastleBridgeConnection, sessionId: string): Promise<void> {
     const result = await connection.extMethod('sandcastle/reject', { sessionId });
     void vscode.window.showInformationMessage(String(result.message ?? 'Sandcastle changes rejected.'));
   }
 
-  async discard(connection: SandcastleConnection, sessionId: string): Promise<void> {
+  async discard(connection: SandcastleBridgeConnection, sessionId: string): Promise<void> {
     await connection.extMethod('sandcastle/reject', { sessionId });
   }
 }

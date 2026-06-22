@@ -12,13 +12,15 @@ import {
 } from '../config/PipelineCatalog';
 import { getTeamEntryForAgent } from '../config/AgentTeamCatalog';
 import { defaultGitCommandRunner } from '../git/GitCommandRunner';
+import { isRunAbortedError } from '../core/RunAbortedError';
+import { runEphemeralSandcastleAgent } from '../sandcastle/EphemeralSandcastleRun';
+import type { EphemeralSandcastleRunResult } from '../sandcastle/EphemeralSandcastleRun';
 import { SandcastleApplyError } from '../sandcastle/SandcastlePromotion';
 import type { SandcastlePromotion } from '../sandcastle/SandcastlePromotion';
-import { AcpAgentRunner, type AcpAgentRunResult } from './AcpAgentRunner';
+import type { SandcastlePromotionOutcome } from '../sandcastle/SandcastlePromotionUi';
 import type { CompiledTeamMetadata } from '../pipeline/AgentTeamCompiler';
 import type { TeamRoleId } from '../config/AgentTeamConfig';
 import { assertSingleProposedPlan, extractSingleProposedPlan } from './ProposedPlan';
-import { isRunAbortedError } from './RunAbortedError';
 import {
   type AcpRunCallback,
   type CompiledPipelineGraph,
@@ -120,7 +122,7 @@ export interface PipelineServiceDependencies {
   getPipelineDefinitions?: () => PipelineDefinition[];
   getPipelineDefinitionForAgent?: (agentName: string) => PipelineDefinition | null;
   getAgentConfigs?: () => Record<string, unknown>;
-  runAcpAgent?: (...args: Parameters<AcpRunCallback>) => Promise<string | AcpAgentRunResult>;
+  runAcpAgent?: (...args: Parameters<AcpRunCallback>) => Promise<string | EphemeralSandcastleRunResult>;
   sandcastlePromotion?: SandcastlePromotion;
 }
 
@@ -313,13 +315,10 @@ export class PipelineService extends EventEmitter {
     const abortController = new AbortController();
     this.reviewerRerunAbortController = abortController;
 
-    const runner = this.createAcpAgentRunner();
-    const collected: SessionNotification[] = [];
     try {
-      const result = await runner.run(reviewerRole, reviewerPrompt, {
+      const result = await this.runEphemeralAgent(reviewerRole, reviewerPrompt, {
         signal: abortController.signal,
         onSessionUpdate: update => {
-          collected.push(update);
           this.emit('session-update', {
             sessionId: snapshot.sessionId,
             phase: 'reviewer-rerun',
@@ -656,8 +655,7 @@ export class PipelineService extends EventEmitter {
       return this.resolveAgentRunResult(result);
     }
 
-    const runner = this.createAcpAgentRunner();
-    const result = await runner.run(primitive.agent, promptText, {
+    const result = await this.runEphemeralAgent(primitive.agent, promptText, {
       onSessionUpdate,
       signal: state.abortController.signal,
       sideEffects: primitive.sideEffects,
@@ -665,15 +663,31 @@ export class PipelineService extends EventEmitter {
     return this.resolveAgentRunResult(result);
   }
 
-  private createAcpAgentRunner(): AcpAgentRunner {
+  private async runEphemeralAgent(
+    agentName: string,
+    promptText: string,
+    options: {
+      onSessionUpdate?: (update: SessionNotification) => void;
+      signal?: AbortSignal;
+      sideEffects?: 'none' | 'workspace';
+    } = {},
+  ): Promise<EphemeralSandcastleRunResult> {
     const promotion = this.dependencies.sandcastlePromotion;
     if (!promotion) {
       throw new Error('PipelineService requires sandcastlePromotion in dependencies.');
     }
-    return new AcpAgentRunner(() => this.workspaceCwd(), promotion);
+
+    return runEphemeralSandcastleAgent(promotion, {
+      workspaceCwd: this.workspaceCwd(),
+      agentName,
+      promptText,
+      onSessionUpdate: options.onSessionUpdate,
+      signal: options.signal,
+      sideEffects: options.sideEffects,
+    });
   }
 
-  private resolveAgentRunResult(result: string | AcpAgentRunResult): string {
+  private resolveAgentRunResult(result: string | EphemeralSandcastleRunResult): string {
     if (typeof result === 'string') {
       return result;
     }

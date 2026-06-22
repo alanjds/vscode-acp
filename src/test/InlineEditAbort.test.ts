@@ -1,6 +1,6 @@
 import * as assert from 'assert';
 
-import { RunAbortedError, isRunAbortedError } from '../pipeline/RunAbortedError';
+import { RunAbortedError, isRunAbortedError } from '../core/RunAbortedError';
 import { MockInlineEditAgent } from '../inlineChat/agent/MockInlineEditAgent';
 import type { InlineEditRequest } from '../inlineChat/InlineChatTypes';
 

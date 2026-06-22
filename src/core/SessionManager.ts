@@ -10,6 +10,7 @@ import type {
   AvailableCommand,
   SessionConfigOption,
   SessionInfo as ProtocolSessionInfo,
+  SessionNotification,
 } from '@agentclientprotocol/sdk';
 import { PROTOCOL_VERSION } from '@agentclientprotocol/sdk';
 
@@ -615,6 +616,21 @@ export class SessionManager extends EventEmitter {
       sessionId,
       text,
     );
+  }
+
+  /**
+   * Persist Discussion chunks from an ACP session/update notification.
+   * Single entry for native, sandcastle, and virtual orchestration projections.
+   */
+  ingestSessionUpdate(sessionId: string, notification: SessionNotification): void {
+    const update = notification.update as any;
+    const text = textFromSessionUpdate(update);
+    if (update?.sessionUpdate === 'agent_message_chunk' && text) {
+      this.recordAssistantMessageChunk(sessionId, text);
+    }
+    if (update?.sessionUpdate === 'user_message_chunk' && text && this.isLoading(sessionId)) {
+      this.recordUserMessageChunk(sessionId, text);
+    }
   }
 
   /** Bump a session's `lastActiveAt` in the history store. */
@@ -1223,4 +1239,11 @@ export class SessionManager extends EventEmitter {
     this.updateBuffer.clear();
     this.discussionContextHandler.dispose();
   }
+}
+
+function textFromSessionUpdate(updateData: any): string | null {
+  const content = updateData?.content;
+  return content?.type === 'text' && typeof content.text === 'string'
+    ? content.text
+    : null;
 }

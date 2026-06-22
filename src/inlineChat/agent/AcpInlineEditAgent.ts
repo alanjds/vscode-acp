@@ -2,30 +2,31 @@ import { getAgentNames, getAgentConfig } from '../../config/AgentConfig';
 import { isPipelineVirtualAgentName } from '../../config/PipelineCatalog';
 import { SessionManager } from '../../core/SessionManager';
 import { WorkspaceIdentity } from '../../core/WorkspaceIdentity';
-import { SandcastlePromotion } from '../../sandcastle/SandcastlePromotion';
-import { AcpAgentRunner } from '../../pipeline/AcpAgentRunner';
+import { runEphemeralSandcastleAgent } from '../../sandcastle/EphemeralSandcastleRun';
+import type { SandcastlePromotion } from '../../sandcastle/SandcastlePromotion';
 import { getSafeFenceMarker } from '../../ui/EditorContext';
 import { InlineEditRequest, InlineEditResult } from '../InlineChatTypes';
 import { InlineEditAgent, InlineEditOptions } from './InlineEditAgent';
 
 export class AcpInlineEditAgent implements InlineEditAgent {
-  private readonly runner: AcpAgentRunner;
-
   constructor(
     private readonly workspaceIdentity: () => WorkspaceIdentity,
     private readonly sessionManager: SessionManager,
-    sandcastlePromotion: SandcastlePromotion,
-  ) {
-    this.runner = new AcpAgentRunner(() => this.workspaceIdentity().cwd, sandcastlePromotion);
-  }
+    private readonly sandcastlePromotion: SandcastlePromotion,
+  ) {}
 
   async generateEdit(request: InlineEditRequest, options?: InlineEditOptions): Promise<InlineEditResult> {
     const agentName = this.resolveAgentName();
     const prompt = this.buildPrompt(request);
-    const result = await this.runner.run(agentName, prompt, {
+    const run = await runEphemeralSandcastleAgent(this.sandcastlePromotion, {
+      workspaceCwd: this.workspaceIdentity().cwd,
+      agentName,
+      promptText: prompt,
       signal: options?.signal,
+      sideEffects: 'none',
     });
-    return this.parseResponse(request, result.text);
+
+    return this.parseResponse(request, run.text);
   }
 
   private resolveAgentName(): string {

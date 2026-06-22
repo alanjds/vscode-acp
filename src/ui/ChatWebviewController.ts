@@ -56,32 +56,6 @@ interface ChatWebviewEndpoint {
 const FILE_SEARCH_RESULT_LIMIT = 30;
 const FILE_SEARCH_INDEX_LIMIT = 5000;
 
-function getTextUpdateContent(updateData: any): string | null {
-  const content = updateData?.content;
-  return content?.type === 'text' && typeof content.text === 'string'
-    ? content.text
-    : null;
-}
-
-function persistSessionUpdateToHistory(
-  sessionManager: SessionManager,
-  sessionId: string,
-  updateData: any,
-): void {
-  if (updateData?.sessionUpdate === 'agent_message_chunk') {
-    const text = getTextUpdateContent(updateData);
-    if (text) {
-      sessionManager.recordAssistantMessageChunk(sessionId, text);
-    }
-  }
-  if (updateData?.sessionUpdate === 'user_message_chunk' && sessionManager.isLoading(sessionId)) {
-    const text = getTextUpdateContent(updateData);
-    if (text) {
-      sessionManager.recordUserMessageChunk(sessionId, text);
-    }
-  }
-}
-
 /**
  * Orchestrates ACP chat behavior and broadcasts UI/session events to all attached webviews.
  */
@@ -283,7 +257,7 @@ export class ChatWebviewController implements vscode.Disposable {
         updatedAt: updateData.updatedAt,
       });
     }
-    persistSessionUpdateToHistory(this.sessionManager, update.sessionId, updateData);
+    this.sessionManager.ingestSessionUpdate(update.sessionId, update);
 
     const activeId = this.sessionManager.getActiveSessionId();
     if (update.sessionId !== activeId) {

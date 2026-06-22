@@ -14,9 +14,14 @@ import type {
 import type { ChatWebviewController } from '../../ui/ChatWebviewController';
 import { logError } from '../../utils/Logger';
 
-function textUpdate(updateData: any): string | null {
-  const content = updateData?.content;
-  return content?.type === 'text' && typeof content.text === 'string' ? content.text : null;
+function assistantTextUpdate(text: string, sessionId: string): SessionNotification {
+  return {
+    sessionId,
+    update: {
+      sessionUpdate: 'agent_message_chunk',
+      content: { type: 'text', text },
+    },
+  } as SessionNotification;
 }
 
 /** Owns every runtime concern of virtual orchestration conversations. */
@@ -96,7 +101,10 @@ export class OrchestrationRuntime implements VirtualSessionRuntime, vscode.Dispo
 
   private readonly handlePlanReady = (event: PipelinePlanReadyEvent): void => {
     if (event.plan) {
-      this.sessions.recordAssistantMessageChunk(event.sessionId, event.plan);
+      this.sessions.ingestSessionUpdate(
+        event.sessionId,
+        assistantTextUpdate(event.plan, event.sessionId),
+      );
     }
     if (event.sessionId !== this.sessions.getActiveSessionId()) { return; }
     this.chat.postMessage({
@@ -111,7 +119,7 @@ export class OrchestrationRuntime implements VirtualSessionRuntime, vscode.Dispo
   };
 
   private readonly handleSessionUpdate = (event: PipelineSessionUpdateEvent): void => {
-    this.persistUpdate(event.sessionId, event.update);
+    this.sessions.ingestSessionUpdate(event.sessionId, event.update);
     if (event.sessionId !== this.sessions.getActiveSessionId()) { return; }
     this.chat.postMessage({
       type: 'sessionUpdate',
@@ -123,17 +131,6 @@ export class OrchestrationRuntime implements VirtualSessionRuntime, vscode.Dispo
       teamId: event.teamId,
     });
   };
-
-  private persistUpdate(sessionId: string, notification: SessionNotification): void {
-    const update = notification.update as any;
-    const text = textUpdate(update);
-    if (update?.sessionUpdate === 'agent_message_chunk' && text) {
-      this.sessions.recordAssistantMessageChunk(sessionId, text);
-    }
-    if (update?.sessionUpdate === 'user_message_chunk' && text && this.sessions.isLoading(sessionId)) {
-      this.sessions.recordUserMessageChunk(sessionId, text);
-    }
-  }
 
   private async approve(plan: string): Promise<void> {
     const sessionId = this.sessions.getActiveSessionId();

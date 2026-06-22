@@ -197,7 +197,6 @@ Après un run éphémère (pipeline/inline) avec un agent Sandcastle sur une pri
 | Script | Rôle |
 |--------|------|
 | `scripts/sandcastle-smoke.mjs` | Test E2E headless : session → prompt → sentinel file → apply/reject → vérif workspace |
-| `scripts/sync-sandcastle-env.mjs` | Sync des variables d'environnement vers Sandcastle |
 
 ### 4.10 Dépendances
 

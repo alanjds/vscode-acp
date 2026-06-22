@@ -8,6 +8,12 @@ import { parseBridgeConfig } from './BridgeConfig';
 import { SandcastleAcpAgent } from './SandcastleAcpAgent';
 import { defaultSandcastleRuntime } from './DefaultSandcastleRuntime';
 
+/**
+ * Écrit une erreur fatale sur stderr sans polluer stdout (réservé au NDJSON ACP).
+ *
+ * @param error - Erreur ou valeur à diagnostiquer en fin de vie du processus bridge.
+ * @returns void ; effet de bord : écriture préfixée `[sandcastle-acp-bridge]` sur stderr.
+ */
 function reportFatal(error: unknown): void {
   const message = error instanceof Error ? error.stack || error.message : String(error);
   process.stderr.write(`[sandcastle-acp-bridge] ${message}\n`);

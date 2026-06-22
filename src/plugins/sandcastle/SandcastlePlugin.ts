@@ -8,9 +8,19 @@ export interface SandcastlePluginContext {
   sessionManager: SessionManager;
 }
 
+/**
+ * Plugin d'extension VS Code pour Sandcastle.
+ * Enregistre les commandes de promotion (diff, apply, reject) sur la session ACP active.
+ */
 export class SandcastlePlugin implements FeaturePlugin<SandcastlePluginContext> {
   readonly id = 'sandcastle';
 
+  /**
+   * Active le plugin : enregistre les commandes `acp.sandcastle.*` et branche la façade {@link SandcastlePromotion}.
+   *
+   * @param context - Contexte d'activation contenant le gestionnaire de sessions ACP.
+   * @returns Disposable regroupant les abonnements aux commandes VS Code.
+   */
   activate({ sessionManager }: SandcastlePluginContext): vscode.Disposable {
     const promotion = new SandcastlePromotion(sessionManager);
 

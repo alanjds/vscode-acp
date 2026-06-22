@@ -54,12 +54,18 @@ interface PromotionPreview {
   worktreePath: string;
 }
 
+/** Abstraction injectable pour créer sandboxes, providers et backends Docker du bridge ACP. */
 export interface SandcastleRuntime {
   createSandbox(options: CreateSandboxOptions): Promise<Sandbox>;
   createProvider(config: BridgeConfig): AgentProvider;
   createSandboxProvider(config: BridgeConfig, cwd: string): CreateSandboxOptions['sandbox'];
 }
 
+/**
+ * Agent ACP côté bridge Sandcastle.
+ * Gère les sessions sandbox (worktree Git), l'exécution sérialisée des prompts,
+ * le streaming vers le client ACP et les méthodes d'extension `sandcastle/*` (preview, apply, reject).
+ */
 export class SandcastleAcpAgent implements Agent {
   private readonly sessions = new Map<string, BridgeSession>();
   private toolCallSequence = 0;
@@ -70,6 +76,12 @@ export class SandcastleAcpAgent implements Agent {
     private readonly runtime: SandcastleRuntime,
   ) {}
 
+  /**
+   * Répond à l'initialisation ACP avec les capacités de l'agent Sandcastle.
+   *
+   * @param _params - Requête d'initialisation ACP (non utilisée dans ce POC).
+   * @returns Version du protocole, métadonnées de l'agent et capacités supportées.
+   */
   async initialize(_params: InitializeRequest): Promise<InitializeResponse> {
     return {
       protocolVersion: PROTOCOL_VERSION,
@@ -95,6 +107,13 @@ export class SandcastleAcpAgent implements Agent {
     return {};
   }
 
+  /**
+   * Ouvre une nouvelle session ACP avec un worktree sandbox dédié sur une branche éphémère.
+   *
+   * @param params - Requête contenant le `cwd` du dépôt hôte.
+   * @returns Identifiant de session ACP nouvellement créé.
+   * @throws Si la création du sandbox échoue (la session est alors retirée de la carte).
+   */
   async newSession(params: NewSessionRequest): Promise<NewSessionResponse> {
     const id = crypto.randomUUID();
     const cwd = path.resolve(params.cwd);
@@ -119,6 +138,13 @@ export class SandcastleAcpAgent implements Agent {
     return { sessionId: id };
   }
 
+  /**
+   * Exécute un prompt texte dans le sandbox de la session, avec historique et streaming ACP.
+   *
+   * @param params - Requête contenant l'identifiant de session et les blocs de prompt.
+   * @returns Raison d'arrêt (`end_turn` ou `cancelled` si abort).
+   * @throws Si une autre exécution est en cours, si le prompt est invalide, ou après enrichissement d'une erreur fournisseur.
+   */
   async prompt(params: PromptRequest): Promise<PromptResponse> {
     const session = this.requireSession(params.sessionId);
     if (session.activeRun) {
@@ -175,10 +201,22 @@ export class SandcastleAcpAgent implements Agent {
     }
   }
 
+  /**
+   * Annule l'exécution en cours d'un prompt pour la session donnée.
+   *
+   * @param params - Notification ACP avec l'identifiant de session à annuler.
+   * @returns Promise résolue après signal d'abort au contrôleur actif, si présent.
+   */
   async cancel(params: CancelNotification): Promise<void> {
     this.sessions.get(params.sessionId)?.activeRun?.abort(new Error('ACP prompt cancelled.'));
   }
 
+  /**
+   * Ferme une session ACP et libère le sandbox associé (reset worktree, fermeture conteneur).
+   *
+   * @param params - Requête avec l'identifiant de session à fermer.
+   * @returns Objet vide conforme au protocole ACP.
+   */
   async closeSession(params: CloseSessionRequest): Promise<Record<string, never>> {
     const session = this.sessions.get(params.sessionId);
     if (session) {
@@ -188,6 +226,14 @@ export class SandcastleAcpAgent implements Agent {
     return {};
   }
 
+  /**
+   * Dispatche les méthodes d'extension Sandcastle (`status`, `preview`, `apply`, `reject`).
+   *
+   * @param method - Nom de la méthode d'extension (préfixe `sandcastle/`).
+   * @param params - Paramètres incluant `sessionId` pour cibler la session.
+   * @returns Payload spécifique à la méthode (statut, preview, résultat apply/reject).
+   * @throws Si la session est introuvable ou si la méthode n'est pas supportée.
+   */
   async extMethod(method: string, params: Record<string, unknown>): Promise<Record<string, unknown>> {
     const sessionId = typeof params.sessionId === 'string' ? params.sessionId : '';
     const session = this.requireSession(sessionId);
@@ -216,11 +262,22 @@ export class SandcastleAcpAgent implements Agent {
     }
   }
 
+  /**
+   * Libère toutes les sessions ouvertes lors de l'arrêt du bridge.
+   *
+   * @returns Promise résolue après tentative de fermeture de chaque sandbox.
+   */
   async dispose(): Promise<void> {
     await Promise.allSettled([...this.sessions.values()].map(session => this.discardSessionSandbox(session)));
     this.sessions.clear();
   }
 
+  /**
+   * Crée ou réutilise le sandbox Git worktree pour la session, en réinitialisant la base si nécessaire.
+   *
+   * @param session - Session bridge dont le sandbox peut être absent ou obsolète.
+   * @returns Instance `Sandbox` prête pour `run`.
+   */
   private async ensureSandbox(session: BridgeSession): Promise<Sandbox> {
     if (session.sandbox) {
       return session.sandbox;
@@ -238,6 +295,13 @@ export class SandcastleAcpAgent implements Agent {
     return session.sandbox;
   }
 
+  /**
+   * Concatène les blocs texte du prompt ACP en une seule chaîne non vide.
+   *
+   * @param params - Requête de prompt ACP.
+   * @returns Texte du prompt utilisateur.
+   * @throws Si un bloc non texte est reçu ou si le résultat est vide.
+   */
   private extractTextPrompt(params: PromptRequest): string {
     const textParts: string[] = [];
     for (const block of params.prompt) {
@@ -253,6 +317,13 @@ export class SandcastleAcpAgent implements Agent {
     return prompt;
   }
 
+  /**
+   * Enfile le traitement d'un événement stream agent pour préserver l'ordre des notifications ACP.
+   *
+   * @param session - Session dont la chaîne `notifications` sérialise les envois.
+   * @param event - Événement stream (texte ou appel d'outil).
+   * @returns void ; les mises à jour sont envoyées de façon asynchrone sur la connexion ACP.
+   */
   private enqueueStreamEvent(session: BridgeSession, event: AgentStreamEvent): void {
     session.notifications = session.notifications.then(async () => {
       if (event.type === 'text') {
@@ -274,6 +345,13 @@ export class SandcastleAcpAgent implements Agent {
     });
   }
 
+  /**
+   * Envoie un fragment de message agent au client ACP.
+   *
+   * @param sessionId - Identifiant de la session ACP destinataire.
+   * @param text - Contenu texte à streamer ; ignoré si vide.
+   * @returns Promise résolue après `sessionUpdate` sur la connexion.
+   */
   private async sendText(sessionId: string, text: string): Promise<void> {
     if (!text) {
       return;
@@ -287,6 +365,12 @@ export class SandcastleAcpAgent implements Agent {
     });
   }
 
+  /**
+   * Calcule le diff binaire entre le worktree sandbox et la référence de base de la session.
+   *
+   * @param session - Session dont le worktree contient les modifications potentielles.
+   * @returns Métadonnées de promotion : diff, nombre de fichiers, branche, base et chemin worktree.
+   */
   private async collectPreview(session: BridgeSession): Promise<PromotionPreview> {
     const sandbox = await this.ensureSandbox(session);
     await this.git(sandbox.worktreePath, ['add', '--intent-to-add', '--', '.']);
@@ -301,6 +385,12 @@ export class SandcastleAcpAgent implements Agent {
     };
   }
 
+  /**
+   * Applique le patch du sandbox sur le dépôt hôte via `git apply`, puis détruit le sandbox.
+   *
+   * @param session - Session source des changements à promouvoir.
+   * @returns Objet succès/échec avec nombre de fichiers et message utilisateur.
+   */
   private async apply(session: BridgeSession): Promise<Record<string, unknown>> {
     const preview = await this.collectPreview(session);
     if (!preview.diff.trim()) {
@@ -334,6 +424,12 @@ export class SandcastleAcpAgent implements Agent {
     }
   }
 
+  /**
+   * Annule les runs actifs, réinitialise le worktree sandbox et ferme le conteneur.
+   *
+   * @param session - Session dont le sandbox et l'historique doivent être libérés.
+   * @returns Promise résolue après reset Git et `sandbox.close()`.
+   */
   private async discardSessionSandbox(session: BridgeSession): Promise<void> {
     session.activeRun?.abort(new Error('Sandcastle session closed.'));
     const sandbox = session.sandbox;
@@ -351,6 +447,13 @@ export class SandcastleAcpAgent implements Agent {
     }
   }
 
+  /**
+   * Récupère une session bridge ou lève une erreur explicite.
+   *
+   * @param sessionId - Identifiant de session ACP.
+   * @returns Session bridge correspondante.
+   * @throws Si l'identifiant est absent ou inconnu.
+   */
   private requireSession(sessionId: string): BridgeSession {
     const session = this.sessions.get(sessionId);
     if (!session) {
@@ -359,6 +462,13 @@ export class SandcastleAcpAgent implements Agent {
     return session;
   }
 
+  /**
+   * Exécute une commande Git dans un répertoire de travail donné.
+   *
+   * @param cwd - Répertoire courant pour l'exécution de `git`.
+   * @param args - Arguments passés à l'exécutable `git`.
+   * @returns Sortie standard de la commande (encodage UTF-8).
+   */
   private async git(cwd: string, args: string[]): Promise<string> {
     const result = await execFileAsync('git', args, {
       cwd,

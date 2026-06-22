@@ -6,7 +6,12 @@ import type { SandcastleProviderName } from './BridgeConfig';
 const NOISE_STDERR = /^reading prompt from stdin\.\.\.?$/i;
 const EXIT_PREFIX = /^(\w[\w-]*) exited with code \d+:\n?([\s\S]*)$/i;
 
-/** Extract the last Codex JSON stream error from CLI stdout/stderr text. */
+/**
+ * Extrait la dernière erreur Codex présente dans un flux JSON ligne par ligne (stdout/stderr).
+ *
+ * @param text - Sortie brute du CLI Codex ou Sandcastle.
+ * @returns Le message d'erreur le plus récent trouvé, ou `undefined` si aucune erreur JSON n'est détectée.
+ */
 export function parseCodexJsonStreamErrors(text: string): string | undefined {
   let lastError: string | undefined;
   for (const line of text.split('\n')) {
@@ -38,7 +43,12 @@ export function parseCodexJsonStreamErrors(text: string): string | undefined {
   return lastError;
 }
 
-/** Read the newest Codex rollout log and surface quota/auth failures. */
+/**
+ * Lit le journal de rollout Codex le plus récent et en extrait les erreurs de quota ou d'authentification.
+ *
+ * @param repoDir - Répertoire racine du dépôt contenant `.sandcastle/codex-home/sessions`.
+ * @returns Message d'erreur métier dérivé du rollout, ou `undefined` si aucun fichier ou erreur pertinent n'est trouvé.
+ */
 export function readLatestCodexRolloutError(repoDir: string): string | undefined {
   const sessionsRoot = join(repoDir, '.sandcastle', 'codex-home', 'sessions');
   const rolloutPath = findNewestFile(sessionsRoot, '.jsonl');
@@ -48,6 +58,12 @@ export function readLatestCodexRolloutError(repoDir: string): string | undefined
   return extractCodexRolloutError(readFileSync(rolloutPath, 'utf8'));
 }
 
+/**
+ * Analyse le contenu d'un fichier rollout Codex pour détecter erreurs de flux et épuisement de crédits.
+ *
+ * @param content - Contenu textuel du fichier `.jsonl` de rollout.
+ * @returns Message d'erreur utilisateur si quota ou erreur stream détectée ; sinon `undefined`.
+ */
 export function extractCodexRolloutError(content: string): string | undefined {
   const lines = content.trim().split('\n').filter(Boolean);
   let sawZeroCredits = false;
@@ -85,6 +101,12 @@ export function extractCodexRolloutError(content: string): string | undefined {
   return undefined;
 }
 
+/**
+ * Simplifie un message d'échec Sandcastle en retirant le bruit stderr et en extrayant les erreurs JSON.
+ *
+ * @param message - Message brut (souvent préfixé par « provider exited with code N »).
+ * @returns Message d'erreur exploitable pour l'utilisateur, ou `undefined` si le contenu est vide ou bruit seul.
+ */
 function simplifySandcastleExitMessage(message: string): string | undefined {
   const match = message.match(EXIT_PREFIX);
   if (!match) {
@@ -110,6 +132,13 @@ function simplifySandcastleExitMessage(message: string): string | undefined {
   return withoutNoise || undefined;
 }
 
+/**
+ * Enrichit une erreur d'exécution du fournisseur avec des diagnostics Codex (rollout, flux JSON).
+ *
+ * @param error - Erreur originale levée par Sandcastle ou le fournisseur.
+ * @param options - Contexte d'exécution : nom du fournisseur et répertoire de travail du dépôt.
+ * @returns Une `Error` avec un message clarifié si un diagnostic est disponible ; sinon l'erreur d'origine.
+ */
 export function enrichProviderRunError(
   error: unknown,
   options: { provider: SandcastleProviderName; cwd: string },
@@ -130,6 +159,13 @@ export function enrichProviderRunError(
   return new Error(message);
 }
 
+/**
+ * Parcourt récursivement un répertoire et retourne le chemin du fichier le plus récemment modifié avec l'extension donnée.
+ *
+ * @param root - Racine de la recherche.
+ * @param extension - Suffixe de fichier attendu (ex. `.jsonl`).
+ * @returns Chemin absolu du fichier le plus récent, ou `undefined` si aucun fichier correspondant n'existe.
+ */
 function findNewestFile(root: string, extension: string): string | undefined {
   if (!existsSync(root)) {
     return undefined;

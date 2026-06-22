@@ -1,3 +1,4 @@
+/** Entrée d'historique de conversation (rôle et texte) pour l'injection dans un prompt. */
 export interface PromptHistoryEntry {
   role: 'user' | 'assistant';
   text: string;
@@ -6,6 +7,15 @@ export interface PromptHistoryEntry {
 const MAX_MESSAGES = 16;
 const MAX_BYTES = 64 * 1024;
 
+/**
+ * Construit un prompt enrichi avec le transcript des échanges précédents, dans les limites de taille.
+ *
+ * Sélectionne au plus 16 messages récents dont la taille cumulée avec le prompt courant ne dépasse pas 64 KiB.
+ *
+ * @param history - Historique chronologique des messages utilisateur et assistant.
+ * @param currentPrompt - Texte du prompt actuel à envoyer à l'agent.
+ * @returns Le prompt seul si l'historique est vide ou trop volumineux ; sinon un prompt avec contexte conversationnel.
+ */
 export function buildPromptWithHistory(
   history: readonly PromptHistoryEntry[],
   currentPrompt: string,

@@ -11,7 +11,12 @@ import { join } from 'node:path';
 import type { BridgeConfig } from './BridgeConfig';
 import type { SandcastleRuntime } from './SandcastleAcpAgent';
 
-/** Writable Codex state dir for the sandbox; seeded once from host auth if present. */
+/**
+ * Prépare un répertoire Codex inscriptible dans le sandbox, en copiant l'authentification hôte si nécessaire.
+ *
+ * @param repoDir - Racine du dépôt où créer `.sandcastle/codex-home`.
+ * @returns Chemin absolu du répertoire `codex-home` du sandbox.
+ */
 export function prepareCodexHome(repoDir: string): string {
   const codexHome = join(repoDir, '.sandcastle', 'codex-home');
   mkdirSync(codexHome, { recursive: true });
@@ -23,6 +28,12 @@ export function prepareCodexHome(repoDir: string): string {
   return codexHome;
 }
 
+/**
+ * Définit les montages Docker pour exposer l'état d'authentification Codex dans le conteneur sandbox.
+ *
+ * @param repoDir - Racine du dépôt servant de base au répertoire Codex préparé.
+ * @returns Liste de montages host → sandbox pour le provider Codex.
+ */
 function codexAuthMounts(repoDir: string): { hostPath: string; sandboxPath: string; readonly: boolean }[] {
   return [{
     hostPath: prepareCodexHome(repoDir),
@@ -31,8 +42,15 @@ function codexAuthMounts(repoDir: string): { hostPath: string; sandboxPath: stri
   }];
 }
 
+/** Runtime Sandcastle par défaut : sandbox Docker, providers Codex/Cursor et montages d'auth Codex. */
 export const defaultSandcastleRuntime: SandcastleRuntime = {
   createSandbox,
+  /**
+   * Instancie le fournisseur d'agent (Codex ou Cursor) selon la configuration du bridge.
+   *
+   * @param config - Configuration du bridge (fournisseur, modèle, effort).
+   * @returns Provider Sandcastle prêt à exécuter des prompts dans le sandbox.
+   */
   createProvider(config: BridgeConfig) {
     if (config.provider === 'codex') {
       return codex(config.model, {
@@ -42,6 +60,13 @@ export const defaultSandcastleRuntime: SandcastleRuntime = {
     }
     return cursor(config.model);
   },
+  /**
+   * Configure le backend sandbox Docker (image, CPU, montages auth Codex si applicable).
+   *
+   * @param config - Configuration du bridge, notamment `imageName`.
+   * @param cwd - Répertoire de travail du dépôt pour les montages Codex.
+   * @returns Options sandbox passées à `createSandbox`.
+   */
   createSandboxProvider(config: BridgeConfig, cwd: string) {
     return docker({
       imageName: config.imageName,

@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import type { JSX } from 'react';
 
 import type { CurrentToolCall, ToolCallHistoryItem } from '../chatTypes';
@@ -22,7 +23,7 @@ export type TurnBlockProps = {
   onMentionClick?: (path: string) => void;
 };
 
-export function TurnBlock({
+function TurnBlockComponent({
   turnKey,
   thought,
   planningDraftText,
@@ -56,3 +57,5 @@ export function TurnBlock({
     </div>
   );
 }
+
+export const TurnBlock = memo(TurnBlockComponent);

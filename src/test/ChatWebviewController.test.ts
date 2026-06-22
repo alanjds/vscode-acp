@@ -249,6 +249,26 @@ suite('ChatWebviewController', () => {
     assert.ok(messages.some(m => m.type === 'error'));
   });
 
+  test('handleSendPrompt ignores duplicate send while a turn is in flight', async () => {
+    const { controller, sentPrompts } = await createController();
+    let releasePrompt: (() => void) | undefined;
+    const promptGate = new Promise<void>(resolve => {
+      releasePrompt = resolve;
+    });
+    (controller as any).sessionManager.sendPrompt = async (_sessionId: string, prompt: string) => {
+      sentPrompts.push(prompt);
+      await promptGate;
+      return { stopReason: 'end_turn' };
+    };
+
+    const first = (controller as any).handleSendPrompt('first prompt');
+    const second = (controller as any).handleSendPrompt('second prompt');
+    releasePrompt?.();
+    await Promise.all([first, second]);
+
+    assert.deepStrictEqual(sentPrompts, ['first prompt']);
+  });
+
   test('postMessage queues messages until endpoint is ready', async () => {
     const ctx = await createController();
     const pending = ctx.attachEndpoint('view-2');

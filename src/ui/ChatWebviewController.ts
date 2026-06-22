@@ -92,6 +92,7 @@ export class ChatWebviewController implements vscode.Disposable {
   private readonly featureMessageHandlers = new Map<string, ChatWebviewMessageHandler>();
   private fileSearchIndexPromise: Promise<{ index: ReturnType<typeof createFileSearchIndex>; files: IndexedFile[] }> | null = null;
   private readonly fileSearchDisposables: vscode.Disposable[] = [];
+  private readonly promptInFlightBySession = new Set<string>();
   private nextEndpointId = 0;
 
   constructor(
@@ -306,6 +307,12 @@ export class ChatWebviewController implements vscode.Disposable {
       return;
     }
 
+    if (this.promptInFlightBySession.has(activeId)) {
+      log(`Ignoring duplicate sendPrompt for session ${activeId}`);
+      return;
+    }
+    this.promptInFlightBySession.add(activeId);
+
     const baseAgentText = agentPromptText ?? text;
     const editorContext = this.editorContextLinked ? this.getEditorContext() : null;
     const agentText = this.editorContextLinked && editorContext
@@ -380,6 +387,8 @@ export class ChatWebviewController implements vscode.Disposable {
         message: message || 'Prompt failed',
       });
       this.postMessage({ type: 'promptEnd', stopReason: 'error' });
+    } finally {
+      this.promptInFlightBySession.delete(activeId);
     }
   }
 

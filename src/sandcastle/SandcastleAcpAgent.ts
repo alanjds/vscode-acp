@@ -19,11 +19,7 @@ import type {
   Sandbox,
 } from '@ai-hero/sandcastle';
 import * as crypto from 'node:crypto';
-import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 
 import type { BridgeConfig } from './BridgeConfig';
 import {
@@ -31,9 +27,8 @@ import {
   type PromptHistoryEntry,
 } from './PromptHistory';
 import { enrichProviderRunError } from './ProviderRunError';
-
-const execFileAsync = promisify(execFile);
-const GIT_MAX_BUFFER = 20 * 1024 * 1024;
+import { runGit } from './runGit';
+import { applyWorktreeToHost, previewWorktreeChanges } from './WorktreePromotion';
 
 interface BridgeSession {
   id: string;
@@ -44,14 +39,6 @@ interface BridgeSession {
   history: PromptHistoryEntry[];
   activeRun?: AbortController;
   notifications: Promise<void>;
-}
-
-interface PromotionPreview {
-  diff: string;
-  filesChanged: number;
-  branch: string;
-  baseRef: string;
-  worktreePath: string;
 }
 
 /** Abstraction injectable pour créer sandboxes, providers et backends Docker du bridge ACP. */
@@ -118,7 +105,7 @@ export class SandcastleAcpAgent implements Agent {
     const id = crypto.randomUUID();
     const cwd = path.resolve(params.cwd);
     const branch = `sandcastle/acp/${this.config.provider}/${id}`;
-    const baseRef = await this.git(cwd, ['rev-parse', 'HEAD']);
+    const baseRef = await runGit(cwd, ['rev-parse', 'HEAD']);
     const session: BridgeSession = {
       id,
       cwd,
@@ -250,10 +237,33 @@ export class SandcastleAcpAgent implements Agent {
           running: Boolean(session.activeRun),
           worktreePath: session.sandbox?.worktreePath,
         };
-      case 'sandcastle/preview':
-        return { ...(await this.collectPreview(session)) };
-      case 'sandcastle/apply':
-        return this.apply(session);
+      case 'sandcastle/preview': {
+        const sandbox = await this.ensureSandbox(session);
+        return {
+          ...(await previewWorktreeChanges(
+            sandbox.worktreePath,
+            session.baseRef,
+            session.branch,
+          )),
+        };
+      }
+      case 'sandcastle/apply': {
+        const sandbox = await this.ensureSandbox(session);
+        const preview = await previewWorktreeChanges(
+          sandbox.worktreePath,
+          session.baseRef,
+          session.branch,
+        );
+        if (!preview.diff.trim()) {
+          await this.discardSessionSandbox(session);
+          return { success: true, filesChanged: 0, message: 'No changes to apply.' };
+        }
+        const result = await applyWorktreeToHost(session.cwd, preview);
+        if (result.success) {
+          await this.discardSessionSandbox(session);
+        }
+        return result;
+      }
       case 'sandcastle/reject':
         await this.discardSessionSandbox(session);
         return { success: true, message: 'Sandcastle changes rejected.' };
@@ -283,7 +293,7 @@ export class SandcastleAcpAgent implements Agent {
       return session.sandbox;
     }
 
-    session.baseRef = (await this.git(session.cwd, ['rev-parse', 'HEAD'])).trim();
+    session.baseRef = (await runGit(session.cwd, ['rev-parse', 'HEAD'])).trim();
     session.branch = `sandcastle/acp/${this.config.provider}/${crypto.randomUUID()}`;
     session.history = [];
     session.sandbox = await this.runtime.createSandbox({
@@ -366,65 +376,6 @@ export class SandcastleAcpAgent implements Agent {
   }
 
   /**
-   * Calcule le diff binaire entre le worktree sandbox et la référence de base de la session.
-   *
-   * @param session - Session dont le worktree contient les modifications potentielles.
-   * @returns Métadonnées de promotion : diff, nombre de fichiers, branche, base et chemin worktree.
-   */
-  private async collectPreview(session: BridgeSession): Promise<PromotionPreview> {
-    const sandbox = await this.ensureSandbox(session);
-    await this.git(sandbox.worktreePath, ['add', '--intent-to-add', '--', '.']);
-    const diff = await this.git(sandbox.worktreePath, ['diff', '--binary', session.baseRef]);
-    const names = await this.git(sandbox.worktreePath, ['diff', '--name-only', session.baseRef]);
-    return {
-      diff,
-      filesChanged: names.split('\n').map(value => value.trim()).filter(Boolean).length,
-      branch: session.branch,
-      baseRef: session.baseRef,
-      worktreePath: sandbox.worktreePath,
-    };
-  }
-
-  /**
-   * Applique le patch du sandbox sur le dépôt hôte via `git apply`, puis détruit le sandbox.
-   *
-   * @param session - Session source des changements à promouvoir.
-   * @returns Objet succès/échec avec nombre de fichiers et message utilisateur.
-   */
-  private async apply(session: BridgeSession): Promise<Record<string, unknown>> {
-    const preview = await this.collectPreview(session);
-    if (!preview.diff.trim()) {
-      await this.discardSessionSandbox(session);
-      return { success: true, filesChanged: 0, message: 'No changes to apply.' };
-    }
-
-    const patchPath = path.join(os.tmpdir(), `acp-sandcastle-${session.id}.patch`);
-    fs.writeFileSync(patchPath, preview.diff, 'utf8');
-    try {
-      await this.git(session.cwd, ['apply', '--check', patchPath]);
-      await this.git(session.cwd, ['apply', patchPath]);
-      await this.discardSessionSandbox(session);
-      return {
-        success: true,
-        filesChanged: preview.filesChanged,
-        message: `Applied Sandcastle changes (${preview.filesChanged} file(s)).`,
-      };
-    } catch (error) {
-      return {
-        success: false,
-        filesChanged: preview.filesChanged,
-        message: error instanceof Error ? error.message : String(error),
-      };
-    } finally {
-      try {
-        fs.unlinkSync(patchPath);
-      } catch {
-        // Ignore temporary patch cleanup failures.
-      }
-    }
-  }
-
-  /**
    * Annule les runs actifs, réinitialise le worktree sandbox et ferme le conteneur.
    *
    * @param session - Session dont le sandbox et l'historique doivent être libérés.
@@ -440,8 +391,8 @@ export class SandcastleAcpAgent implements Agent {
     }
 
     try {
-      await this.git(sandbox.worktreePath, ['reset', '--hard']);
-      await this.git(sandbox.worktreePath, ['clean', '-fd']);
+      await runGit(sandbox.worktreePath, ['reset', '--hard']);
+      await runGit(sandbox.worktreePath, ['clean', '-fd']);
     } finally {
       await sandbox.close();
     }
@@ -462,19 +413,4 @@ export class SandcastleAcpAgent implements Agent {
     return session;
   }
 
-  /**
-   * Exécute une commande Git dans un répertoire de travail donné.
-   *
-   * @param cwd - Répertoire courant pour l'exécution de `git`.
-   * @param args - Arguments passés à l'exécutable `git`.
-   * @returns Sortie standard de la commande (encodage UTF-8).
-   */
-  private async git(cwd: string, args: string[]): Promise<string> {
-    const result = await execFileAsync('git', args, {
-      cwd,
-      encoding: 'utf8',
-      maxBuffer: GIT_MAX_BUFFER,
-    });
-    return result.stdout.toString();
-  }
 }

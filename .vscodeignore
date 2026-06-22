@@ -1,6 +1,8 @@
 .vscode/**
 .vscode-test/**
 .sandcastle/**
+.cursor/**
+.agents/**
 src/**
 webview/**
 out/**
@@ -11,8 +13,18 @@ node_modules/**
 *.ts
 !dist/**
 tsconfig.json
+tsconfig.compile-tests.json
+tsconfig.tsbuildinfo
 webpack.config.js
 eslint.config.mjs
 .vscode-test.mjs
 vsc-extension-quickstart.md
 CHANGELOG.md
+CONTEXT-MAP.md
+ROADMAP.md
+doc_fr/**
+docs/**
+.github/**
+scripts/**
+refactor-large-ts-classes.skill
+skills-lock.json

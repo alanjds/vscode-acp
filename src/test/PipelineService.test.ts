@@ -333,6 +333,108 @@ suite('PipelineService', () => {
     }
   });
 
+  test('createPlan revises pending plan when user sends follow-up message', async () => {
+    const calls: Array<{ kind: string; prompt: string }> = [];
+    const planReadyEvents: Array<{ plan: string; revised?: boolean }> = [];
+    let plannerCall = 0;
+    const service = createService({
+      runAcpAgent: async (kind, prompt) => {
+        calls.push({ kind, prompt });
+        if (kind === 'plan') {
+          plannerCall += 1;
+          return plannerCall === 1
+            ? '<proposed_plan>\nInitial\n</proposed_plan>'
+            : '<proposed_plan>\nRevised\n</proposed_plan>';
+        }
+        return 'implemented successfully';
+      },
+    });
+    service.on('plan-ready', (event: any) => {
+      planReadyEvents.push({ plan: event.plan, revised: event.revised });
+    });
+
+    try {
+      await service.createPlan('session-1', 'build feature', PLAN_EXECUTE_VERIFY_PIPELINE.title);
+      const revised = await service.createPlan('session-1', 'add more tests', PLAN_EXECUTE_VERIFY_PIPELINE.title);
+
+      assert.strictEqual(revised, '<proposed_plan>\nRevised\n</proposed_plan>');
+      assert.strictEqual(calls.filter(call => call.kind === 'plan').length, 2);
+      assert.ok(calls[1].prompt.includes('add more tests'));
+      assert.ok(calls[1].prompt.includes('Initial'));
+      assert.ok(calls[1].prompt.includes('build feature'));
+      assert.strictEqual(calls.filter(call => call.kind === 'implement').length, 0);
+      assert.deepStrictEqual(planReadyEvents, [
+        { plan: '<proposed_plan>\nInitial\n</proposed_plan>', revised: false },
+        { plan: '<proposed_plan>\nRevised\n</proposed_plan>', revised: true },
+      ]);
+    } finally {
+      await service.dispose();
+    }
+  });
+
+  test('approvePlan after revision sends revised plan to implementer', async () => {
+    const calls: Array<{ kind: string; prompt: string }> = [];
+    let plannerCall = 0;
+    const service = createService({
+      runAcpAgent: async (kind, prompt) => {
+        calls.push({ kind, prompt });
+        if (kind === 'plan') {
+          plannerCall += 1;
+          return plannerCall === 1
+            ? '<proposed_plan>\nInitial\n</proposed_plan>'
+            : '<proposed_plan>\nRevised\n</proposed_plan>';
+        }
+        if (kind === 'implement') {
+          return 'implemented successfully';
+        }
+        return 'verified successfully';
+      },
+    });
+
+    try {
+      await service.createPlan('session-1', 'build feature', PLAN_EXECUTE_VERIFY_PIPELINE.title);
+      await service.createPlan('session-1', 'add tests', PLAN_EXECUTE_VERIFY_PIPELINE.title);
+      const finalOutput = await service.approvePlan('session-1', '<proposed_plan>\nRevised\n</proposed_plan>');
+
+      assert.strictEqual(finalOutput, 'verified successfully');
+      assert.ok(calls.some(call => call.kind === 'implement' && call.prompt.includes('Revised')));
+      assert.strictEqual(calls.filter(call => call.kind === 'implement').length, 1);
+    } finally {
+      await service.dispose();
+    }
+  });
+
+  test('failed revision preserves pending plan for approval', async () => {
+    let plannerCall = 0;
+    const service = createService({
+      runAcpAgent: async (kind) => {
+        if (kind === 'plan') {
+          plannerCall += 1;
+          if (plannerCall === 1) {
+            return '<proposed_plan>\nInitial\n</proposed_plan>';
+          }
+          throw new Error('planner failed');
+        }
+        if (kind === 'implement') {
+          return 'implemented successfully';
+        }
+        return 'verified successfully';
+      },
+    });
+
+    try {
+      await service.createPlan('session-1', 'build feature', PLAN_EXECUTE_VERIFY_PIPELINE.title);
+      await assert.rejects(
+        () => service.createPlan('session-1', 'bad revision', PLAN_EXECUTE_VERIFY_PIPELINE.title),
+        /planner failed/,
+      );
+      const finalOutput = await service.approvePlan('session-1', '<proposed_plan>\nInitial\n</proposed_plan>');
+      assert.strictEqual(finalOutput, 'verified successfully');
+    } finally {
+      await service.dispose();
+    }
+  });
+
   test('dispose cancels pending runs and clears listeners', async () => {
     const events: Array<{ sessionId: string; status: string }> = [];
     const service = createService({

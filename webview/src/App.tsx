@@ -37,10 +37,11 @@ import {
 import { mapSessionUpdateToActions } from './app/sessionUpdates';
 import { appReducer, buildSharedSnapshot, createInitialState } from './app/state';
 import { MessageBubble } from './components/MessageBubble';
-import {
-  MarkdownEditor,
-  setMarkdownEditableCursorPosition,
-} from './components/MarkdownEditor';
+import { ChatComposer } from './components/ChatComposer';
+import { CurrentTurnBlock } from './components/CurrentTurnBlock';
+import { EmptyState } from './components/EmptyState';
+import { HistoryTurnBlock } from './components/HistoryTurnBlock';
+import { SessionBanner } from './components/SessionBanner';
 import { PlanBlock } from './components/PlanBlock';
 import { PipelinePlanBlock } from './components/PipelinePlanBlock';
 import {
@@ -49,7 +50,6 @@ import {
   PipelineRoleTimeline,
 } from './components/PipelineRoleTimeline';
 import { PipelineRoleOutputBlock } from './components/PipelineRoleOutputBlock';
-import { TurnBlock } from './components/TurnBlock';
 import { getState, onMessage, postMessage, setState } from './vscode';
 import { useFileMentions } from './app/useFileMentions';
 import { useSessionDisplay } from './app/useSessionDisplay';
@@ -64,8 +64,6 @@ export function App(): JSX.Element {
   const loadMarkdownRequestedRef = useRef(false);
   const messagesRef = useRef<HTMLDivElement | null>(null);
   const promptInputRef = useRef<HTMLDivElement | null>(null);
-  const slashPopupRef = useRef<HTMLDivElement | null>(null);
-  const filePopupRef = useRef<HTMLDivElement | null>(null);
   const pendingCursorPositionRef = useRef<number | null>(null);
   const sharedVersionRef = useRef(0);
   const sharedUpdatedAtRef = useRef(0);
@@ -118,6 +116,15 @@ export function App(): JSX.Element {
     () => buildHistoryBlocks(state.persisted.chatHistory, excludedToolIndexes),
     [excludedToolIndexes, state.persisted.chatHistory],
   );
+  const hasPendingPipelinePlan = useMemo(
+    () => state.persisted.chatHistory.some(
+      item => item.kind === 'pipelinePlan' && item.status === 'pending',
+    ),
+    [state.persisted.chatHistory],
+  );
+  const composerPlaceholder = hasPendingPipelinePlan
+    ? 'Send a message to revise the plan, or approve/reject below.'
+    : placeholder;
 
   // Sync shared UI state to extension host and VS Code serializer
   useEffect(() => {
@@ -167,10 +174,11 @@ export function App(): JSX.Element {
         case 'sharedStateUpdated':
           if (message.state && typeof message.state === 'object') {
             const sharedState = message.state as ChatWebviewSharedState;
-            if (
-              sharedState.version === sharedVersionRef.current
-              && sharedState.updatedAt === sharedUpdatedAtRef.current
-            ) {
+            const isStale =
+              sharedState.version < sharedVersionRef.current
+              || (sharedState.version === sharedVersionRef.current
+                && sharedState.updatedAt <= sharedUpdatedAtRef.current);
+            if (isStale) {
               break;
             }
             sharedVersionRef.current = sharedState.version;
@@ -245,20 +253,33 @@ export function App(): JSX.Element {
 
         case 'pipelinePlanReady':
           if (typeof message.plan === 'string') {
-            dispatch({
-              type: 'appendPipelinePlan',
-              plan: message.plan,
-              role: normalizePipelinePhase(message.role),
-              agentName: typeof message.agentName === 'string' ? message.agentName : undefined,
-              implementerUsesSandcastle: message.implementerUsesSandcastle === true,
-            });
-            if (typeof message.teamId === 'string') {
+            const planAction = message.revised === true
+              ? {
+                  type: 'revisePipelinePlan' as const,
+                  plan: message.plan,
+                  role: normalizePipelinePhase(message.role),
+                  agentName: typeof message.agentName === 'string' ? message.agentName : undefined,
+                  implementerUsesSandcastle: message.implementerUsesSandcastle === true,
+                }
+              : {
+                  type: 'appendPipelinePlan' as const,
+                  plan: message.plan,
+                  role: normalizePipelinePhase(message.role),
+                  agentName: typeof message.agentName === 'string' ? message.agentName : undefined,
+                  implementerUsesSandcastle: message.implementerUsesSandcastle === true,
+                };
+            dispatch(planAction);
+            if (typeof message.teamId === 'string' && message.revised !== true) {
               dispatch({
                 type: 'updatePipelineTimeline',
                 timeline: createDefaultTeamTimeline(false),
               });
             }
           }
+          break;
+
+        case 'pipelinePlanApprovalFailed':
+          dispatch({ type: 'revertPipelinePlanApproval' });
           break;
 
         case 'pipelineStatus': {
@@ -388,30 +409,26 @@ export function App(): JSX.Element {
     postMessage({ type: 'searchFiles', query: activeFileMention.query, requestId });
   }, [fileSearchKey, activeFileMention, suppressedFileMention, fileMentionKey]);
 
-  // Scroll selected file item into view
-  useEffect(() => {
-    const selectedItem = filePopupRef.current?.querySelector<HTMLElement>(
-      `.file-popup-item[data-index="${fileSelectedIdx}"]`,
-    );
-    selectedItem?.scrollIntoView({ block: 'nearest' });
-  }, [fileSelectedIdx, isFilePopupOpen]);
-
-  // Scroll selected slash command into view
-  useEffect(() => {
-    const selectedItem = slashPopupRef.current?.querySelector<HTMLElement>(
-      `.slash-popup-item[data-index="${state.slashSelectedIdx}"]`,
-    );
-    selectedItem?.scrollIntoView({ block: 'nearest' });
-  }, [state.slashSelectedIdx, isSlashPopupOpen]);
-
-  // Scroll messages to bottom
+  // Scroll messages to bottom when near bottom or history changes
   useEffect(() => {
     const container = messagesRef.current;
     if (!container) {
       return;
     }
 
-    container.scrollTop = container.scrollHeight;
+    const isNearBottom =
+      container.scrollHeight - container.scrollTop - container.clientHeight < 80;
+
+    if (!isNearBottom && state.currentTurn) {
+      return;
+    }
+
+    requestAnimationFrame(() => {
+      const node = messagesRef.current;
+      if (node) {
+        node.scrollTop = node.scrollHeight;
+      }
+    });
   }, [historyBlocks, state.currentTurn]);
 
   // Close pickers on document click
@@ -425,23 +442,6 @@ export function App(): JSX.Element {
       document.removeEventListener('click', closePickers);
     };
   }, []);
-
-  // Handle pending cursor position
-  useEffect(() => {
-    if (pendingCursorPositionRef.current === null) {
-      return;
-    }
-
-    const nextCursorPosition = pendingCursorPositionRef.current;
-    pendingCursorPositionRef.current = null;
-    requestAnimationFrame(() => {
-      const input = promptInputRef.current;
-      if (!input || document.activeElement !== input) {
-        return;
-      }
-      setMarkdownEditableCursorPosition(input, nextCursorPosition);
-    });
-  }, [state.promptText, cursorPosition]);
 
   // Reset slash popup state when prompt text changes
   useEffect(() => {
@@ -488,17 +488,17 @@ export function App(): JSX.Element {
       return;
     }
 
-    dispatch({ type: 'appendUserMessage', text });
-    dispatch({ type: 'setPromptText', text: '' });
-    dispatch({ type: 'setPlaceholderOverride', placeholder: null });
-    dispatch({ type: 'suppressSlashPopup', promptText: null });
+    dispatch({ type: 'submitUserMessage', text });
     setSelectedFileMentions([]);
+    setCursorPosition(0);
+    pendingCursorPositionRef.current = 0;
+    focusPromptInput();
     postMessage({
       type: 'sendPrompt',
       text,
       agentText: expandFileMentionsForPrompt(text, selectedFileMentions),
     });
-  }, [selectedFileMentions, state.isProcessing, state.promptText]);
+  }, [focusPromptInput, selectedFileMentions, state.isProcessing, state.promptText]);
 
   // Handle cancel
   const handleCancel = useCallback((): void => {
@@ -508,6 +508,26 @@ export function App(): JSX.Element {
   // Handle welcome command
   const handleWelcomeCommand = useCallback((command: string): void => {
     postMessage({ type: 'executeCommand', command });
+  }, []);
+
+  const handleConnectAgent = useCallback((): void => {
+    handleWelcomeCommand('acp.connectAgent');
+  }, [handleWelcomeCommand]);
+
+  const handleAddAgent = useCallback((): void => {
+    handleWelcomeCommand('acp.addAgent');
+  }, [handleWelcomeCommand]);
+
+  const handleMentionClick = useCallback((path: string): void => {
+    postMessage({ type: 'openFile', path });
+  }, []);
+
+  const handleToggleCollapsedTools = useCallback((key: string, collapsed: boolean): void => {
+    dispatch({ type: 'setCollapsedTools', key, collapsed: !collapsed });
+  }, []);
+
+  const handleCurrentThoughtOpen = useCallback((open: boolean): void => {
+    dispatch({ type: 'setCurrentThoughtOpen', isOpen: open });
   }, []);
 
   // Handle open debug snapshot
@@ -737,64 +757,19 @@ export function App(): JSX.Element {
     state.persisted.chatHistory.length === 0 &&
     !state.currentTurn &&
     !state.isLoadingSession;
-  const contextFamily = sessionState?.contextFamily;
-  const contextFamilyLabel = contextFamily
-    ? contextFamily.contextLinkedFrom
-      ? `Context family · from ${contextFamily.contextLinkedFrom.agentName}`
-      : 'Context family'
-    : null;
 
   return (
     <>
-      <div className={`session-banner${state.persisted.hasActiveSession ? ' visible' : ''}`}>
-        <span className="dot" />
-        <div className="info">
-          <div className="agent">{sessionState?.title || sessionState?.agentName || 'Agent'}</div>
-          <div className="cwd">{sessionState?.cwd || ''}</div>
-          {contextFamilyLabel ? <div className="context-family">{contextFamilyLabel}</div> : null}
-          {sessionState?.pendingSharedContext ? (
-            <div className="pending-shared-context">Next prompt includes shared context</div>
-          ) : null}
-        </div>
-        <span className="status">{state.isProcessing ? <span className="spinner" /> : null}</span>
-        <button
-          className="banner-debug-btn"
-          title="Open debug snapshot"
-          type="button"
-          onClick={handleOpenDebugSnapshot}
-        >
-          Debug
-        </button>
-      </div>
+      <SessionBanner
+        isProcessing={state.isProcessing}
+        onOpenDebugSnapshot={handleOpenDebugSnapshot}
+        sessionState={sessionState}
+        visible={state.persisted.hasActiveSession}
+      />
 
       <div className="messages" id="messages" ref={messagesRef}>
         {emptyStateVisible ? (
-          <div className="empty-state" id="emptyState">
-            <div className="icon">🤖</div>
-            <div className="title">ACP Chat</div>
-            <div className="subtitle">Connect to an AI coding agent to start chatting.</div>
-            <div className="actions">
-              <button
-                className="action-btn primary"
-                id="welcomeConnectAgent"
-                type="button"
-                onClick={() => handleWelcomeCommand('acp.connectAgent')}
-              >
-                🔌 Connect to Agent
-              </button>
-              <button
-                className="action-btn secondary"
-                id="welcomeAddAgent"
-                type="button"
-                onClick={() => handleWelcomeCommand('acp.addAgent')}
-              >
-                ⚙ Add Agent
-              </button>
-            </div>
-            <div className="hint">
-              or press <kbd>Ctrl+Shift+A</kbd> anytime
-            </div>
-          </div>
+          <EmptyState onAddAgent={handleAddAgent} onConnectAgent={handleConnectAgent} />
         ) : null}
 
         {state.pipelineTimeline.length > 0 ? (
@@ -807,7 +782,7 @@ export function App(): JSX.Element {
               <MessageBubble
                 item={block.item}
                 key={`message-${block.historyIndex}`}
-                onMentionClick={(path) => postMessage({ type: 'openFile', path })}
+                onMentionClick={handleMentionClick}
               />
             );
           }
@@ -838,59 +813,27 @@ export function App(): JSX.Element {
 
           const collapsed = getToolCollapseState(block.key, block.toolCalls.length, state.collapsedTools);
           return (
-            <TurnBlock
-              assistantText={block.assistant?.item.text}
+            <HistoryTurnBlock
+              block={block}
               collapsed={collapsed}
               key={block.key}
-              onToggleTools={() =>
-                dispatch({
-                  type: 'setCollapsedTools',
-                  key: block.key,
-                  collapsed: !collapsed,
-                })
-              }
-              thought={
-                block.thought
-                  ? {
-                      text: block.thought.item.text,
-                      durationSec: block.thought.item.durationSec,
-                      isStreaming: false,
-                    }
-                  : null
-              }
-              toolCalls={block.toolCalls}
-              turnKey={block.key}
-              onMentionClick={(path) => postMessage({ type: 'openFile', path })}
+              onMentionClick={handleMentionClick}
+              onToggleCollapsedTools={handleToggleCollapsedTools}
             />
           );
         })}
 
         {state.currentTurn ? (
-          <TurnBlock
-            assistantText={state.currentTurn.assistantText.trim().length > 0 ? state.currentTurn.assistantText : undefined}
-            planningDraftText={state.currentTurn.planningDraft}
-            collapsed={getToolCollapseState('current-turn', state.currentTurn.toolCalls.length, state.collapsedTools)}
-            onToggleTools={() =>
-              dispatch({
-                type: 'setCollapsedTools',
-                key: 'current-turn',
-                collapsed: !getToolCollapseState('current-turn', state.currentTurn?.toolCalls.length ?? 0, state.collapsedTools),
-              })
-            }
-            thought={
-              state.currentTurn.thought
-                ? {
-                    text: state.currentTurn.thought.text,
-                    durationSec: null,
-                    isStreaming: state.currentTurn.thought.finishedAt === null,
-                    open: state.currentTurn.thought.isOpen,
-                    onToggle: (open) => dispatch({ type: 'setCurrentThoughtOpen', isOpen: open }),
-                  }
-                : null
-            }
-            toolCalls={state.currentTurn.toolCalls}
-            turnKey="current-turn"
-            onMentionClick={(path) => postMessage({ type: 'openFile', path })}
+          <CurrentTurnBlock
+            collapsed={getToolCollapseState(
+              'current-turn',
+              state.currentTurn.toolCalls.length,
+              state.collapsedTools,
+            )}
+            currentTurn={state.currentTurn}
+            onMentionClick={handleMentionClick}
+            onThoughtOpenChange={handleCurrentThoughtOpen}
+            onToggleCollapsedTools={handleToggleCollapsedTools}
           />
         ) : null}
       </div>
@@ -902,165 +845,44 @@ export function App(): JSX.Element {
         </div>
       ) : null}
 
-      <div
-        className={`input-area${disabledBySession ? ' disabled' : ''}`}
-        id="inputArea"
-        style={{ height: state.inputAreaHeight }}
-      >
-        <div
-          className={`slash-popup${isSlashPopupOpen ? ' open' : ''}`}
-          id="slashPopup"
-          ref={slashPopupRef}
-          onClick={(event) => event.stopPropagation()}
-        >
-          <div className="slash-popup-header">Commands</div>
-          {slashFilteredCommands.map((command, index) => (
-            <div
-              className={`slash-popup-item${index === state.slashSelectedIdx ? ' active' : ''}`}
-              data-index={index}
-              key={command.name}
-              onClick={() => selectSlashCommand(command)}
-              onMouseEnter={() => dispatch({ type: 'setSlashSelectedIdx', index })}
-            >
-              <span className="cmd-name">/{command.name}</span>
-              <span className="cmd-desc">{command.description}</span>
-            </div>
-          ))}
-        </div>
-
-        <div
-          className={`file-popup${isFilePopupOpen ? ' open' : ''}`}
-          id="filePopup"
-          ref={filePopupRef}
-          onClick={(event) => event.stopPropagation()}
-        >
-          <div className="slash-popup-header">Files</div>
-          {fileResults.map((result, index) => (
-            <div
-              className={`file-popup-item${index === fileSelectedIdx ? ' active' : ''}`}
-              data-index={index}
-              key={result.path}
-              onClick={() => handleFileSelect(result)}
-              onMouseEnter={() => setFileSelectedIdx(index)}
-            >
-              <span className="file-name">{result.name}</span>
-              <span className="file-path">{result.path}</span>
-            </div>
-          ))}
-        </div>
-
-        <div className="input-resize-handle" id="resizeHandle" onMouseDown={handleResizeStart} />
-
-        <div className="input-toolbar">
-          {(sessionState?.configOptions ?? []).filter((option) =>
-            option.type === 'select' && (option.options ?? []).length > 0
-          ).map((option) => (
-            <div className="picker-wrap" key={option.id} onClick={(event) => event.stopPropagation()}>
-              <button
-                className="picker-btn"
-                title={option.description || option.name || ''}
-                type="button"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  dispatch({ type: 'toggleConfigDropdown', configId: option.id });
-                }}
-              >
-                <span className="picker-icon">⚙</span>
-                <span className="picker-label">{option.name}</span>
-                <span className="picker-chevron">▾</span>
-              </button>
-            </div>
-          ))}
-
-          {!sessionState?.configOptions?.some(opt => opt.type === 'select' && (opt.options ?? []).length > 0) && sessionState?.modes?.availableModes.length ? (
-            <div className="picker-wrap" onClick={(event) => event.stopPropagation()}>
-              <button
-                className="picker-btn"
-                title={currentMode?.description ?? 'Select mode'}
-                type="button"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  dispatch({ type: 'toggleModeDropdown' });
-                }}
-              >
-                <span className="picker-icon">⚡</span>
-                <span className="picker-label">{currentMode?.name ?? 'Mode'}</span>
-                <span className="picker-chevron">▾</span>
-              </button>
-            </div>
-          ) : (
-            <div className="picker-wrap hidden" />
-          )}
-
-          {!sessionState?.configOptions?.some(opt => opt.type === 'select' && (opt.options ?? []).length > 0) && sessionState?.models?.availableModels.length ? (
-            <div className="picker-wrap" onClick={(event) => event.stopPropagation()}>
-              <button
-                className="picker-btn"
-                title={currentModel?.description ?? 'Select model'}
-                type="button"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  dispatch({ type: 'toggleModelDropdown' });
-                }}
-              >
-                <span className="picker-icon">🧠</span>
-                <span className="picker-label">{currentModel?.name ?? 'Model'}</span>
-                <span className="picker-chevron">▾</span>
-              </button>
-            </div>
-          ) : (
-            <div className="picker-wrap hidden" />
-          )}
-          <span className="toolbar-spacer" />
-        </div>
-
-        <div className="input-editor-wrap">
-          <MarkdownEditor
-            ref={promptInputRef}
-            value={state.promptText}
-            onChange={(text, nextCursorPosition = text.length) => {
-              dispatch({ type: 'setPromptText', text });
-              pendingCursorPositionRef.current = nextCursorPosition;
-              setCursorPosition(nextCursorPosition);
-
-              if (state.slashPopupSuppressedFor && state.slashPopupSuppressedFor !== text) {
-                dispatch({ type: 'suppressSlashPopup', promptText: null });
-              }
-
-              const filteredMentions = selectedFileMentions.filter((mention) =>
-                text.includes(mention.token)
-              );
-              if (filteredMentions.length !== selectedFileMentions.length) {
-                setSelectedFileMentions(filteredMentions);
-              }
-            }}
-            placeholder={placeholder}
-            disabled={disabledBySession || state.isProcessing}
-            onKeyDown={handlePromptKeyDown}
-            onFocus={focusPromptInput}
-            fileMentions={selectedFileMentions.map(m => ({ token: m.token, path: m.path, name: m.name }))}
-            onMentionClick={(path) => postMessage({ type: 'openFile', path })}
-          />
-        </div>
-
-        <div className="input-send-row">
-          <button
-            className={`send-stop-btn ${state.isProcessing ? 'stop' : 'send'}`}
-            disabled={!state.isProcessing && (disabledBySession || state.promptText.trim().length === 0)}
-            id="sendStopBtn"
-            type="button"
-            onClick={() => {
-              if (state.isProcessing) {
-                handleCancel();
-              } else {
-                handleSend();
-              }
-            }}
-          >
-            {state.isProcessing ? '■ Stop' : 'Send'}
-          </button>
-        </div>
-      </div>
+      <ChatComposer
+        currentMode={currentMode}
+        currentModel={currentModel}
+        disabledBySession={disabledBySession}
+        dispatch={dispatch}
+        fileResults={fileResults}
+        fileSelectedIdx={fileSelectedIdx}
+        inputAreaHeight={state.inputAreaHeight}
+        isFilePopupOpen={isFilePopupOpen}
+        isModeDropdownOpen={state.isModeDropdownOpen}
+        isModelDropdownOpen={state.isModelDropdownOpen}
+        isProcessing={state.isProcessing}
+        isSlashPopupOpen={isSlashPopupOpen}
+        onCancel={handleCancel}
+        onConfigOptionSelect={handleConfigOptionSelect}
+        onFileSelect={handleFileSelect}
+        onFileSelectedIdxChange={setFileSelectedIdx}
+        onFocusPrompt={focusPromptInput}
+        onMentionClick={handleMentionClick}
+        onModeSelect={handleModeSelect}
+        onModelSelect={handleModelSelect}
+        onPromptKeyDown={handlePromptKeyDown}
+        onResizeStart={handleResizeStart}
+        onSelectSlashCommand={selectSlashCommand}
+        onSelectedFileMentionsChange={setSelectedFileMentions}
+        onSend={handleSend}
+        openConfigDropdownId={state.openConfigDropdownId}
+        pendingCursorPositionRef={pendingCursorPositionRef}
+        placeholder={composerPlaceholder}
+        promptInputRef={promptInputRef}
+        promptText={state.promptText}
+        selectedFileMentions={selectedFileMentions}
+        sessionState={sessionState}
+        setCursorPosition={setCursorPosition}
+        slashFilteredCommands={slashFilteredCommands}
+        slashPopupSuppressedFor={state.slashPopupSuppressedFor}
+        slashSelectedIdx={state.slashSelectedIdx}
+      />
     </>
   );
 }

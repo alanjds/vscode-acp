@@ -61,6 +61,7 @@ export type AppAction =
   | { type: 'showSessionConnected'; session: SessionSnapshot }
   | { type: 'showNoSession' }
   | { type: 'appendUserMessage'; text: string }
+  | { type: 'submitUserMessage'; text: string }
   | { type: 'appendUserChunk'; text: string }
   | { type: 'appendErrorMessage'; text: string }
   | { type: 'appendInfoMessage'; text: string }
@@ -82,7 +83,9 @@ export type AppAction =
   | { type: 'updateToolCall'; toolCallId: string; title?: string; status: ToolCallStatus }
   | { type: 'appendPlan'; plan: PlanUpdate }
   | { type: 'appendPipelinePlan'; plan: string; role?: PipelinePhase; agentName?: string; implementerUsesSandcastle?: boolean }
+  | { type: 'revisePipelinePlan'; plan: string; role?: PipelinePhase; agentName?: string; implementerUsesSandcastle?: boolean }
   | { type: 'updatePipelinePlanStatus'; status: PipelinePlanStatus; message?: string }
+  | { type: 'revertPipelinePlanApproval' }
   | { type: 'updatePipelineTimeline'; timeline: PipelineTimelineStep[] }
   | { type: 'setActivePipelineRole'; role: PipelinePhase | null; agentName?: string | null }
   | { type: 'appendPipelineRoleOutput'; role: PipelinePhase; agentName?: string; text: string; title: string }
@@ -389,12 +392,35 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         },
       };
 
+    case 'submitUserMessage':
+      return {
+        ...state,
+        promptText: '',
+        placeholderOverride: null,
+        slashPopupSuppressedFor: null,
+        isProcessing: true,
+        persisted: {
+          ...state.persisted,
+          chatHistory: [
+            ...state.persisted.chatHistory,
+            { kind: 'message', role: 'user', text: action.text },
+          ],
+        },
+      };
+
     case 'appendUserChunk': {
       const nextHistory = commitCurrentTurnToHistory(
         state.persisted.chatHistory,
         state.currentTurn,
       );
       const last = nextHistory[nextHistory.length - 1];
+      if (last?.kind === 'message' && last.role === 'user' && last.text === action.text) {
+        return {
+          ...state,
+          currentTurn: null,
+        };
+      }
+
       const chatHistory: ChatHistoryItem[] =
         last?.kind === 'message' && last.role === 'user'
           ? [
@@ -782,6 +808,47 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         },
       };
 
+    case 'revisePipelinePlan': {
+      const nextHistory = [...state.persisted.chatHistory];
+      for (let index = nextHistory.length - 1; index >= 0; index -= 1) {
+        const item = nextHistory[index];
+        if (item.kind === 'pipelinePlan' && item.status === 'pending') {
+          nextHistory[index] = {
+            ...item,
+            plan: action.plan,
+            role: action.role ?? item.role,
+            agentName: action.agentName ?? item.agentName,
+            implementerUsesSandcastle: action.implementerUsesSandcastle ?? item.implementerUsesSandcastle,
+          };
+          return {
+            ...state,
+            persisted: {
+              ...state.persisted,
+              chatHistory: nextHistory,
+            },
+          };
+        }
+      }
+
+      return {
+        ...state,
+        persisted: {
+          ...state.persisted,
+          chatHistory: [
+            ...state.persisted.chatHistory,
+            {
+              kind: 'pipelinePlan',
+              plan: action.plan,
+              status: 'pending',
+              role: action.role,
+              agentName: action.agentName,
+              implementerUsesSandcastle: action.implementerUsesSandcastle,
+            },
+          ],
+        },
+      };
+    }
+
     case 'updatePipelineTimeline':
       return {
         ...state,
@@ -830,6 +897,29 @@ export function appReducer(state: AppState, action: AppAction): AppState {
             ...item,
             status: action.status,
             message: action.message,
+          };
+          break;
+        }
+      }
+
+      return {
+        ...state,
+        persisted: {
+          ...state.persisted,
+          chatHistory: nextHistory,
+        },
+      };
+    }
+
+    case 'revertPipelinePlanApproval': {
+      const nextHistory = [...state.persisted.chatHistory];
+      for (let index = nextHistory.length - 1; index >= 0; index -= 1) {
+        const item = nextHistory[index];
+        if (item.kind === 'pipelinePlan') {
+          nextHistory[index] = {
+            ...item,
+            status: 'pending',
+            message: undefined,
           };
           break;
         }

@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "module": "commonjs",
+    "target": "es2022",
+    "lib": ["es2022", "dom"],
+    "types": ["node", "vscode", "mocha"],
+    "outDir": "out",
+    "rootDir": ".",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "jsx": "react-jsx",
+    "moduleResolution": "node"
+  },
+  "include": [
+    "src/**/*",
+    "webview/src/chatTypes.ts",
+    "webview/src/app/state.ts",
+    "webview/src/app/normalizers.ts"
+  ]
+}

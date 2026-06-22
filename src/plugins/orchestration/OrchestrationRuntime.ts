@@ -106,6 +106,7 @@ export class OrchestrationRuntime implements VirtualSessionRuntime, vscode.Dispo
       agentName: event.agentName,
       teamId: event.teamId,
       implementerUsesSandcastle: event.implementerUsesSandcastle,
+      revised: event.revised === true,
     });
   };
 
@@ -144,6 +145,7 @@ export class OrchestrationRuntime implements VirtualSessionRuntime, vscode.Dispo
       this.sessions.touchHistory(sessionId);
     } catch (error: any) {
       logError('Pipeline implementation failed', error);
+      this.chat.postMessage({ type: 'pipelinePlanApprovalFailed', message: error.message || 'Pipeline implementation failed' });
       this.chat.postMessage({ type: 'error', message: error.message || 'Pipeline implementation failed' });
       this.chat.postMessage({ type: 'promptEnd', stopReason: 'error' });
     }

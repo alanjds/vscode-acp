@@ -2,6 +2,7 @@ import { memo, useMemo } from 'react';
 import type { JSX } from 'react';
 
 import type { CurrentToolCall, ToolCallHistoryItem, ToolCallStatus } from '../chatTypes';
+import { Codicon } from './Codicon';
 
 type TurnToolHistoryItem = {
   item: ToolCallHistoryItem;
@@ -15,16 +16,16 @@ export type TurnToolsProps = {
   onToggle: () => void;
 };
 
-function getStatusIcon(status: ToolCallStatus): string {
+function getStatusIcon(status: ToolCallStatus): { name: string; spin?: boolean } {
   switch (status) {
     case 'running':
-      return '⟳';
+      return { name: 'sync', spin: true };
     case 'completed':
-      return '✓';
+      return { name: 'check' };
     case 'failed':
-      return '✗';
+      return { name: 'close' };
     default:
-      return '…';
+      return { name: 'ellipsis' };
   }
 }
 
@@ -54,20 +55,32 @@ function TurnToolsComponent({ turnKey, toolCalls, collapsed, onToggle }: TurnToo
   }
 
   const count = items.length;
-  const summaryLabel = `${collapsed ? '▸' : '▾'} ${count} tool call${count !== 1 ? 's' : ''}`;
+  const summaryLabel = `${count} tool call${count !== 1 ? 's' : ''}`;
 
   return (
     <div className="turn-tools">
-      <div className="turn-tools-summary" data-count={count} onClick={onToggle} onKeyDown={undefined} role="button" tabIndex={0}>
+      <button
+        className="turn-tools-summary"
+        data-count={count}
+        onClick={onToggle}
+        type="button"
+      >
+        <Codicon className="turn-tools-chevron" name={collapsed ? 'chevron-right' : 'chevron-down'} />
+        <Codicon name="tools" />
         {summaryLabel}
-      </div>
+      </button>
       <div className={`turn-tools-list${collapsed ? ' collapsed' : ''}`}>
-        {items.map((toolCall) => (
-          <div className="tool-call-inline" id={`tc-${toolCall.toolCallId}`} key={toolCall.key}>
-            <span className={`tc-icon ${toolCall.status}`}>{getStatusIcon(toolCall.status)}</span>
-            <span className="tc-title">{toolCall.title || 'Tool Call'}</span>
-          </div>
-        ))}
+        {items.map((toolCall) => {
+          const icon = getStatusIcon(toolCall.status);
+          return (
+            <div className="tool-call-inline" id={`tc-${toolCall.toolCallId}`} key={toolCall.key}>
+              <span className={`tc-icon ${toolCall.status}`}>
+                <Codicon name={icon.name} spin={icon.spin} />
+              </span>
+              <span className="tc-title">{toolCall.title || 'Tool Call'}</span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

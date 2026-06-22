@@ -4,6 +4,7 @@ import type { JSX } from 'react';
 import type { MessageHistoryItem } from '../chatTypes';
 import { parseUserMessage } from '../app/composer';
 import { MarkdownDisplay } from './MarkdownDisplay';
+import { Codicon } from './Codicon';
 
 export type MessageBubbleProps = {
   item: MessageHistoryItem;
@@ -29,6 +30,7 @@ function MessageBubbleComponent({ item, onMentionClick }: MessageBubbleProps): J
   if (item.role === 'error') {
     return (
       <div className="message error md-rendered">
+        <Codicon className="message-status-icon" name="error" />
         <MarkdownDisplay>{item.text}</MarkdownDisplay>
       </div>
     );
@@ -37,6 +39,7 @@ function MessageBubbleComponent({ item, onMentionClick }: MessageBubbleProps): J
   if (item.role === 'info') {
     return (
       <div className="message info md-rendered">
+        <Codicon className="message-status-icon" name="info" />
         <MarkdownDisplay>{item.text}</MarkdownDisplay>
       </div>
     );
@@ -52,7 +55,10 @@ function MessageBubbleComponent({ item, onMentionClick }: MessageBubbleProps): J
 
   return (
     <div className="message user md-rendered">
-      <span className="file-badge">📄 {parsedUserMessage.badgeText}</span>
+      <span className="file-badge">
+        <Codicon name="file" />
+        {parsedUserMessage.badgeText}
+      </span>
       {parsedUserMessage.body ? (
         <div className="message-text">
           <MarkdownDisplay>{parsedUserMessage.body}</MarkdownDisplay>

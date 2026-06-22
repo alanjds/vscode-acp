@@ -17,7 +17,7 @@ import type { SandcastlePromotion } from '../sandcastle/SandcastlePromotion';
 import { AcpAgentRunner, type AcpAgentRunResult } from './AcpAgentRunner';
 import type { CompiledTeamMetadata } from '../pipeline/AgentTeamCompiler';
 import type { TeamRoleId } from '../config/AgentTeamConfig';
-import { assertSingleProposedPlan } from './ProposedPlan';
+import { assertSingleProposedPlan, extractSingleProposedPlan } from './ProposedPlan';
 import { isRunAbortedError } from './RunAbortedError';
 import {
   type AcpRunCallback,
@@ -57,6 +57,7 @@ export interface PipelinePlanReadyEvent {
   agentName?: string;
   teamId?: string;
   implementerUsesSandcastle?: boolean;
+  revised?: boolean;
 }
 
 export interface PipelineSessionUpdateEvent {
@@ -90,11 +91,29 @@ interface PipelineRunState {
   pipeline: PipelineDefinition;
   graph: CompiledPipelineGraph;
   pendingApproval: PendingApprovalState | null;
+  originalUserPrompt: string;
+  revisionCount: number;
   cancelled: boolean;
   abortController: AbortController;
   approvedPlan?: string;
   implementOutput?: string;
   stepOutputs: Map<string, string>;
+}
+
+function buildRevisionPrompt(originalUserPrompt: string, currentPlan: string, feedback: string): string {
+  return [
+    'Original user request:',
+    originalUserPrompt,
+    '',
+    'Current proposed plan:',
+    currentPlan,
+    '',
+    'User revision request:',
+    feedback,
+    '',
+    'Revise the plan based on the user\'s feedback.',
+    'Return exactly one <proposed_plan>...</proposed_plan> block.',
+  ].join('\n');
 }
 
 export interface PipelineServiceDependencies {
@@ -122,6 +141,11 @@ export class PipelineService extends EventEmitter {
   }
 
   async createPlan(sessionId: string, userPrompt: string, pipelineAgentName?: string): Promise<string> {
+    const existing = this.runs.get(sessionId);
+    if (existing?.pendingApproval) {
+      return this.revisePendingPlan(sessionId, existing, userPrompt);
+    }
+
     const pipeline = this.readPipelineDefinition(pipelineAgentName);
     this.assertConfiguredAgents(pipeline);
 
@@ -129,6 +153,8 @@ export class PipelineService extends EventEmitter {
       pipeline,
       graph: this.compileGraph(sessionId, pipeline),
       pendingApproval: null,
+      originalUserPrompt: userPrompt,
+      revisionCount: 0,
       cancelled: false,
       abortController: new AbortController(),
       stepOutputs: new Map(),
@@ -374,6 +400,78 @@ export class PipelineService extends EventEmitter {
     return compiler.compile(pipeline);
   }
 
+  private async revisePendingPlan(
+    sessionId: string,
+    state: PipelineRunState,
+    feedback: string,
+  ): Promise<string> {
+    const pendingApproval = state.pendingApproval;
+    if (!pendingApproval) {
+      throw new Error('No pending pipeline plan for this session.');
+    }
+
+    const plannerStepId = this.findPlannerStepId(state.pipeline);
+    const teamContext = this.readTeamContext(state.pipeline);
+    const plannerRole = teamContext?.roleByStepId[plannerStepId];
+    const plannerPrimitive = this.findPrimitiveForExecutorKind(state.pipeline, plannerStepId);
+    const revisionPrompt = buildRevisionPrompt(
+      state.originalUserPrompt,
+      pendingApproval.plan,
+      feedback,
+    );
+
+    state.revisionCount += 1;
+    state.abortController = new AbortController();
+
+    const statusMessage = plannerRole
+      ? `${this.formatRoleLabel(plannerRole)} (${plannerPrimitive.agent})…`
+      : `Revising plan with ${plannerPrimitive.agent}...`;
+    this.emitStatus(
+      sessionId,
+      'planning',
+      statusMessage,
+      plannerStepId,
+      undefined,
+      teamContext,
+      plannerRole,
+      plannerPrimitive.agent,
+    );
+
+    try {
+      const output = await this.runConfiguredAcpAgent(
+        sessionId,
+        plannerStepId,
+        revisionPrompt,
+        update => {
+          this.emit('session-update', {
+            sessionId,
+            phase: plannerStepId,
+            update,
+            stepId: plannerStepId,
+            role: plannerRole,
+            agentName: plannerRole ? teamContext?.agentByRole[plannerRole] : undefined,
+            teamId: teamContext?.teamId,
+          } satisfies PipelineSessionUpdateEvent);
+        },
+      );
+      const revisedPlan = extractSingleProposedPlan(output);
+      state.pendingApproval = {
+        stepId: pendingApproval.stepId,
+        plan: revisedPlan,
+      };
+      state.stepOutputs.set(plannerStepId, revisedPlan);
+      this.emitPlanReady(sessionId, state, revisedPlan, pendingApproval.stepId, true);
+      return revisedPlan;
+    } catch (e: any) {
+      if (this.isPipelineAborted(sessionId, state, e)) {
+        this.runs.delete(sessionId);
+        throw e;
+      }
+      this.emitStatus(sessionId, 'error', e.message || 'Plan revision failed.', plannerStepId);
+      throw e;
+    }
+  }
+
   private handleGraphResult(
     sessionId: string,
     state: PipelineRunState,
@@ -385,32 +483,7 @@ export class PipelineService extends EventEmitter {
     if (interrupt) {
       assertSingleProposedPlan(interrupt.plan);
       state.pendingApproval = interrupt;
-      const teamContext = this.readTeamContext(state.pipeline);
-      const plannerRole = teamContext?.roleByStepId[interrupt.stepId];
-      const implementerUsesSandcastle = this.implementerUsesSandcastle(state.pipeline);
-      const approvalMessage = implementerUsesSandcastle
-        ? 'Plan ready — approve before Sandcastle implementation.'
-        : 'Plan ready for review.';
-      this.emit('plan-ready', {
-        sessionId,
-        plan: interrupt.plan,
-        stepId: interrupt.stepId,
-        role: plannerRole,
-        agentName: plannerRole ? teamContext?.agentByRole[plannerRole] : undefined,
-        teamId: teamContext?.teamId,
-        implementerUsesSandcastle,
-      } satisfies PipelinePlanReadyEvent);
-      this.emitStatus(
-        sessionId,
-        'awaiting_approval',
-        approvalMessage,
-        interrupt.stepId,
-        undefined,
-        teamContext,
-        undefined,
-        undefined,
-        implementerUsesSandcastle,
-      );
+      this.emitPlanReady(sessionId, state, interrupt.plan, interrupt.stepId, false);
       return interrupt.plan;
     }
 
@@ -418,6 +491,60 @@ export class PipelineService extends EventEmitter {
     this.emitStatus(sessionId, 'completed', completionMessage, undefined, undefined, this.readTeamContext(state.pipeline));
     this.runs.delete(sessionId);
     return typeof result?.lastOutput === 'string' ? result.lastOutput : '';
+  }
+
+  private emitPlanReady(
+    sessionId: string,
+    state: PipelineRunState,
+    plan: string,
+    approvalStepId: string,
+    revised: boolean,
+  ): void {
+    const teamContext = this.readTeamContext(state.pipeline);
+    const plannerStepId = this.findPlannerStepId(state.pipeline);
+    const plannerRole = teamContext?.roleByStepId[plannerStepId];
+    const implementerUsesSandcastle = this.implementerUsesSandcastle(state.pipeline);
+    const approvalMessage = revised
+      ? 'Plan revised — review and approve.'
+      : implementerUsesSandcastle
+        ? 'Plan ready — approve before Sandcastle implementation.'
+        : 'Plan ready for review.';
+    this.emit('plan-ready', {
+      sessionId,
+      plan,
+      stepId: approvalStepId,
+      role: plannerRole,
+      agentName: plannerRole ? teamContext?.agentByRole[plannerRole] : undefined,
+      teamId: teamContext?.teamId,
+      implementerUsesSandcastle,
+      revised,
+    } satisfies PipelinePlanReadyEvent);
+    this.emitStatus(
+      sessionId,
+      'awaiting_approval',
+      approvalMessage,
+      approvalStepId,
+      undefined,
+      teamContext,
+      undefined,
+      undefined,
+      implementerUsesSandcastle,
+    );
+  }
+
+  private findPlannerStepId(pipeline: PipelineDefinition): string {
+    for (const step of pipeline.steps) {
+      if ('type' in step && step.type === 'approval') {
+        break;
+      }
+      if ('use' in step) {
+        const primitive = pipeline.primitives[step.use];
+        if (primitive.output === 'proposed_plan') {
+          return step.id;
+        }
+      }
+    }
+    throw new Error('Pipeline has no planner step with proposed_plan output.');
   }
 
   private readApprovalInterrupt(result: any): PendingApprovalState | null {

@@ -1,4 +1,4 @@
-import { Children, memo } from 'react';
+import { Children, memo, useMemo, useRef, type ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -10,7 +10,8 @@ export type MarkdownDisplayProps = {
   onMentionClick?: (path: string) => void;
 };
 
-// Composant pour afficher les mentions de fichiers comme des chips
+const REMARK_PLUGINS = [remarkGfm];
+
 const FileMentionChip = ({
   path,
   name,
@@ -37,45 +38,46 @@ const FileMentionChip = ({
   </span>
 );
 
-// Composant principal pour afficher le markdown
 const MarkdownDisplayComponent = ({
   children,
   className = '',
   onMentionClick,
 }: MarkdownDisplayProps) => {
+  const onMentionClickRef = useRef(onMentionClick);
+  onMentionClickRef.current = onMentionClick;
+
+  const components = useMemo(
+    () => ({
+      a({ href, children: linkChildren, ...props }: {
+        href?: string;
+        children?: ReactNode;
+      }) {
+        if (typeof href === 'string' && href.startsWith('file://')) {
+          const path = decodeFileMentionPath(href.slice('file://'.length));
+          const rawName = Children.toArray(linkChildren).join('');
+          const name = rawName.startsWith('@') ? rawName.slice(1) : rawName;
+          return (
+            <FileMentionChip
+              path={path}
+              name={name || path.split('/').pop() || path}
+              onClick={onMentionClickRef.current}
+            />
+          );
+        }
+
+        return (
+          <a href={href} target="_blank" rel="noopener noreferrer" {...props}>
+            {linkChildren}
+          </a>
+        );
+      },
+    }),
+    [],
+  );
+
   return (
     <div className={`markdown-display md-rendered ${className}`}>
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={{
-          a({ node, href, children, ...props }) {
-            if (typeof href === 'string' && href.startsWith('file://')) {
-              const path = decodeFileMentionPath(href.slice('file://'.length));
-              const rawName = Children.toArray(children).join('');
-              const name = rawName.startsWith('@') ? rawName.slice(1) : rawName;
-              return (
-                <FileMentionChip
-                  path={path}
-                  name={name || path.split('/').pop() || path}
-                  onClick={onMentionClick}
-                />
-              );
-            }
-
-            return (
-              <a
-                href={href}
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{ color: '#4f8ef7' }}
-                {...props}
-              >
-              {children}
-            </a>
-          );
-          },
-        }}
-      >
+      <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={components}>
         {children}
       </ReactMarkdown>
     </div>

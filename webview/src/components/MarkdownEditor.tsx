@@ -263,7 +263,8 @@ const MarkdownEditorComponent = (
   ref: ForwardedRef<HTMLDivElement>
 ) => {
   const editorRef = useRef<HTMLDivElement>(null);
-  
+  const suppressInputRef = useRef(false);
+
   useImperativeHandle(ref, () => editorRef.current as HTMLDivElement);
 
   useLayoutEffect(() => {
@@ -272,11 +273,16 @@ const MarkdownEditorComponent = (
       return;
     }
 
-    if (getMarkdownEditableText(editor) === value) {
+    const domText = getMarkdownEditableText(editor);
+    if (domText === value && value !== '') {
       return;
     }
 
+    suppressInputRef.current = true;
     renderMarkdownEditableContent(editor, value, fileMentions);
+    queueMicrotask(() => {
+      suppressInputRef.current = false;
+    });
   }, [fileMentions, value]);
 
   // Gérer les clics sur les mentions de fichiers
@@ -301,6 +307,9 @@ const MarkdownEditorComponent = (
   // Gérer la position du curseur
   const handleInput = useCallback(
     (e: FormEvent<HTMLDivElement>) => {
+      if (suppressInputRef.current) {
+        return;
+      }
       const text = getMarkdownEditableText(e.currentTarget);
       onChange(text, getMarkdownEditableCursorPosition(e.currentTarget));
     },

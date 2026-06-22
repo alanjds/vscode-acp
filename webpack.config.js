@@ -25,6 +25,30 @@ class CopyWebviewCssPlugin {
   }
 }
 
+class CopyCodiconsPlugin {
+  apply(compiler) {
+    compiler.hooks.thisCompilation.tap('CopyCodiconsPlugin', (compilation) => {
+      compilation.hooks.processAssets.tap(
+        {
+          name: 'CopyCodiconsPlugin',
+          stage: webpack.Compilation.PROCESS_ASSETS_STAGE_ADDITIONS,
+        },
+        () => {
+          const codiconsDir = path.resolve(__dirname, 'node_modules/@vscode/codicons/dist');
+          compilation.emitAsset(
+            'codicon.css',
+            new webpack.sources.RawSource(fs.readFileSync(path.join(codiconsDir, 'codicon.css'), 'utf8')),
+          );
+          compilation.emitAsset(
+            'codicon.ttf',
+            new webpack.sources.RawSource(fs.readFileSync(path.join(codiconsDir, 'codicon.ttf'))),
+          );
+        },
+      );
+    });
+  }
+}
+
 /** @type {import('webpack').Configuration} */
 const extensionConfig = {
   name: 'extension',
@@ -129,6 +153,7 @@ const webviewConfig = {
   },
   plugins: [
     new CopyWebviewCssPlugin(),
+    new CopyCodiconsPlugin(),
   ],
   devtool: 'nosources-source-map',
   infrastructureLogging: {

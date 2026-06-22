@@ -1,37 +1,44 @@
+import { memo } from 'react';
 import type { JSX } from 'react';
 
 import type { PlanHistoryItem } from '../chatTypes';
+import { Codicon } from './Codicon';
 import { MarkdownDisplay } from './MarkdownDisplay';
 
 export type PlanBlockProps = {
   item: PlanHistoryItem;
 };
 
-function getPlanEntryIcon(status?: string): string {
+function getPlanEntryIcon(status?: string): { name: string; spin?: boolean } {
   if (status === 'completed') {
-    return '✅';
+    return { name: 'check' };
   }
   if (status === 'in_progress') {
-    return '🔄';
+    return { name: 'sync', spin: true };
   }
-  return '⬜';
+  return { name: 'circle-large-outline' };
 }
 
-export function PlanBlock({ item }: PlanBlockProps): JSX.Element {
+function PlanBlockComponent({ item }: PlanBlockProps): JSX.Element {
   return (
     <div className="plan">
       <div className="plan-title">Plan</div>
-      {item.plan.entries?.map((entry, index) => (
-        <div
-          className={`plan-entry${entry.status === 'completed' ? ' completed' : ''}`}
-          key={`plan-entry-${index}`}
-        >
-          <span style={{ marginRight: '8px' }}>{getPlanEntryIcon(entry.status)}</span>
-          <MarkdownDisplay>
-            {entry.title || entry.description || entry.content || ''}
-          </MarkdownDisplay>
-        </div>
-      ))}
+      {item.plan.entries?.map((entry, index) => {
+        const icon = getPlanEntryIcon(entry.status);
+        return (
+          <div
+            className={`plan-entry${entry.status === 'completed' ? ' completed' : ''}`}
+            key={`plan-entry-${index}`}
+          >
+            <Codicon className="plan-entry-icon" name={icon.name} spin={icon.spin} />
+            <MarkdownDisplay>
+              {entry.title || entry.description || entry.content || ''}
+            </MarkdownDisplay>
+          </div>
+        );
+      })}
     </div>
   );
 }
+
+export const PlanBlock = memo(PlanBlockComponent);

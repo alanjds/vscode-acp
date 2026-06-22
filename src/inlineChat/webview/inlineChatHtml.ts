@@ -15,6 +15,15 @@ export function getInlineChatHtml(_webview: vscode.Webview): string {
     content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';"
   />
   <style>
+    :root {
+      --acp-space-sm: 8px;
+      --acp-space-md: 12px;
+      --acp-radius-sm: 4px;
+      --acp-radius-md: 8px;
+      --acp-text-secondary: var(--vscode-descriptionForeground);
+      --acp-border: var(--vscode-panel-border);
+    }
+
     body {
       padding: 0;
       margin: 0;
@@ -26,30 +35,30 @@ export function getInlineChatHtml(_webview: vscode.Webview): string {
 
     .container {
       margin: 4px 16px 4px 0;
-      border: 1px solid var(--vscode-input-border);
+      border: 1px solid var(--acp-border);
       background: var(--vscode-input-background);
       color: var(--vscode-input-foreground);
-      border-radius: 6px;
-      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+      border-radius: var(--acp-radius-md);
+      box-shadow: 0 4px 14px color-mix(in srgb, var(--vscode-widget-shadow, var(--vscode-foreground)) 20%, transparent);
       overflow: hidden;
     }
 
     .input-row {
       display: flex;
       align-items: stretch;
-      gap: 8px;
-      padding: 8px;
+      gap: var(--acp-space-sm);
+      padding: var(--acp-space-sm);
     }
 
     .header-row {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding: 6px 8px 0 8px;
+      padding: 6px var(--acp-space-sm) 0 var(--acp-space-sm);
     }
 
     .title {
-      color: var(--vscode-descriptionForeground);
+      color: var(--acp-text-secondary);
       font-size: calc(var(--vscode-font-size) * 0.9);
       user-select: none;
     }
@@ -58,7 +67,7 @@ export function getInlineChatHtml(_webview: vscode.Webview): string {
       border: none;
       background: transparent;
       color: var(--vscode-icon-foreground);
-      border-radius: 4px;
+      border-radius: var(--acp-radius-sm);
       padding: 2px 6px;
       cursor: pointer;
       line-height: 1;
@@ -66,7 +75,7 @@ export function getInlineChatHtml(_webview: vscode.Webview): string {
     }
 
     .close-btn:hover {
-      background: rgba(127, 127, 127, 0.15);
+      background: var(--vscode-toolbar-hoverBackground);
     }
 
     textarea {
@@ -84,11 +93,14 @@ export function getInlineChatHtml(_webview: vscode.Webview): string {
 
     button {
       border: none;
-      border-radius: 4px;
+      border-radius: var(--acp-radius-sm);
       padding: 4px 10px;
       cursor: pointer;
       color: var(--vscode-button-foreground);
       background: var(--vscode-button-background);
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
     }
 
     button.secondary {
@@ -100,9 +112,9 @@ export function getInlineChatHtml(_webview: vscode.Webview): string {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding: 6px 8px;
-      border-top: 1px solid var(--vscode-input-border);
-      color: var(--vscode-descriptionForeground);
+      padding: 6px var(--acp-space-sm);
+      border-top: 1px solid var(--acp-border);
+      color: var(--acp-text-secondary);
     }
 
     .actions {
@@ -118,21 +130,32 @@ export function getInlineChatHtml(_webview: vscode.Webview): string {
       white-space: nowrap;
     }
 
-    textarea:focus {
-      outline: 1px solid var(--vscode-focusBorder);
+    .btn-icon {
+      width: 14px;
+      height: 14px;
+      fill: currentColor;
+      flex-shrink: 0;
     }
 
-    button:hover {
-      opacity: 0.8;
+    textarea:focus {
+      outline: 1px solid var(--vscode-focusBorder);
+      box-shadow: 0 0 0 1px var(--vscode-focusBorder);
+    }
+
+    button:hover:not(:disabled) {
+      background: var(--vscode-button-hoverBackground);
     }
 
     button:disabled {
-      opacity: 0.5;
+      color: var(--vscode-disabledForeground);
       cursor: not-allowed;
     }
 
     button.stop {
-      min-width: 52px;
+      min-width: 72px;
+      background: var(--vscode-inputValidation-errorBackground);
+      color: var(--vscode-inputValidation-errorForeground);
+      border: 1px solid var(--vscode-inputValidation-errorBorder);
     }
   </style>
 </head>
@@ -148,7 +171,10 @@ export function getInlineChatHtml(_webview: vscode.Webview): string {
         placeholder="Ask Damien to edit this code..."
         autofocus
       ></textarea>
-      <button id="submit">Send</button>
+      <button id="submit" type="button" aria-label="Send">
+        <svg class="btn-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M1 1.5 15 8 1 14.5V9l8-1-8-1V1.5z"/></svg>
+        <span class="submit-label">Send</span>
+      </button>
     </div>
 
     <div class="footer">
@@ -214,12 +240,12 @@ export function getInlineChatHtml(_webview: vscode.Webview): string {
     function setThinking(thinking) {
       isThinking = thinking;
       if (thinking) {
-        submit.textContent = '■ Stop';
+        submit.innerHTML = '<svg class="btn-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="4" y="4" width="8" height="8" rx="1"/></svg><span class="submit-label">Stop</span>';
         submit.classList.add('stop');
         submit.disabled = false;
         prompt.disabled = true;
       } else {
-        submit.textContent = 'Send';
+        submit.innerHTML = '<svg class="btn-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M1 1.5 15 8 1 14.5V9l8-1-8-1V1.5z"/></svg><span class="submit-label">Send</span>';
         submit.classList.remove('stop');
         submit.disabled = false;
         prompt.disabled = false;

@@ -1,6 +1,8 @@
 import { memo } from 'react';
 import type { JSX, MouseEvent as ReactMouseEvent } from 'react';
 
+import { Codicon } from './Codicon';
+
 export type PickerProps<T> = {
   label: string;
   title: string;
@@ -31,23 +33,24 @@ function PickerComponent<T>({
   return (
     <div className="picker-wrap" onClick={(event) => event.stopPropagation()}>
       <button className="picker-btn" title={title} type="button" onClick={onToggle}>
-        <span className="picker-icon">{icon}</span>
+        <Codicon className="picker-icon" name={icon} />
         <span className="picker-label">{label}</span>
-        <span className="picker-chevron">▾</span>
+        <Codicon className="picker-chevron" name="chevron-down" />
       </button>
       <div className={`picker-dropdown${isOpen ? ' open' : ''}`}>
         {items.map((item) => {
           const key = itemKey(item);
           const selected = key === currentValue;
+          const description = itemDescription(item);
           return (
             <div
               className={`picker-dropdown-item${selected ? ' selected' : ''}`}
               key={key}
               onClick={(event) => onSelect(item, event)}
             >
-              <span className="check">{selected ? '✓' : ''}</span>
+              <span className="check">{selected ? <Codicon name="check" /> : null}</span>
               <span className="item-label">{itemLabel(item)}</span>
-              {itemDescription(item) ? <span className="item-desc">{itemDescription(item)}</span> : null}
+              {description ? <span className="item-desc">{description}</span> : null}
             </div>
           );
         })}

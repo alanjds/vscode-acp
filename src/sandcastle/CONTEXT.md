@@ -33,7 +33,7 @@ Checkout git isolé où l’agent modifie les fichiers jusqu’à promotion ou r
 _À éviter_ : dossier sandbox, répertoire temporaire
 
 **Promotion** :
-Décision utilisateur d’appliquer les changements du worktree isolé dans le vrai workspace (Apply) ou de les rejeter et démonter la sandbox (Reject). Efface le BridgeTranscript pour cette BridgeConversation. Le module `SandcastlePromotion` orchestre aussi `finishEphemeralRun` après un EphemeralRun (discard silencieux ou gate Promotion selon `sideEffects`).
+Décision utilisateur d’appliquer les changements du worktree isolé dans le vrai workspace (Apply) ou de les rejeter et démonter la sandbox (Reject). Efface le BridgeTranscript pour cette BridgeConversation. Côté bridge, `WorktreePromotion` calcule le diff worktree (`previewWorktreeChanges`) et applique le patch sur le dépôt hôte (`applyWorktreeToHost`) ; `SandcastleAcpAgent` orchestre ces opérations via les handlers `sandcastle/preview` et `sandcastle/apply`. Côté extension, `SandcastlePromotion` orchestre aussi `finishEphemeralRun` après un EphemeralRun (discard silencieux ou gate Promotion selon `sideEffects`).
 _À éviter_ : merge, commit, sync
 
 **ShowDiff** :

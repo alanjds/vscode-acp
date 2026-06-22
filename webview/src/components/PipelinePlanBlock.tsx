@@ -1,4 +1,4 @@
-import { useEffect, useState, type JSX } from 'react';
+import { memo, useEffect, useState, type JSX } from 'react';
 
 import type { PipelinePlanHistoryItem } from '../chatTypes';
 import { MarkdownDisplay } from './MarkdownDisplay';
@@ -10,7 +10,7 @@ export interface PipelinePlanBlockProps {
   onReject: () => void;
 }
 
-export function PipelinePlanBlock({
+function PipelinePlanBlockComponent({
   item,
   onApprove,
   onReject,
@@ -76,4 +76,6 @@ export function PipelinePlanBlock({
     </div>
   );
 }
+
+export const PipelinePlanBlock = memo(PipelinePlanBlockComponent);
 

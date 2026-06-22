@@ -9,12 +9,6 @@ import { fetchRegistry } from '../config/RegistryClient';
 import { classifyAgentError } from '../core/AgentError';
 import { SessionHistoryStore } from '../core/SessionHistoryStore';
 import { SessionManager } from '../core/SessionManager';
-import { AcpAgentRunner } from '../pipeline/AcpAgentRunner';
-import { isSandboxEnabled } from '../sandbox/SandboxConfig';
-import type { SandboxContext } from '../sandbox/SandboxContext';
-import type { SandboxPromotionPanel } from '../sandbox/SandboxPromotionPanel';
-import type { SandboxService } from '../sandbox/SandboxService';
-import { resolveWorkspaceIdentity } from '../core/WorkspaceIdentity';
 import { ChatWebviewProvider } from '../ui/ChatWebviewProvider';
 import { ChatEditorPanelManager } from '../ui/ChatEditorPanelManager';
 import { SessionTreeProvider } from '../ui/SessionTreeProvider';
@@ -26,7 +20,6 @@ import { SandcastlePromotionUi } from '../sandcastle/SandcastlePromotionUi';
 
 export const EDITOR_CONTEXT_LINK_STATE_KEY = 'acp.editorContextLinked';
 export const PIPELINE_ENABLED_CONTEXT_KEY = 'acp.pipelineEnabled';
-export const SANDBOX_ENABLED_CONTEXT_KEY = 'acp.sandboxEnabled';
 
 const FOCUS_CHAT_COMMAND = 'acp-chat.focus';
 
@@ -37,8 +30,6 @@ interface RegisterCommandsDependencies {
   chatWebviewProvider: ChatWebviewProvider;
   chatEditorPanelManager: ChatEditorPanelManager;
   historyStore: SessionHistoryStore;
-  sandboxService: SandboxService;
-  sandboxPromotionPanel: SandboxPromotionPanel;
   pipelineService: PipelineService;
 }
 
@@ -49,8 +40,6 @@ export function registerCommands({
   chatWebviewProvider,
   chatEditorPanelManager,
   historyStore,
-  sandboxService,
-  sandboxPromotionPanel,
   pipelineService,
 }: RegisterCommandsDependencies): vscode.Disposable[] {
   const resolveAgentName = async (agentNameOrItem?: string | any): Promise<string | undefined> => {
@@ -320,31 +309,6 @@ export function registerCommands({
     await setPipelineEnabled(false);
   });
 
-  const setSandboxEnabled = async (enabled: boolean): Promise<void> => {
-    const config = vscode.workspace.getConfiguration('acp.sandbox');
-    await config.update('enabled', enabled, vscode.ConfigurationTarget.Workspace);
-    await vscode.commands.executeCommand('setContext', SANDBOX_ENABLED_CONTEXT_KEY, enabled);
-    vscode.window.showInformationMessage(
-      enabled
-        ? 'ACP sandbox enabled. Workspace-changing runs use isolated git worktrees.'
-        : 'ACP sandbox disabled. Agents write directly to the workspace.',
-    );
-  };
-
-  const enableSandboxCmd = vscode.commands.registerCommand('acp.enableSandbox', async () => {
-    await setSandboxEnabled(true);
-  });
-
-  const disableSandboxCmd = vscode.commands.registerCommand('acp.disableSandbox', async () => {
-    await setSandboxEnabled(false);
-  });
-
-  const toggleSandboxCmd = vscode.commands.registerCommand('acp.toggleSandbox', async () => {
-    const config = vscode.workspace.getConfiguration('acp.sandbox');
-    const enabled = config.get<boolean>('enabled', false);
-    await setSandboxEnabled(!enabled);
-  });
-
   const refreshSessionsCmd = vscode.commands.registerCommand('acp.refreshSessions', (arg?: any) => {
     const agentName = typeof arg === 'string' ? arg : arg?.agentName;
     sessionTreeProvider.invalidate(agentName);
@@ -541,88 +505,6 @@ export function registerCommands({
     }
   });
 
-  const runInSandboxCmd = vscode.commands.registerCommand('acp.runInSandbox', async () => {
-    if (!isSandboxEnabled()) {
-      const enable = await vscode.window.showInformationMessage(
-        'Sandbox mode is disabled. Enable acp.sandbox.enabled to run agents in an isolated worktree.',
-        'Open Settings',
-      );
-      if (enable === 'Open Settings') {
-        await vscode.commands.executeCommand('workbench.action.openSettings', 'acp.sandbox.enabled');
-      }
-      return;
-    }
-
-    const agentName = sessionManager.getActiveAgentName() ?? await resolveAgentName();
-    if (!agentName) {
-      return;
-    }
-
-    const prompt = await vscode.window.showInputBox({
-      title: 'Run in Sandbox',
-      prompt: `Enter a prompt for ${agentName}`,
-      placeHolder: 'Describe the change to make in the sandbox worktree...',
-    });
-    if (!prompt?.trim()) {
-      return;
-    }
-
-    const workspaceCwd = () => resolveWorkspaceIdentity().cwd;
-    let sandbox: SandboxContext | undefined;
-    try {
-      sandbox = await sandboxService.create(workspaceCwd());
-      const runner = new AcpAgentRunner(workspaceCwd);
-      await vscode.window.withProgress(
-        {
-          location: vscode.ProgressLocation.Notification,
-          title: `Running ${agentName} in sandbox...`,
-          cancellable: false,
-        },
-        async () => runner.run(agentName, prompt.trim(), { sandbox }),
-      );
-      await sandboxPromotionPanel.show(sandbox);
-    } catch (error) {
-      if (sandbox) {
-        await sandboxService.destroy(sandbox);
-      }
-      await showClassifiedAgentError('Sandbox run failed', error);
-    }
-  });
-
-  const sandboxPromoteCmd = vscode.commands.registerCommand('acp.sandbox.promote', async () => {
-    const sandbox = sandboxService.getRegistry().getActive();
-    if (!sandbox) {
-      vscode.window.showWarningMessage('No active sandbox to promote.');
-      return;
-    }
-    await sandboxPromotionPanel.show(sandbox);
-  });
-
-  const sandboxDiscardCmd = vscode.commands.registerCommand('acp.sandbox.discard', async () => {
-    const sandbox = sandboxService.getRegistry().getActive();
-    if (!sandbox) {
-      vscode.window.showWarningMessage('No active sandbox to discard.');
-      return;
-    }
-    const confirm = await vscode.window.showWarningMessage(
-      `Discard sandbox ${sandbox.id}?`,
-      { modal: true },
-      'Discard',
-    );
-    if (confirm !== 'Discard') {
-      return;
-    }
-    await sandboxService.destroy(sandbox);
-    vscode.window.showInformationMessage(`Sandbox ${sandbox.id} discarded.`);
-  });
-
-  const sandboxCleanupCmd = vscode.commands.registerCommand('acp.sandbox.cleanup', async () => {
-    const removed = await sandboxService.cleanupStale();
-    vscode.window.showInformationMessage(
-      removed === 0 ? 'No stale sandboxes to clean up.' : `Removed ${removed} stale sandbox(es).`,
-    );
-  });
-
   const resolveActiveSandcastle = () => {
     const activeSession = sessionManager.getActiveSession();
     if (!activeSession) {
@@ -742,9 +624,6 @@ export function registerCommands({
     refreshAgentsCmd,
     enablePipelineAgentsCmd,
     disablePipelineAgentsCmd,
-    enableSandboxCmd,
-    disableSandboxCmd,
-    toggleSandboxCmd,
     refreshSessionsCmd,
     openSessionCmd,
     openSessionWithCurrentContextCmd,
@@ -756,10 +635,6 @@ export function registerCommands({
     enableEditorContextLinkCmd,
     disableEditorContextLinkCmd,
     browseRegistryCmd,
-    runInSandboxCmd,
-    sandboxPromoteCmd,
-    sandboxDiscardCmd,
-    sandboxCleanupCmd,
     sandcastleShowDiffCmd,
     sandcastleApplyCmd,
     sandcastleRejectCmd,

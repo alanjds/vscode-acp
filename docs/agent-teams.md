@@ -217,11 +217,11 @@ Each team compiles to a pipeline v2 with these steps:
 4. **review**: Runs the reviewer role to analyze the implementation
 5. **test** (if tester role exists): Runs the tester role for additional validation
 
-### Side Effects and Sandbox
+### Side Effects and Sandcastle
 
 - **Only `implementer` can modify the workspace** (`sideEffects: workspace`)
-- If `acp.sandbox.enabled` is `true`, the implementer runs in an isolated git worktree
-- The promotion gate applies: you can View Diff, Apply, or Reject changes
+- For isolated edits, assign a **Sandcastle** agent to the implementer role — the promotion gate (View Diff / Apply / Reject) runs automatically after the step
+- Native agents write directly to the workspace
 - All other roles (`planner`, `reviewer`, `tester`) are read-only (`sideEffects: none`)
 
 ### Approval Flow
@@ -300,8 +300,8 @@ All steps completed. Changes ready for promotion.
 |---------|---------|-------------|
 | `acp.pipeline.enabled` | `true` | Must be enabled for teams to appear as virtual agents |
 | `acp.instructions.maxBytes` | `262144` | Maximum size in bytes for instruction markdown files |
-| `acp.sandbox.enabled` | `false` | When enabled, implementer runs in isolated git worktrees |
-| `acp.sandbox.directory` | `.acp/sandboxes` | Where sandbox worktrees are created |
+
+For isolated implementer runs, assign a Sandcastle agent in the team YAML instead of enabling a separate sandbox setting.
 
 ## Complete Example
 
@@ -496,4 +496,4 @@ The team compiler generates the equivalent pipeline automatically.
 
 - [Pipeline v2 DSL](./pipeline-a2a.md) — The underlying orchestration layer
 - [ADR-0012: Agent Teams Architecture](../adr/0012-agent-teams.md) — Design decisions and rationale
-- [Agent Sandbox](../adr/0011-agent-sandbox-worktree.md) — How workspace isolation works
+- [Sandcastle architecture](./sandcastle-architecture.md) — Docker isolation and promotion workflow

@@ -44,7 +44,7 @@ Besoins utilisateurs clés identifiés :
 5. **Intégration avec l'infrastructure existante** :
    - Les équipes chargées par `AgentTeamCatalog` aux côtés des fichiers pipeline
    - Les équipes apparaissent comme des agents virtuels dans l'arbre Agents via `PipelineService`
-   - Sandbox automatiquement appliqué à implementer lorsque `acp.sandbox.enabled` est true
+   - Passerelle de promotion Sandcastle affichée automatiquement quand l'implementer utilise un agent Sandcastle
    - Taille des fichiers d'instructions limitée par le paramètre `acp.instructions.maxBytes`
 
 6. **Règles de validation** :
@@ -151,4 +151,4 @@ Besoins utilisateurs clés identifiés :
 ## ADRs liés
 
 - [ADR-0005 : Pipeline A2A ACP](../adr/0005-a2a-acp-pipeline.md) — Conception originale du pipeline v2
-- [ADR-0011 : Sandbox agent via git worktree](../adr/0011-sandbox-worktree.md) — Intégration sandbox utilisée par les équipes
+- [ADR-0013 : Bridge ACP Sandcastle](../docs/adr/0013-acp-sandcastle-bridge.md) — Isolation Docker utilisée par les équipes pour les étapes workspace

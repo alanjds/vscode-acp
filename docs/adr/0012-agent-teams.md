@@ -44,7 +44,7 @@ Key user needs identified:
 5. **Integration with existing infrastructure**:
    - Teams loaded by `AgentTeamCatalog` alongside pipeline files
    - Teams appear as virtual agents in the Agents tree via `PipelineService`
-   - Sandbox automatically applied to implementer when `acp.sandbox.enabled` is true
+   - Sandcastle promotion gate shown automatically when the implementer uses a Sandcastle agent
    - Instruction file size limited by `acp.instructions.maxBytes` setting
 
 6. **Validation rules**:
@@ -151,4 +151,4 @@ Key user needs identified:
 ## Related ADRs
 
 - [ADR-0005: A2A ACP Pipeline](0005-a2a-acp-pipeline.md) — Original pipeline v2 design
-- [ADR-0011: Agent Sandbox via Git Worktree](0011-agent-sandbox-worktree.md) — Sandbox integration used by teams
+- [Sandcastle architecture](0013-acp-sandcastle-bridge.md) — Docker isolation used by teams for workspace-changing steps

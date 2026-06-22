@@ -1,6 +1,6 @@
 # ADR-0011: Agent sandbox via git worktree
 
-**Status**: Accepted (legacy; scheduled for removal after ADR-0013 smoke-test gate)
+**Status**: Superseded by [ADR-0013](0013-acp-sandcastle-bridge.md) — removed from the extension
 
 ## Context
 

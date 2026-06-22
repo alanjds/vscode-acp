@@ -217,11 +217,11 @@ Chaque équipe se compile en un pipeline v2 avec ces étapes :
 4. **review** : Exécute le rôle reviewer pour analyser l'implémentation
 5. **test** (si le rôle tester existe) : Exécute le rôle tester pour une validation supplémentaire
 
-### Effets secondaires et Sandbox
+### Effets secondaires et Sandcastle
 
 - **Seul `implementer` peut modifier le workspace** (`sideEffects: workspace`)
-- Si `acp.sandbox.enabled` est `true`, l'implementer s'exécute dans un git worktree isolé
-- La passerelle de promotion s'applique : vous pouvez Voir le Diff, Appliquer ou Rejeter les modifications
+- Pour des modifications isolées, assignez un agent **Sandcastle** au rôle implementer — la passerelle de promotion (Voir le Diff / Appliquer / Rejeter) s'ouvre automatiquement après l'étape
+- Les agents natifs écrivent directement dans le workspace
 - Tous les autres rôles (`planner`, `reviewer`, `tester`) sont en lecture seule (`sideEffects: none`)
 
 ### Flux d'approbation
@@ -300,8 +300,8 @@ Toutes les étapes terminées. Modifications prêtes pour la promotion.
 |-----------|------------------|-------------|
 | `acp.pipeline.enabled` | `true` | Doit être activé pour que les équipes apparaissent comme des agents virtuels |
 | `acp.instructions.maxBytes` | `262144` | Taille maximale en octets pour les fichiers d'instructions Markdown |
-| `acp.sandbox.enabled` | `false` | Lorsque activé, l'implementer s'exécute dans des git worktrees isolés |
-| `acp.sandbox.directory` | `.acp/sandboxes` | Où les worktrees de sandbox sont créés |
+
+Pour isoler l'implementer, assignez un agent Sandcastle dans le YAML de l'équipe.
 
 ## Exemple complet
 
@@ -496,4 +496,4 @@ Le compilateur d'équipe génère automatiquement le pipeline équivalent.
 
 - [DSL Pipeline v2](./pipelines-langgraph.md) — La couche d'orchestration sous-jacente
 - [ADR-0012 : Architecture des Équipes d'agents](../adr/0012-equipes-agents.md) — Décisions de conception et justification
-- [Sandbox Agent](../adr/0011-sandbox-worktree.md) — Fonctionnement de l'isolement du workspace
+- [Architecture Sandcastle](../docs/sandcastle-architecture.md) — Isolation Docker et workflow de promotion

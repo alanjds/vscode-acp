@@ -58,10 +58,14 @@ export class SandcastlePromotionUi {
     void vscode.window.showInformationMessage(String(result.message ?? 'Sandcastle changes rejected.'));
   }
 
-  async show(connection: SandcastleConnection, sessionId: string): Promise<'applied' | 'rejected' | 'cancelled'> {
+  async discard(connection: SandcastleConnection, sessionId: string): Promise<void> {
+    await connection.extMethod('sandcastle/reject', { sessionId });
+  }
+
+  async promote(connection: SandcastleConnection, sessionId: string): Promise<'applied' | 'rejected' | 'cancelled'> {
     const preview = await this.preview(connection, sessionId);
     if (preview.filesChanged === 0) {
-      await this.reject(connection, sessionId);
+      await this.discard(connection, sessionId);
       void vscode.window.showInformationMessage('Sandcastle run completed with no file changes.');
       return 'rejected';
     }

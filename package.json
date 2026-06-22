@@ -174,37 +174,6 @@
         "icon": "$(debug-pause)"
       },
       {
-        "command": "acp.enableSandbox",
-        "title": "ACP: Enable Sandbox",
-        "icon": "$(beaker)"
-      },
-      {
-        "command": "acp.disableSandbox",
-        "title": "ACP: Disable Sandbox",
-        "icon": "$(beaker)"
-      },
-      {
-        "command": "acp.toggleSandbox",
-        "title": "ACP: Toggle Sandbox"
-      },
-      {
-        "command": "acp.runInSandbox",
-        "title": "ACP: Run in Sandbox",
-        "icon": "$(beaker)"
-      },
-      {
-        "command": "acp.sandbox.promote",
-        "title": "ACP: Promote Sandbox Changes"
-      },
-      {
-        "command": "acp.sandbox.discard",
-        "title": "ACP: Discard Sandbox"
-      },
-      {
-        "command": "acp.sandbox.cleanup",
-        "title": "ACP: Cleanup Stale Sandboxes"
-      },
-      {
         "command": "acp.sandcastle.showDiff",
         "title": "ACP: Sandcastle Show Diff"
       },
@@ -296,17 +265,6 @@
         {
           "command": "acp.disablePipelineAgents",
           "when": "acp.pipelineEnabled"
-        },
-        {
-          "command": "acp.enableSandbox",
-          "when": "!acp.sandboxEnabled"
-        },
-        {
-          "command": "acp.disableSandbox",
-          "when": "acp.sandboxEnabled"
-        },
-        {
-          "command": "acp.toggleSandbox"
         }
       ],
       "view/title": [
@@ -331,16 +289,6 @@
           "group": "navigation@2"
         },
         {
-          "command": "acp.enableSandbox",
-          "when": "view == acp-sessions && !acp.sandboxEnabled",
-          "group": "navigation@4"
-        },
-        {
-          "command": "acp.disableSandbox",
-          "when": "view == acp-sessions && acp.sandboxEnabled",
-          "group": "navigation@4"
-        },
-        {
           "command": "acp.browseRegistry",
           "when": "view == acp-sessions"
         },
@@ -363,16 +311,6 @@
           "command": "acp.disableEditorContextLink",
           "when": "view == acp-chat && acp.editorContextLinked",
           "group": "navigation@3"
-        },
-        {
-          "command": "acp.enableSandbox",
-          "when": "view == acp-chat && !acp.sandboxEnabled",
-          "group": "navigation@2"
-        },
-        {
-          "command": "acp.disableSandbox",
-          "when": "view == acp-chat && acp.sandboxEnabled",
-          "group": "navigation@2"
         },
         {
           "command": "acp.cancelTurn",
@@ -623,54 +561,6 @@
           "type": "number",
           "default": 262144,
           "description": "Maximum size in bytes for Markdown instruction files referenced by agent teams."
-        },
-        "acp.sandbox.enabled": {
-          "type": "boolean",
-          "default": false,
-          "description": "Run pipeline workspace-changing steps inside isolated git worktrees with a promotion gate."
-        },
-        "acp.sandbox.directory": {
-          "type": "string",
-          "default": ".acp/sandboxes",
-          "description": "Directory (relative to workspace) where sandbox worktrees are created."
-        },
-        "acp.sandbox.baseBranch": {
-          "type": "string",
-          "default": "",
-          "description": "Optional git ref used as the sandbox base. Empty uses current HEAD."
-        },
-        "acp.sandbox.autoCleanupOnReject": {
-          "type": "boolean",
-          "default": true,
-          "description": "Remove the sandbox worktree automatically when changes are rejected."
-        },
-        "acp.sandbox.staleTtlMs": {
-          "type": "number",
-          "default": 86400000,
-          "description": "Maximum age in milliseconds before a stale sandbox is eligible for cleanup."
-        },
-        "acp.sandbox.promotion.lintCommand": {
-          "type": "string",
-          "default": "",
-          "description": "Optional shell command run in the sandbox worktree before promotion (for example npm run lint)."
-        },
-        "acp.sandbox.promotion.testCommand": {
-          "type": "string",
-          "default": "",
-          "description": "Optional shell command run in the sandbox worktree before promotion (for example npm test)."
-        },
-        "acp.sandbox.promotion.requireChecksPass": {
-          "type": "boolean",
-          "default": false,
-          "description": "Require lint/test checks to pass before applying sandbox changes."
-        },
-        "acp.sandbox.network.allowlist": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "default": [],
-          "description": "Optional host allowlist for sandbox network policy (application-level in v1)."
         }
       }
     }

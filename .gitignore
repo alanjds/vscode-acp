@@ -6,7 +6,6 @@ out/
 .vscode-test/
 .DS_Store
 *.tsbuildinfo
-.acp/sandboxes/
 .sandcastle/.env
 .sandcastle/logs/
 .sandcastle/patches/

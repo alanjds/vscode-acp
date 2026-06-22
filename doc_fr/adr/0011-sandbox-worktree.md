@@ -1,6 +1,6 @@
 # ADR-0011 : Sandbox agent via git worktree
 
-**Statut** : Accepté
+**Statut** : Remplacé par [ADR-0013](../docs/adr/0013-acp-sandcastle-bridge.md) — retiré de l'extension
 
 ## Contexte
 

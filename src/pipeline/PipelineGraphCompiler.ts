@@ -40,14 +40,11 @@ export interface PipelineGraphState {
 
 export type PipelineExecutorKind = string;
 
-import type { SandboxContext } from '../sandbox/SandboxContext';
-
 export type AcpRunCallback = (
   kind: PipelineExecutorKind,
   promptText: string,
   onSessionUpdate?: (update: SessionNotification) => void,
   signal?: AbortSignal,
-  sandbox?: SandboxContext,
 ) => Promise<string>;
 
 export interface PipelineGraphCompilerHooks {

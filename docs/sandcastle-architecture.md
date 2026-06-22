@@ -49,4 +49,4 @@ The VS Code commands `ACP: Sandcastle Show Diff`, `Apply Changes`, and `Reject C
 - Docker's default bridge network is used because both providers need outbound API access; no egress allowlist is enforced yet.
 - Provider keys are loaded from `.sandcastle/.env` and must not appear in settings, logs, or commits.
 - Non-Sandcastle ACP agents still execute on the host and display a warning.
-- Native Codex session resume is deferred because Sandcastle 0.6.4 does not expose it on reusable sandbox runs.
+- Native Codex session resume is deferred because Sandcastle 0.6.4 does not expose it on reusable sandbox runs. See [ADR-0014](adr/0014-sandcastle-bounded-prompt-history.md).

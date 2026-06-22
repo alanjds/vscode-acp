@@ -11,16 +11,12 @@ import {
   type PipelinePrimitiveDefinition,
 } from '../config/PipelineCatalog';
 import { getTeamEntryForAgent } from '../config/AgentTeamCatalog';
-import { defaultGitCommandRunner } from '../sandbox/GitCommandRunner';
+import { defaultGitCommandRunner } from '../git/GitCommandRunner';
 import { AcpAgentRunner } from './AcpAgentRunner';
 import type { CompiledTeamMetadata } from '../pipeline/AgentTeamCompiler';
 import type { TeamRoleId } from '../config/AgentTeamConfig';
 import { assertSingleProposedPlan } from './ProposedPlan';
 import { isRunAbortedError } from './RunAbortedError';
-import { isSandboxEnabled } from '../sandbox/SandboxConfig';
-import { runSandboxedAcpAgent } from '../sandbox/sandboxedAgentRun';
-import type { SandboxPromotionPanel } from '../sandbox/SandboxPromotionPanel';
-import type { SandboxService } from '../sandbox/SandboxService';
 import {
   type AcpRunCallback,
   type CompiledPipelineGraph,
@@ -102,9 +98,6 @@ export interface PipelineServiceDependencies {
   getPipelineDefinitionForAgent?: (agentName: string) => PipelineDefinition | null;
   getAgentConfigs?: () => Record<string, unknown>;
   runAcpAgent?: AcpRunCallback;
-  sandboxService?: SandboxService;
-  sandboxPromotionPanel?: SandboxPromotionPanel;
-  isSandboxEnabled?: () => boolean;
 }
 
 export class PipelineService extends EventEmitter {
@@ -485,36 +478,19 @@ export class PipelineService extends EventEmitter {
     const primitive = this.findPrimitiveForExecutorKind(state.pipeline, kind);
 
     if (this.dependencies.runAcpAgent) {
-      return runSandboxedAcpAgent({
-        primitive,
-        workspaceCwd: this.workspaceCwd(),
-        agentName: primitive.agent,
+      return this.dependencies.runAcpAgent(
+        kind,
         promptText,
-        signal: state.abortController.signal,
         onSessionUpdate,
-        sandboxService: this.dependencies.sandboxService,
-        sandboxPromotionPanel: this.dependencies.sandboxPromotionPanel,
-        isSandboxEnabled: this.dependencies.isSandboxEnabled ?? isSandboxEnabled,
-        runRunner: async (_cwd, sandbox) => this.dependencies.runAcpAgent!(
-          kind,
-          promptText,
-          onSessionUpdate,
-          state.abortController.signal,
-          sandbox,
-        ),
-      });
+        state.abortController.signal,
+      );
     }
 
-    return runSandboxedAcpAgent({
-      primitive,
-      workspaceCwd: this.workspaceCwd(),
-      agentName: primitive.agent,
-      promptText,
-      signal: state.abortController.signal,
+    const runner = new AcpAgentRunner(() => this.workspaceCwd());
+    return runner.run(primitive.agent, promptText, {
       onSessionUpdate,
-      sandboxService: this.dependencies.sandboxService,
-      sandboxPromotionPanel: this.dependencies.sandboxPromotionPanel,
-      isSandboxEnabled: this.dependencies.isSandboxEnabled ?? isSandboxEnabled,
+      signal: state.abortController.signal,
+      sideEffects: primitive.sideEffects,
     });
   }
 

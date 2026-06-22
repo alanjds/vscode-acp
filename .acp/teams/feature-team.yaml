@@ -7,10 +7,10 @@ orchestrator:
   agent: Vibe
 roles:
   planner:
-    agent: Codex CLI
+    agent: Cursor CLI
     instructions: .acp/agents/planner.md
   implementer:
-    agent: Cursor CLI
+    agent: Cursor Sandcastle
     instructions: .acp/agents/implementer.md
   reviewer:
     agent: Cursor CLI

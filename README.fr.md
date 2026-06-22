@@ -459,9 +459,6 @@ La communication avec les agents utilise ACP (JSON-RPC 2.0 sur stdio).
 - [Agent Client Protocol](https://agentclientprotocol.com/)
 - [Dépôt GitHub](https://github.com/maurice30120/vscode-acp)
 
-## Divers
-
-- [Un poème sur le code](doc_fr/poeme-sur-le-code.md)
 
 ## Licence
 

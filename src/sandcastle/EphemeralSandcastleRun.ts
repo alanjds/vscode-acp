@@ -42,5 +42,9 @@ export async function runEphemeralSandcastleAgent(
 ): Promise<EphemeralSandcastleRunResult> {
   const { sideEffects, ...runInput } = input;
   const run = await runEphemeralRun(runInput);
-  return finishEphemeralSandcastleRun(promotion, run, { sideEffects });
+  try {
+    return await finishEphemeralSandcastleRun(promotion, run, { sideEffects });
+  } finally {
+    run.sandbox?.dispose();
+  }
 }

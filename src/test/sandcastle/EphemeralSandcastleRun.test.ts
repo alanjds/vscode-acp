@@ -26,6 +26,9 @@ suite('EphemeralSandcastleRun', () => {
       sandbox: {
         connection: { extMethod: async () => ({}) },
         sessionId: 'sandbox-1',
+        dispose: () => {
+          calls.push('dispose');
+        },
       },
     };
 
@@ -33,5 +36,32 @@ suite('EphemeralSandcastleRun', () => {
 
     assert.deepStrictEqual(result, { text: 'done', promotion: undefined });
     assert.deepStrictEqual(calls, ['discard']);
+  });
+
+  test('runEphemeralSandcastleAgent disposes sandbox after promotion', async () => {
+    const order: string[] = [];
+    const promotion = new SandcastlePromotion({} as any, {
+      discard: async () => {
+        order.push('promotion');
+      },
+    } as any);
+    const run: EphemeralRunResult = {
+      text: 'done',
+      sandbox: {
+        connection: { extMethod: async () => ({}) },
+        sessionId: 'sandbox-1',
+        dispose: () => {
+          order.push('dispose');
+        },
+      },
+    };
+
+    try {
+      await finishEphemeralSandcastleRun(promotion, run, { sideEffects: 'none' });
+    } finally {
+      run.sandbox?.dispose();
+    }
+
+    assert.deepStrictEqual(order, ['promotion', 'dispose']);
   });
 });

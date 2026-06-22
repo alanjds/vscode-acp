@@ -17,6 +17,8 @@ export interface EphemeralRunSandboxContext {
     extMethod(method: string, params: Record<string, unknown>): Promise<Record<string, unknown>>;
   };
   sessionId: string;
+  /** Tear down the bridge process after Sandcastle promotion finishes. */
+  dispose: () => void;
 }
 
 export interface EphemeralRunOptions {
@@ -98,6 +100,14 @@ export async function runEphemeralRun(input: EphemeralRunInput): Promise<Ephemer
 
   sessionUpdateHandler.addListener(listener);
 
+  const disposeRun = (): void => {
+    agentManager.killAll();
+    connectionManager.dispose();
+    sessionUpdateHandler.dispose();
+  };
+
+  let deferCleanup = false;
+
   try {
     throwIfAborted();
     log(`EphemeralRun: starting "${agentName}"`);
@@ -153,9 +163,11 @@ export async function runEphemeralRun(input: EphemeralRunInput): Promise<Ephemer
     };
 
     if (isSandcastleAgentConfig(config)) {
+      deferCleanup = true;
       result.sandbox = {
         connection: connInfo.connection,
         sessionId,
+        dispose: disposeRun,
       };
     }
 
@@ -163,9 +175,9 @@ export async function runEphemeralRun(input: EphemeralRunInput): Promise<Ephemer
   } finally {
     signal?.removeEventListener('abort', onAbort);
     sessionUpdateHandler.removeListener(listener);
-    agentManager.killAll();
-    connectionManager.dispose();
-    sessionUpdateHandler.dispose();
+    if (!deferCleanup) {
+      disposeRun();
+    }
   }
 }
 

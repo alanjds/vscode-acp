@@ -1,10 +1,35 @@
+import * as vscode from 'vscode';
+
 import { getAgentConfig, isSandcastleAgentConfig } from '../config/AgentConfig';
 import type { SessionManager } from '../core/SessionManager';
-import { SandcastlePromotionUi } from './SandcastlePromotionUi';
+import {
+  SandcastlePromotionUi,
+  type SandcastlePreview,
+  type SandcastlePromotionMode,
+  type SandcastlePromotionOutcome,
+} from './SandcastlePromotionUi';
+
+export type { SandcastlePromotionMode, SandcastlePromotionOutcome };
+
+export class SandcastleApplyError extends Error {
+  constructor() {
+    super('Sandcastle changes could not be applied.');
+  }
+}
+
+interface SandcastleConnection {
+  extMethod(method: string, params: Record<string, unknown>): Promise<Record<string, unknown>>;
+}
+
+export interface FinishEphemeralRunOptions {
+  sideEffects?: 'none' | 'workspace';
+}
+
+type PromotionChoice = 'diff' | 'apply' | 'reject';
 
 /**
  * Façade de promotion Sandcastle côté extension VS Code.
- * Résout la session ACP active, valide qu'elle est gérée par Sandcastle, puis délègue à l'UI (diff, apply, reject).
+ * Résout la session ACP active pour les commandes palette ; orchestre Promotion après EphemeralRun.
  */
 export class SandcastlePromotion {
   constructor(
@@ -14,9 +39,6 @@ export class SandcastlePromotion {
 
   /**
    * Affiche le diff des changements du sandbox actif dans un document VS Code.
-   *
-   * @returns Promise résolue après ouverture du document diff.
-   * @throws Si aucune session active, agent non Sandcastle, ou connexion indisponible.
    */
   async showDiff(): Promise<void> {
     const { connection, sessionId } = this.resolveActiveSandbox();
@@ -25,9 +47,6 @@ export class SandcastlePromotion {
 
   /**
    * Applique les changements du sandbox actif sur le workspace hôte.
-   *
-   * @returns Promise résolue après tentative d'apply via le bridge ACP.
-   * @throws Si la session active n'est pas une session Sandcastle valide.
    */
   async apply(): Promise<void> {
     const { connection, sessionId } = this.resolveActiveSandbox();
@@ -36,9 +55,6 @@ export class SandcastlePromotion {
 
   /**
    * Rejette et détruit les changements du sandbox de la session active.
-   *
-   * @returns Promise résolue après appel `sandcastle/reject` sur le bridge.
-   * @throws Si la résolution de session active échoue.
    */
   async reject(): Promise<void> {
     const { connection, sessionId } = this.resolveActiveSandbox();
@@ -46,11 +62,105 @@ export class SandcastlePromotion {
   }
 
   /**
-   * Détermine la session Sandcastle active et sa connexion ACP pour les commandes de promotion.
+   * Termine un EphemeralRun Sandcastle : discard silencieux ou gate Promotion selon sideEffects.
    *
-   * @returns Identifiant de session et connexion permettant les `extMethod` Sandcastle.
-   * @throws Si pas de session active, agent non Sandcastle, ou connexion manquante.
+   * @returns Outcome Promotion quand sideEffects vaut workspace ; sinon undefined après discard.
+   * @throws {@link SandcastleApplyError} Si apply échoue en mode autoApply ou après choix Apply.
    */
+  async finishEphemeralRun(
+    connection: SandcastleConnection,
+    sessionId: string,
+    options: FinishEphemeralRunOptions = {},
+  ): Promise<SandcastlePromotionOutcome | undefined> {
+    const sideEffects = options.sideEffects ?? 'none';
+    if (sideEffects !== 'workspace') {
+      await this.ui.discard(connection, sessionId);
+      return undefined;
+    }
+
+    const outcome = await this.promote(connection, sessionId);
+    if (outcome === 'cancelled') {
+      await this.ui.discard(connection, sessionId);
+    }
+    return outcome;
+  }
+
+  /**
+   * Exécute le flux Promotion post-run selon le mode configuré (ask, autoApply, autoReject).
+   */
+  async promote(connection: SandcastleConnection, sessionId: string): Promise<SandcastlePromotionOutcome> {
+    const preview = await this.ui.preview(connection, sessionId);
+    if (preview.filesChanged === 0) {
+      await this.ui.discard(connection, sessionId);
+      void vscode.window.showInformationMessage('Sandcastle run completed with no file changes.');
+      return 'no_changes';
+    }
+
+    const mode = this.getPromotionMode();
+    if (mode === 'autoApply') {
+      if (!(await this.ui.apply(connection, sessionId))) {
+        throw new SandcastleApplyError();
+      }
+      return 'applied';
+    }
+    if (mode === 'autoReject') {
+      await this.ui.reject(connection, sessionId);
+      return 'rejected';
+    }
+
+    return this.promptPromotionChoice(connection, sessionId, preview, true);
+  }
+
+  private getPromotionMode(): SandcastlePromotionMode {
+    const mode = vscode.workspace.getConfiguration('acp').get<string>('sandcastle.promotion', 'ask');
+    if (mode === 'autoApply' || mode === 'autoReject') {
+      return mode;
+    }
+    return 'ask';
+  }
+
+  private async promptPromotionChoice(
+    connection: SandcastleConnection,
+    sessionId: string,
+    preview: SandcastlePreview,
+    allowViewDiff: boolean,
+  ): Promise<SandcastlePromotionOutcome> {
+    const items: Array<vscode.QuickPickItem & { choice: PromotionChoice }> = [];
+    if (allowViewDiff) {
+      items.push({
+        label: '$(diff) View Diff',
+        description: `${preview.filesChanged} file(s) changed`,
+        choice: 'diff',
+      });
+    }
+    items.push(
+      { label: '$(check) Apply', description: 'Merge sandbox changes into the workspace', choice: 'apply' },
+      { label: '$(close) Reject', description: 'Discard sandbox changes', choice: 'reject' },
+    );
+
+    const selection = await vscode.window.showQuickPick(items, {
+      title: 'Sandcastle changes ready',
+      placeHolder: 'Promote sandbox changes to the workspace',
+      ignoreFocusOut: true,
+    });
+    if (!selection) {
+      return 'cancelled';
+    }
+
+    if (selection.choice === 'diff') {
+      await this.ui.showDiff(preview);
+      return this.promptPromotionChoice(connection, sessionId, preview, false);
+    }
+    if (selection.choice === 'reject') {
+      await this.ui.reject(connection, sessionId);
+      return 'rejected';
+    }
+    if (!(await this.ui.apply(connection, sessionId))) {
+      throw new SandcastleApplyError();
+    }
+    return 'applied';
+  }
+
   private resolveActiveSandbox() {
     const activeSession = this.sessions.getActiveSession();
     if (!activeSession) {

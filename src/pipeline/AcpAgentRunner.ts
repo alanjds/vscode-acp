@@ -6,9 +6,13 @@ import { AgentManager } from '../core/AgentManager';
 import { ConnectionInfo, ConnectionManager } from '../core/ConnectionManager';
 import { SessionUpdateHandler } from '../handlers/SessionUpdateHandler';
 import { getAgentConfig, isSandcastleAgentConfig } from '../config/AgentConfig';
-import { SandcastlePromotionUi, type SandcastlePromotionOutcome } from '../sandcastle/SandcastlePromotionUi';
+import { SandcastlePromotion, type SandcastlePromotionOutcome } from '../sandcastle/SandcastlePromotion';
 import { log, logError } from '../utils/Logger';
 import { RunAbortedError } from './RunAbortedError';
+import { buildPromptWithSkills } from '../skills/SkillsPromptBuilder';
+import { isSkillsEnabledAgent } from '../skills/SkillsConfig';
+import { prepareCursorSkillsSymlink } from '../skills/SkillsWorkspacePrep';
+import { SkillsCatalog } from '../skills/SkillsCatalog';
 
 export interface AcpAgentRunOptions {
   onSessionUpdate?: (update: SessionNotification) => void;
@@ -24,6 +28,7 @@ export interface AcpAgentRunResult {
 export class AcpAgentRunner {
   constructor(
     private readonly workspaceCwd: () => string,
+    private readonly sandcastlePromotion: SandcastlePromotion,
   ) {}
 
   async run(agentName: string, promptText: string, options: AcpAgentRunOptions = {}): Promise<AcpAgentRunResult> {
@@ -110,9 +115,24 @@ export class AcpAgentRunner {
       sessionId = sessionResponse.sessionId;
       throwIfAborted();
 
+      if (isSkillsEnabledAgent(agentName)) {
+        if (agentName === 'Cursor CLI') {
+          prepareCursorSkillsSymlink(cwd);
+        }
+        const skills = new SkillsCatalog(cwd).listSkills();
+        log(`Pipeline ACP runner: discovered ${skills.length} skill(s) for "${agentName}"`);
+      }
+
+      const skillsResult = buildPromptWithSkills({
+        agentName,
+        workspaceCwd: cwd,
+        text: promptText,
+        skillsBootstrapped: false,
+      });
+
       await connInfo.connection.prompt({
         sessionId,
-        prompt: [{ type: 'text', text: promptText }],
+        prompt: [{ type: 'text', text: skillsResult.text }],
       });
 
       if (options.signal?.aborted) {
@@ -121,15 +141,11 @@ export class AcpAgentRunner {
 
       let promotion: SandcastlePromotionOutcome | undefined;
       if (isSandcastleAgentConfig(config)) {
-        const promotionUi = new SandcastlePromotionUi();
-        if (options.sideEffects === 'workspace') {
-          promotion = await promotionUi.promote(connInfo.connection, sessionId);
-          if (promotion === 'cancelled') {
-            await promotionUi.discard(connInfo.connection, sessionId);
-          }
-        } else {
-          await promotionUi.discard(connInfo.connection, sessionId);
-        }
+        promotion = await this.sandcastlePromotion.finishEphemeralRun(
+          connInfo.connection,
+          sessionId,
+          { sideEffects: options.sideEffects },
+        );
       }
 
       return { text: collectedText.trim(), promotion };

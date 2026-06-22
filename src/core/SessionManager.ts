@@ -26,6 +26,10 @@ import { DiscussionContextHandler } from './DiscussionContextHandler';
 import { log, logError } from '../utils/Logger';
 import { sendEvent, sendError } from '../utils/TelemetryManager';
 import type { VirtualSessionRuntime } from './VirtualSessionRuntime';
+import { SkillsCatalog } from '../skills/SkillsCatalog';
+import { isSkillsEnabledAgent, isCursorCliAgent } from '../skills/SkillsConfig';
+import { buildPromptWithSkills } from '../skills/SkillsPromptBuilder';
+import { prepareCursorSkillsSymlink } from '../skills/SkillsWorkspacePrep';
 
 export type { AgentCapabilitySummary } from './SessionState';
 export type { SharedDiscussionContext } from './DiscussionContextHandler';
@@ -52,6 +56,8 @@ export interface SessionInfo {
   title?: string;
   /** Identifies sessions whose conversation lifecycle is owned by a plugin. */
   transport?: 'acp' | 'virtual';
+  /** Whether the skills catalog was injected for this session. */
+  skillsBootstrapped?: boolean;
 }
 
 export interface OpenSessionOptions {
@@ -215,6 +221,8 @@ export class SessionManager extends EventEmitter {
     try {
       const workspace = this.getWorkspaceIdentity();
       const workspaceCwd = workspace.cwd;
+
+      this.prepareSkillsForAgent(agentName, workspaceCwd);
 
       // Spawn the agent process in workspace cwd
       const agentInstance = this.agentManager.spawnAgent(agentName, config, workspaceCwd);
@@ -475,9 +483,8 @@ export class SessionManager extends EventEmitter {
       models: (sessionResponse as any).models ?? null,
       configOptions: (sessionResponse as any).configOptions ?? null,
       availableCommands: [],
+      skillsBootstrapped: false,
     };
-
-    // Register the session into the map *synchronously* with newSession's
     // resolution so that any session/update notifications dispatched by the
     // agent (e.g. available_commands_update) can be persisted onto it.
     this.sessionState.addSession(sessionInfo);
@@ -505,6 +512,20 @@ export class SessionManager extends EventEmitter {
     } catch {
       return undefined;
     }
+  }
+
+  private prepareSkillsForAgent(agentName: string, workspaceCwd: string): void {
+    if (!isSkillsEnabledAgent(agentName)) {
+      return;
+    }
+
+    if (isCursorCliAgent(agentName)) {
+      prepareCursorSkillsSymlink(workspaceCwd);
+    }
+
+    const catalog = new SkillsCatalog(workspaceCwd);
+    const skills = catalog.listSkills();
+    log(`Skills: discovered ${skills.length} skill(s) for agent "${agentName}"`);
   }
 
   // --- Session Updates ---
@@ -1062,8 +1083,19 @@ export class SessionManager extends EventEmitter {
 
     log(`sendPrompt: session=${sessionId}, textLength=${text.length}`);
 
+    const skillsResult = buildPromptWithSkills({
+      agentName: session.agentName,
+      workspaceCwd: session.cwd,
+      text: textWithSharedContext,
+      skillsBootstrapped: session.skillsBootstrapped === true,
+    });
+    if (skillsResult.skillsBootstrapped && !session.skillsBootstrapped) {
+      session.skillsBootstrapped = true;
+      this.sessionState.addSession(session);
+    }
+
     const prompt: ContentBlock[] = [
-      { type: 'text', text: textWithSharedContext },
+      { type: 'text', text: skillsResult.text },
     ];
 
     const response = await connInfo.connection.prompt({

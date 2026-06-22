@@ -284,6 +284,19 @@ Voir [doc_fr/agent-teams.md](doc_fr/agent-teams.md) · English: [docs/agent-team
 
 ---
 
+## Agent Skills
+
+L’extension peut brancher les skills du dépôt depuis `.agents/skills/` pour **Cursor CLI**, **Codex Sandcastle** et **Cursor Sandcastle**.
+
+- **Chat direct** — au premier message de session, l’extension injecte un catalogue `<available_skills>` (name + description des skills model-invoked). Les skills user-invoked restent accessibles via `/nom-du-skill`.
+- **Invocation `/skill`** — un message commençant par `/tdd` (par ex.) est développé en contenu complet du `SKILL.md` avant envoi à l’agent.
+- **Cursor CLI** — si `.cursor/skills` est absent, l’extension crée un symlink vers `.agents/skills` pour la découverte native du CLI.
+- **Sandcastle** — le dossier hôte `.agents/` est monté dans le conteneur pour que Codex/Cursor voient les skills même s’ils ne sont pas encore commités dans le worktree.
+
+Désactiver par agent : `"skills": false` dans l’entrée `acp.agents`.
+
+---
+
 ## Paramètres
 
 | Paramètre | Défaut | Description |
@@ -294,6 +307,10 @@ Voir [doc_fr/agent-teams.md](doc_fr/agent-teams.md) · English: [docs/agent-team
 | `acp.logTraffic` | `true` | Journaliser le JSON-RPC ACP dans le canal ACP Traffic |
 | `acp.pipeline.enabled` | `true` | Charger `.acp/pipelines/` et `.acp/teams/` |
 | `acp.instructions.maxBytes` | `262144` | Taille max des fichiers Markdown d’instructions d’équipe |
+| `acp.skills.enabled` | `true` | Activer le branchement des skills workspace |
+| `acp.skills.directory` | `.agents/skills` | Répertoire des skills à scanner |
+| `acp.skills.maxCatalogBytes` | `65536` | Taille max du catalogue injecté au 1er message |
+| `acp.skills.agents` | Cursor CLI, Codex/Cursor Sandcastle | Agents qui reçoivent les skills |
 
 ---
 

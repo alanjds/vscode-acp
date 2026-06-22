@@ -12,7 +12,8 @@ import {
 } from '../config/PipelineCatalog';
 import { getTeamEntryForAgent } from '../config/AgentTeamCatalog';
 import { defaultGitCommandRunner } from '../git/GitCommandRunner';
-import { SandcastleApplyError } from '../sandcastle/SandcastlePromotionUi';
+import { SandcastleApplyError } from '../sandcastle/SandcastlePromotion';
+import type { SandcastlePromotion } from '../sandcastle/SandcastlePromotion';
 import { AcpAgentRunner, type AcpAgentRunResult } from './AcpAgentRunner';
 import type { CompiledTeamMetadata } from '../pipeline/AgentTeamCompiler';
 import type { TeamRoleId } from '../config/AgentTeamConfig';
@@ -101,6 +102,7 @@ export interface PipelineServiceDependencies {
   getPipelineDefinitionForAgent?: (agentName: string) => PipelineDefinition | null;
   getAgentConfigs?: () => Record<string, unknown>;
   runAcpAgent?: (...args: Parameters<AcpRunCallback>) => Promise<string | AcpAgentRunResult>;
+  sandcastlePromotion?: SandcastlePromotion;
 }
 
 class SandcastlePromotionRejectedError extends Error {}
@@ -285,7 +287,7 @@ export class PipelineService extends EventEmitter {
     const abortController = new AbortController();
     this.reviewerRerunAbortController = abortController;
 
-    const runner = new AcpAgentRunner(this.workspaceCwd);
+    const runner = this.createAcpAgentRunner();
     const collected: SessionNotification[] = [];
     try {
       const result = await runner.run(reviewerRole, reviewerPrompt, {
@@ -527,13 +529,21 @@ export class PipelineService extends EventEmitter {
       return this.resolveAgentRunResult(result);
     }
 
-    const runner = new AcpAgentRunner(() => this.workspaceCwd());
+    const runner = this.createAcpAgentRunner();
     const result = await runner.run(primitive.agent, promptText, {
       onSessionUpdate,
       signal: state.abortController.signal,
       sideEffects: primitive.sideEffects,
     });
     return this.resolveAgentRunResult(result);
+  }
+
+  private createAcpAgentRunner(): AcpAgentRunner {
+    const promotion = this.dependencies.sandcastlePromotion;
+    if (!promotion) {
+      throw new Error('PipelineService requires sandcastlePromotion in dependencies.');
+    }
+    return new AcpAgentRunner(() => this.workspaceCwd(), promotion);
   }
 
   private resolveAgentRunResult(result: string | AcpAgentRunResult): string {

@@ -3,6 +3,7 @@ import * as vscode from 'vscode';
 import { getAgentNames } from '../../config/AgentConfig';
 import { isPipelineEnabled } from '../../config/PipelineConfig';
 import type { SessionManager } from '../../core/SessionManager';
+import type { SandcastlePromotion } from '../../sandcastle/SandcastlePromotion';
 import { serializeCompiledTeamPipeline } from '../../pipeline/AgentTeamCompiler';
 import { PipelineService } from '../../pipeline/PipelineService';
 import type { ChatWebviewController } from '../../ui/ChatWebviewController';
@@ -19,14 +20,15 @@ export interface OrchestrationPluginContext {
   sessionTreeProvider: SessionTreeProvider;
   chatController: ChatWebviewController;
   workspaceCwd: () => string;
+  sandcastlePromotion: SandcastlePromotion;
 }
 
 export class OrchestrationPlugin implements FeaturePlugin<OrchestrationPluginContext> {
   readonly id = 'orchestration';
 
   activate(context: OrchestrationPluginContext): vscode.Disposable {
-    const { sessionManager, sessionTreeProvider, chatController } = context;
-    const pipelineService = new PipelineService(context.workspaceCwd);
+    const { sessionManager, sessionTreeProvider, chatController, sandcastlePromotion } = context;
+    const pipelineService = new PipelineService(context.workspaceCwd, { sandcastlePromotion });
     const runtime = new OrchestrationRuntime(pipelineService, sessionManager, chatController);
     const disposables: vscode.Disposable[] = [];
     disposables.push(runtime.activate());

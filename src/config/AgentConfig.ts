@@ -20,6 +20,8 @@ export interface AcpAgentConfigEntry {
   use_idea_mcp?: boolean;
   /** Enable custom MCP server */
   use_custom_mcp?: boolean;
+  /** When false, disables `.agents/skills` wiring for this agent. */
+  skills?: boolean;
 }
 
 export interface SandcastleAgentConfigEntry {
@@ -29,6 +31,8 @@ export interface SandcastleAgentConfigEntry {
   displayName?: string;
   env?: Record<string, string>;
   effort?: 'low' | 'medium' | 'high' | 'xhigh';
+  /** When false, disables `.agents/skills` wiring for this agent. */
+  skills?: boolean;
 }
 
 export type AgentConfigEntry = AcpAgentConfigEntry | SandcastleAgentConfigEntry;

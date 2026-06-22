@@ -26,6 +26,7 @@ import { activateFeaturePlugins } from '../plugins/FeaturePluginRegistry';
 import { InlineChatPlugin } from '../plugins/inlineChat/InlineChatPlugin';
 import { OrchestrationPlugin } from '../plugins/orchestration/OrchestrationPlugin';
 import { SandcastlePlugin } from '../plugins/sandcastle/SandcastlePlugin';
+import { SandcastlePromotion } from '../sandcastle/SandcastlePromotion';
 
 class RuntimeResources implements vscode.Disposable {
   private readonly resources: vscode.Disposable[] = [];
@@ -213,6 +214,7 @@ function initializeExtensionRuntime(
     await debugWebviewPanel.open();
   });
   resources.add(openDebugSnapshotCmd);
+  const sandcastlePromotion = new SandcastlePromotion(sessionManager);
   const featurePlugins = activateFeaturePlugins([
     {
       plugin: new OrchestrationPlugin(),
@@ -221,15 +223,21 @@ function initializeExtensionRuntime(
         sessionTreeProvider,
         chatController,
         workspaceCwd: () => workspaceIdentity().cwd,
+        sandcastlePromotion,
       },
     },
     {
       plugin: new SandcastlePlugin(),
-      context: { sessionManager },
+      context: { sessionManager, sandcastlePromotion },
     },
     {
       plugin: new InlineChatPlugin(),
-      context: { extensionContext: context, sessionManager, workspaceIdentity },
+      context: {
+        extensionContext: context,
+        sessionManager,
+        workspaceIdentity,
+        sandcastlePromotion,
+      },
     },
   ]);
   resources.add(featurePlugins);

@@ -1,11 +1,13 @@
 import * as vscode from 'vscode';
 
 import type { SessionManager } from '../../core/SessionManager';
-import { SandcastlePromotion } from '../../sandcastle/SandcastlePromotion';
+import type { SandcastlePromotion } from '../../sandcastle/SandcastlePromotion';
+import { SandcastlePromotion as SandcastlePromotionImpl } from '../../sandcastle/SandcastlePromotion';
 import type { FeaturePlugin } from '../FeaturePlugin';
 
 export interface SandcastlePluginContext {
   sessionManager: SessionManager;
+  sandcastlePromotion?: SandcastlePromotion;
 }
 
 /**
@@ -21,8 +23,8 @@ export class SandcastlePlugin implements FeaturePlugin<SandcastlePluginContext> 
    * @param context - Contexte d'activation contenant le gestionnaire de sessions ACP.
    * @returns Disposable regroupant les abonnements aux commandes VS Code.
    */
-  activate({ sessionManager }: SandcastlePluginContext): vscode.Disposable {
-    const promotion = new SandcastlePromotion(sessionManager);
+  activate({ sessionManager, sandcastlePromotion }: SandcastlePluginContext): vscode.Disposable {
+    const promotion = sandcastlePromotion ?? new SandcastlePromotionImpl(sessionManager);
 
     const showDiff = vscode.commands.registerCommand('acp.sandcastle.showDiff', async () => {
       try {

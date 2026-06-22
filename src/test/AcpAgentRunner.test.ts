@@ -2,6 +2,7 @@ import * as assert from 'assert';
 import * as vscode from 'vscode';
 
 import { AcpAgentRunner } from '../pipeline/AcpAgentRunner';
+import { SandcastlePromotion } from '../sandcastle/SandcastlePromotion';
 import { isRunAbortedError, RunAbortedError } from '../pipeline/RunAbortedError';
 
 suite('RunAbortedError', () => {
@@ -33,7 +34,8 @@ suite('AcpAgentRunner abort', () => {
   });
 
   test('run throws RunAbortedError when signal is already aborted', async () => {
-    const runner = new AcpAgentRunner(() => '/repo');
+    const promotion = new SandcastlePromotion({} as any);
+    const runner = new AcpAgentRunner(() => '/repo', promotion);
     const controller = new AbortController();
     controller.abort();
 

@@ -571,6 +571,30 @@
           "type": "number",
           "default": 262144,
           "description": "Maximum size in bytes for Markdown instruction files referenced by agent teams."
+        },
+        "acp.skills.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable wiring of workspace skills from .agents/skills for configured ACP agents."
+        },
+        "acp.skills.directory": {
+          "type": "string",
+          "default": ".agents/skills",
+          "description": "Relative path from the workspace root where agent skills are discovered."
+        },
+        "acp.skills.maxCatalogBytes": {
+          "type": "number",
+          "default": 65536,
+          "description": "Maximum size in bytes for the injected skills catalog on the first prompt of a session."
+        },
+        "acp.skills.agents": {
+          "type": "array",
+          "default": [
+            "Cursor CLI",
+            "Codex Sandcastle",
+            "Cursor Sandcastle"
+          ],
+          "description": "ACP agent names that receive skills catalog injection and Sandcastle skill mounts."
         }
       }
     }

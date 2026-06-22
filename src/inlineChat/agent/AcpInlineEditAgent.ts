@@ -2,6 +2,7 @@ import { getAgentNames, getAgentConfig } from '../../config/AgentConfig';
 import { isPipelineVirtualAgentName } from '../../config/PipelineCatalog';
 import { SessionManager } from '../../core/SessionManager';
 import { WorkspaceIdentity } from '../../core/WorkspaceIdentity';
+import { SandcastlePromotion } from '../../sandcastle/SandcastlePromotion';
 import { AcpAgentRunner } from '../../pipeline/AcpAgentRunner';
 import { getSafeFenceMarker } from '../../ui/EditorContext';
 import { InlineEditRequest, InlineEditResult } from '../InlineChatTypes';
@@ -13,8 +14,9 @@ export class AcpInlineEditAgent implements InlineEditAgent {
   constructor(
     private readonly workspaceIdentity: () => WorkspaceIdentity,
     private readonly sessionManager: SessionManager,
+    sandcastlePromotion: SandcastlePromotion,
   ) {
-    this.runner = new AcpAgentRunner(() => this.workspaceIdentity().cwd);
+    this.runner = new AcpAgentRunner(() => this.workspaceIdentity().cwd, sandcastlePromotion);
   }
 
   async generateEdit(request: InlineEditRequest, options?: InlineEditOptions): Promise<InlineEditResult> {

@@ -1,6 +1,10 @@
 import * as vscode from 'vscode';
 
-import { getAgentNames } from '../config/AgentConfig';
+import {
+  getAgentConfig,
+  getAgentNames,
+  isSandcastleAgentConfig,
+} from '../config/AgentConfig';
 import { fetchRegistry } from '../config/RegistryClient';
 import { classifyAgentError } from '../core/AgentError';
 import { SessionHistoryStore } from '../core/SessionHistoryStore';
@@ -18,6 +22,7 @@ import { PipelineService } from '../pipeline/PipelineService';
 import { serializeCompiledTeamPipeline } from '../pipeline/AgentTeamCompiler';
 import { getOutputChannel, getTrafficChannel, logError } from '../utils/Logger';
 import { sendEvent } from '../utils/TelemetryManager';
+import { SandcastlePromotionUi } from '../sandcastle/SandcastlePromotionUi';
 
 export const EDITOR_CONTEXT_LINK_STATE_KEY = 'acp.editorContextLinked';
 export const PIPELINE_ENABLED_CONTEXT_KEY = 'acp.pipelineEnabled';
@@ -73,6 +78,13 @@ export function registerCommands({
   const connectAgentCmd = vscode.commands.registerCommand('acp.connectAgent', async (agentNameOrItem?: string | any) => {
     const agentName = await resolveAgentName(agentNameOrItem);
     if (!agentName) { return; }
+
+    const selectedConfig = getAgentConfig(agentName);
+    if (selectedConfig && !isSandcastleAgentConfig(selectedConfig)) {
+      void vscode.window.showWarningMessage(
+        `${agentName} runs directly on the host and is not isolated by Sandcastle.`,
+      );
+    }
 
     const currentAgent = sessionManager.getActiveAgentName();
     if (currentAgent && currentAgent !== agentName && chatWebviewProvider.hasChatContent) {
@@ -611,6 +623,57 @@ export function registerCommands({
     );
   });
 
+  const resolveActiveSandcastle = () => {
+    const activeSession = sessionManager.getActiveSession();
+    if (!activeSession) {
+      throw new Error('No active ACP session.');
+    }
+    const config = getAgentConfig(activeSession.agentName);
+    if (!config || !isSandcastleAgentConfig(config)) {
+      throw new Error('The active agent is not managed by Sandcastle.');
+    }
+    const connection = sessionManager.getConnectionForSession(activeSession.sessionId);
+    if (!connection) {
+      throw new Error('The active Sandcastle connection is unavailable.');
+    }
+    return { activeSession, connection: connection.connection };
+  };
+
+  const sandcastleShowDiffCmd = vscode.commands.registerCommand('acp.sandcastle.showDiff', async () => {
+    try {
+      const { activeSession, connection } = resolveActiveSandcastle();
+      const ui = new SandcastlePromotionUi();
+      await ui.showDiff(await ui.preview(connection, activeSession.sessionId));
+    } catch (error) {
+      void vscode.window.showErrorMessage(error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  const sandcastleApplyCmd = vscode.commands.registerCommand('acp.sandcastle.apply', async () => {
+    try {
+      const { activeSession, connection } = resolveActiveSandcastle();
+      await new SandcastlePromotionUi().apply(connection, activeSession.sessionId);
+    } catch (error) {
+      void vscode.window.showErrorMessage(error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  const sandcastleRejectCmd = vscode.commands.registerCommand('acp.sandcastle.reject', async () => {
+    try {
+      const { activeSession, connection } = resolveActiveSandcastle();
+      const confirm = await vscode.window.showWarningMessage(
+        'Reject all changes in the active Sandcastle sandbox?',
+        { modal: true },
+        'Reject',
+      );
+      if (confirm === 'Reject') {
+        await new SandcastlePromotionUi().reject(connection, activeSession.sessionId);
+      }
+    } catch (error) {
+      void vscode.window.showErrorMessage(error instanceof Error ? error.message : String(error));
+    }
+  });
+
   const showCompiledTeamPipelineCmd = vscode.commands.registerCommand('acp.showCompiledTeamPipeline', async (agentNameOrItem?: string | any) => {
     const agentName = await resolveAgentName(agentNameOrItem);
     if (!agentName) { return; }
@@ -697,6 +760,9 @@ export function registerCommands({
     sandboxPromoteCmd,
     sandboxDiscardCmd,
     sandboxCleanupCmd,
+    sandcastleShowDiffCmd,
+    sandcastleApplyCmd,
+    sandcastleRejectCmd,
     showCompiledTeamPipelineCmd,
     rerunTeamReviewerCmd,
   ];

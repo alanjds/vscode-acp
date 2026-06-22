@@ -5,7 +5,8 @@ import { RequestError } from '@agentclientprotocol/sdk';
 import { AgentManager } from '../core/AgentManager';
 import { ConnectionInfo, ConnectionManager } from '../core/ConnectionManager';
 import { SessionUpdateHandler } from '../handlers/SessionUpdateHandler';
-import { getAgentConfig } from '../config/AgentConfig';
+import { getAgentConfig, isSandcastleAgentConfig } from '../config/AgentConfig';
+import { SandcastlePromotionUi } from '../sandcastle/SandcastlePromotionUi';
 import type { SandboxContext } from '../sandbox/SandboxContext';
 import { logNetworkPolicyNotice } from '../sandbox/NetworkPolicy';
 import { log, logError } from '../utils/Logger';
@@ -116,6 +117,11 @@ export class AcpAgentRunner {
 
       if (options.signal?.aborted) {
         throw new RunAbortedError();
+      }
+
+      if (isSandcastleAgentConfig(config)) {
+        const promotionUi = new SandcastlePromotionUi();
+        await promotionUi.show(connInfo.connection, sessionId);
       }
 
       return collectedText.trim();

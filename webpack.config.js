@@ -58,6 +58,48 @@ const extensionConfig = {
 };
 
 /** @type {import('webpack').Configuration} */
+const sandcastleBridgeConfig = {
+  name: 'sandcastle-bridge',
+  target: 'node',
+  mode: 'none',
+  entry: './src/sandcastle/bridge.ts',
+  output: {
+    path: path.resolve(__dirname, 'dist'),
+    filename: 'sandcastle-acp-bridge.js',
+    libraryTarget: 'commonjs2',
+  },
+  resolve: {
+    extensions: ['.ts', '.js'],
+    conditionNames: ['import', 'node', '...'],
+    alias: {
+      bufferutil: false,
+      'utf-8-validate': false,
+    },
+  },
+  module: {
+    rules: [
+      {
+        test: /\.ts$/,
+        exclude: /node_modules/,
+        use: [{
+          loader: 'ts-loader',
+          options: {
+            compilerOptions: {
+              module: 'ESNext',
+              moduleResolution: 'Bundler',
+            },
+          },
+        }],
+      },
+    ],
+  },
+  devtool: 'nosources-source-map',
+  infrastructureLogging: {
+    level: 'log',
+  },
+};
+
+/** @type {import('webpack').Configuration} */
 const webviewConfig = {
   name: 'webview',
   target: 'web',
@@ -94,4 +136,4 @@ const webviewConfig = {
   },
 };
 
-module.exports = [extensionConfig, webviewConfig];
+module.exports = [extensionConfig, sandcastleBridgeConfig, webviewConfig];

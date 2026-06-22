@@ -7,3 +7,8 @@ out/
 .DS_Store
 *.tsbuildinfo
 .acp/sandboxes/
+.sandcastle/.env
+.sandcastle/logs/
+.sandcastle/patches/
+.sandcastle/worktrees/
+.sandcastle/codex-home/

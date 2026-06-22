@@ -9,7 +9,7 @@ A [Visual Studio Code extension](https://marketplace.visualstudio.com/items?item
 
 ## Features
 
-- **Multi-Agent Support**: Connect to 13 pre-configured ACP agents or add your own
+- **Multi-Agent Support**: Connect to pre-configured ACP and Sandcastle-backed agents or add your own
 - **Vibe Agent Support**: Vibe is included as a pre-configured ACP agent via `vibe-acp`.
 - **Single-Agent Focus**: One agent active at a time — seamlessly switch between agents
 - **Per-Agent Session List**: Each agent in the Agents view is expandable into its previous sessions. Click a session to restore its history in the chat. Backed by `session/list` when the agent supports it, or by a local per-workspace cache otherwise.
@@ -22,7 +22,8 @@ A [Visual Studio Code extension](https://marketplace.visualstudio.com/items?item
 - **Interactive Chat**: Built-in chat panel with Markdown rendering, inline tool call display, and collapsible tool sections
 - **LangGraph Pipelines**: Optional virtual agents can orchestrate ACP agents from workspace YAML workflows with reviewable approvals.
 - **Agent Teams**: Declarative multi-role workflows in `.acp/teams/*.yaml` that compile to pipeline v2 — define `planner`, `implementer`, `reviewer`, and optional `tester` roles, each using a different ACP agent.
-- **Agent Sandbox**: Optional git worktree isolation for workspace-changing pipeline steps, with diff review and promotion gate before applying changes to the main workspace.
+- **Sandcastle POC**: Codex and Cursor CLI can run behind an ACP bridge in Docker-managed Sandcastle worktrees with explicit Apply/Reject promotion.
+- **Legacy Agent Sandbox**: The previous worktree-only pipeline sandbox remains available until both Sandcastle smoke tests pass.
 - **Thinking Display**: See agent reasoning in a collapsible block with streaming animation and elapsed time
 - **Slash Commands**: Autocomplete popup for agent-provided commands with keyboard navigation
 - **File Mentions**: Type `@` in the composer to search workspace files and send precise relative-path references to agents.
@@ -46,10 +47,18 @@ A [Visual Studio Code extension](https://marketplace.visualstudio.com/items?item
 
 - Node.js 18+ (for spawning agent processes)
 - An ACP-compatible agent installed or available via `npx`
+- Docker for Sandcastle-backed Codex and Cursor agents
 
 ## Pre-configured Agents
 
-The extension comes with default configurations for 13 agents:
+The extension also includes two Sandcastle-backed POC agents:
+
+| Agent | Runtime |
+|-------|---------|
+| Codex Sandcastle | Docker + `codex("gpt-5.4")` |
+| Cursor Sandcastle | Docker + `cursor("composer-2")` |
+
+The existing native ACP defaults remain available:
 
 | Agent | Command |
 |-------|---------|
@@ -77,7 +86,7 @@ You can add custom agent configurations in settings.
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `acp.agents` | *(13 agents)* | Agent configurations. Each key is the agent name, value has `command`, `args`, and `env`. |
+| `acp.agents` | *(native ACP + 2 Sandcastle agents)* | Agent configurations using either `transport: "acp"` or `transport: "sandcastle"`. |
 | `acp.autoApprovePermissions` | `ask` | How agent permission requests are handled: `ask` or `allowAll`. |
 | `acp.defaultWorkingDirectory` | `""` | Default working directory for agent sessions. Empty uses current workspace. |
 | `acp.logTraffic` | `true` | Log all ACP protocol traffic to the ACP Traffic output channel. |
@@ -91,6 +100,10 @@ You can add custom agent configurations in settings.
 | `acp.sandbox.network.allowlist` | `[]` | Optional host allowlist (application-level policy in v1). |
 
 ## Agent Sandbox
+
+The preferred POC path for Codex and Cursor is now the ACP–Sandcastle bridge. See [Sandcastle architecture](docs/sandcastle-architecture.md) and [first test guide](docs/sandcastle-first-test.md).
+
+The settings below describe the legacy worktree-only sandbox. It is intentionally retained until the two real provider smoke tests pass.
 
 When `acp.sandbox.enabled` is `true`, pipeline primitives with `sideEffects: workspace` run inside a disposable **git worktree** under `.acp/sandboxes/`. Agent file and terminal access is scoped to that worktree. When the step completes:
 
@@ -138,6 +151,9 @@ Main commands are available from the Command Palette, view title buttons, or con
 | `ACP: Promote Sandbox Changes` | Open the promotion gate for the active sandbox. |
 | `ACP: Discard Sandbox` | Discard the active sandbox worktree. |
 | `ACP: Cleanup Stale Sandboxes` | Remove sandbox worktrees older than the configured TTL. |
+| `ACP: Sandcastle Show Diff` | Open the current Sandcastle worktree diff. |
+| `ACP: Sandcastle Apply Changes` | Apply the current Sandcastle changes to the main workspace. |
+| `ACP: Sandcastle Reject Changes` | Discard the current Sandcastle changes. |
 | `ACP: Show Compiled Team Pipeline` | Inspect the generated pipeline v2 JSON for an agent team. |
 | `ACP: Re-run Team Reviewer` | Run reviewer only on the latest completed team run and current git diff. |
 | `ACP: Refresh Sessions` | Re-fetch the session list for an agent (also on the agent's right-click menu) |
@@ -200,6 +216,7 @@ The extension follows a modular architecture:
 - **UI**: `SessionTreeProvider`, `ChatWebviewProvider`, `StatusBarManager`, `EditorContext`, `DebugWebviewPanel`
 - **Config**: `AgentConfig`, `RegistryClient`, `PipelineConfig`
 - **Pipeline**: `PipelineService`, `PipelineGraphCompiler`, `AcpAgentRunner`, `ProposedPlan`, `AgentTeamCompiler`, `AgentTeamCatalog`
+- **Sandcastle**: bundled ACP bridge, Docker runtime adapter, bounded conversation history, and promotion UI
 - **Utils**: `Logger`
 
 Communication with agents uses the ACP protocol (JSON-RPC 2.0 over stdio).

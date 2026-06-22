@@ -1,10 +1,41 @@
+import { RequestError } from '@agentclientprotocol/sdk';
+
 export type AgentErrorKind =
   | 'command-not-found'
   | 'handshake-failed'
   | 'initialization-timeout'
   | 'auth-cancelled'
   | 'missing-pipeline-agent'
+  | 'provider-quota'
+  | 'provider-auth'
   | 'unknown';
+
+function readErrorDataDetails(error: unknown): string | undefined {
+  if (error instanceof RequestError) {
+    const data = error.data as { details?: unknown } | undefined;
+    if (typeof data?.details === 'string' && data.details.trim()) {
+      return data.details.trim();
+    }
+  }
+
+  const data = (error as { data?: { details?: unknown } } | undefined)?.data;
+  if (typeof data?.details === 'string' && data.details.trim()) {
+    return data.details.trim();
+  }
+  return undefined;
+}
+
+/** Prefer agent-provided details over generic JSON-RPC wrappers like "Internal error". */
+export function formatAgentErrorMessage(error: unknown): string {
+  const details = readErrorDataDetails(error);
+  if (details) {
+    return details;
+  }
+  if (error instanceof Error && error.message.trim() && error.message !== 'Internal error') {
+    return error.message.trim();
+  }
+  return 'An unexpected agent error occurred.';
+}
 
 export interface ClassifiedAgentError {
   kind: AgentErrorKind;
@@ -13,13 +44,25 @@ export interface ClassifiedAgentError {
 }
 
 export function classifyAgentError(error: unknown): ClassifiedAgentError {
-  const rawMessage = error instanceof Error
-    ? error.message
-    : typeof error === 'string'
-      ? error
-      : String((error as any)?.message || error || 'Unknown error');
+  const rawMessage = formatAgentErrorMessage(error);
   const message = rawMessage || 'Unknown error';
   const lower = message.toLowerCase();
+
+  if (/usage limit|no credits remaining|rate.?limit|quota|credits/.test(lower)) {
+    return {
+      kind: 'provider-quota',
+      message,
+      actionHint: 'Check Codex usage at https://chatgpt.com/codex/settings/usage, upgrade your plan, or wait for the limit to reset.',
+    };
+  }
+
+  if (/401 unauthorized|missing bearer|invalid api key|authentication/.test(lower)) {
+    return {
+      kind: 'provider-auth',
+      message,
+      actionHint: 'Set a valid OpenAI API key in .sandcastle/.env or re-authenticate Codex on the host.',
+    };
+  }
 
   if (/missing configured acp pipeline agent/.test(lower)) {
     return {

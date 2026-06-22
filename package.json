@@ -205,6 +205,18 @@
         "title": "ACP: Cleanup Stale Sandboxes"
       },
       {
+        "command": "acp.sandcastle.showDiff",
+        "title": "ACP: Sandcastle Show Diff"
+      },
+      {
+        "command": "acp.sandcastle.apply",
+        "title": "ACP: Sandcastle Apply Changes"
+      },
+      {
+        "command": "acp.sandcastle.reject",
+        "title": "ACP: Sandcastle Reject Changes"
+      },
+      {
         "command": "acp.showCompiledTeamPipeline",
         "title": "ACP: Show Compiled Team Pipeline"
       },
@@ -530,6 +542,19 @@
               ],
               "env": {}
             },
+            "Codex Sandcastle": {
+              "transport": "sandcastle",
+              "provider": "codex",
+              "model": "gpt-5.4",
+              "effort": "high",
+              "env": {}
+            },
+            "Cursor Sandcastle": {
+              "transport": "sandcastle",
+              "provider": "cursor",
+              "model": "composer-2",
+              "env": {}
+            },
             "OpenCode": {
               "command": "npx",
               "args": [
@@ -659,12 +684,15 @@
     "compile-tests": "tsc -p . --outDir out --incremental false",
     "watch-tests": "tsc -p . -w --outDir out",
     "lint": "eslint src --max-warnings 0",
+    "sandcastle:smoke:codex": "npm run compile && node scripts/sandcastle-smoke.mjs codex apply",
+    "sandcastle:smoke:cursor": "npm run compile && node scripts/sandcastle-smoke.mjs cursor reject",
     "pretest": "npm run compile-tests && npm run compile && npm run lint",
     "test": "vscode-test",
     "vscode:dts": "vscode-dts dev"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.21.1",
+    "@ai-hero/sandcastle": "0.6.4",
     "@langchain/core": "^1.1.49",
     "@langchain/langgraph": "^1.4.2",
     "@vscode/extension-telemetry": "^1.5.0",

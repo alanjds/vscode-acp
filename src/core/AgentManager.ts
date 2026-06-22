@@ -1,9 +1,13 @@
 import { spawn, ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { EventEmitter } from 'node:events';
+import * as path from 'node:path';
 import { log, logError } from '../utils/Logger';
 import { sendEvent, sendError } from '../utils/TelemetryManager';
-import type { AgentConfigEntry } from '../config/AgentConfig';
+import {
+  isSandcastleAgentConfig,
+  type AgentConfigEntry,
+} from '../config/AgentConfig';
 
 /**
  * Escape a single argument for safe inclusion in a shell command string.
@@ -77,9 +81,30 @@ export class AgentManager extends EventEmitter {
    */
   spawnAgent(name: string, config: AgentConfigEntry, cwd?: string): AgentInstance {
     const id = `agent_${this.nextId++}`;
-    log(`Spawning agent "${name}" (${id}): ${config.command} ${(config.args || []).join(' ')}`);
+    const launchDescription = isSandcastleAgentConfig(config)
+      ? `Sandcastle ${config.provider} (${config.model})`
+      : `${config.command} ${(config.args || []).join(' ')}`;
+    log(`Spawning agent "${name}" (${id}): ${launchDescription}`);
 
     const child = (() => {
+      if (isSandcastleAgentConfig(config)) {
+        const bridgePath = path.join(__dirname, 'sandcastle-acp-bridge.js');
+        return spawn(process.execPath, [
+          bridgePath,
+          '--provider', config.provider,
+          '--model', config.model,
+          ...(config.effort ? ['--effort', config.effort] : []),
+        ], {
+          stdio: ['pipe', 'pipe', 'pipe'],
+          cwd: cwd || undefined,
+          env: {
+            ...process.env,
+            ...(config.env || {}),
+            ELECTRON_RUN_AS_NODE: '1',
+          },
+        });
+      }
+
       if (process.platform === 'win32') {
         // On Windows, commands like npx are batch scripts (.cmd) that require
         // shell resolution via cmd.exe.

@@ -4,6 +4,7 @@ import { marked } from 'marked';
 import type { SessionNotification } from '@agentclientprotocol/sdk';
 
 import { SessionManager } from '../core/SessionManager';
+import { classifyAgentError, formatAgentErrorMessage } from '../core/AgentError';
 import { DebugTraceStore } from '../core/DebugTraceStore';
 import { SessionUpdateHandler, SessionUpdateListener } from '../handlers/SessionUpdateHandler';
 import { ALLOWED_WEBVIEW_COMMANDS } from '../security/SecurityPolicy';
@@ -434,6 +435,7 @@ export class ChatWebviewController implements vscode.Disposable {
       });
       this.sessionManager.touchHistory(activeId);
     } catch (e: any) {
+      const classified = classifyAgentError(e);
       logError('Prompt failed', e);
       this.debugTraceStore?.record({
         category: 'prompt',
@@ -443,9 +445,13 @@ export class ChatWebviewController implements vscode.Disposable {
         durationMs: Date.now() - promptStartedAt,
         payload: e,
       });
+      const detail = formatAgentErrorMessage(e);
+      const message = classified.kind === 'provider-quota' || classified.kind === 'provider-auth'
+        ? `${detail}\n\n${classified.actionHint}`
+        : detail;
       this.postMessage({
         type: 'error',
-        message: e.message || 'Prompt failed',
+        message: message || 'Prompt failed',
       });
       this.postMessage({ type: 'promptEnd', stopReason: 'error' });
     }

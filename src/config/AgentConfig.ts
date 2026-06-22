@@ -5,7 +5,9 @@ import { getPipelineAgentNames } from './PipelineCatalog';
 /**
  * Configuration for a single ACP agent.
  */
-export interface AgentConfigEntry {
+export interface AcpAgentConfigEntry {
+  /** Legacy entries omit transport and are treated as native ACP processes. */
+  transport?: 'acp';
   /** NPX package to run (e.g., "@anthropic-ai/claude-code@latest") */
   command: string;
   /** Command-line arguments */
@@ -18,6 +20,23 @@ export interface AgentConfigEntry {
   use_idea_mcp?: boolean;
   /** Enable custom MCP server */
   use_custom_mcp?: boolean;
+}
+
+export interface SandcastleAgentConfigEntry {
+  transport: 'sandcastle';
+  provider: 'codex' | 'cursor';
+  model: string;
+  displayName?: string;
+  env?: Record<string, string>;
+  effort?: 'low' | 'medium' | 'high' | 'xhigh';
+}
+
+export type AgentConfigEntry = AcpAgentConfigEntry | SandcastleAgentConfigEntry;
+
+export function isSandcastleAgentConfig(
+  config: AgentConfigEntry,
+): config is SandcastleAgentConfigEntry {
+  return config.transport === 'sandcastle';
 }
 
 /**

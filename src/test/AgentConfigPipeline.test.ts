@@ -25,6 +25,7 @@ suite('AgentConfig pipeline', () => {
                 'Gemini CLI': { command: 'gemini' },
                 'Codex CLI': { command: 'codex' },
                 'Claude Code': { command: 'claude' },
+                'Cursor CLI': { command: 'cursor' },
                 Vibe: { command: 'vibe' },
               };
             case 'pipeline.enabled':
@@ -68,6 +69,7 @@ suite('AgentConfig pipeline', () => {
                 'Gemini CLI': { command: 'gemini' },
                 'Codex CLI': { command: 'codex' },
                 'Claude Code': { command: 'claude' },
+                'Cursor CLI': { command: 'cursor' },
                 Vibe: { command: 'vibe' },
               };
             case 'pipeline.enabled':

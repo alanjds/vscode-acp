@@ -18,7 +18,7 @@ import { ConnectionManager, ConnectionInfo } from './ConnectionManager';
 import { ContextFamilyInfo, SessionHistoryStore } from './SessionHistoryStore';
 import { classifyAgentError } from './AgentError';
 import { resolveWorkspaceIdentity, type WorkspaceIdentity } from './WorkspaceIdentity';
-import { getAgentConfigs } from '../config/AgentConfig';
+import { getAgentConfigs, isSandcastleAgentConfig } from '../config/AgentConfig';
 import { getPipelineDefinitionForAgent, isPipelineVirtualAgentName } from '../config/PipelineCatalog';
 import { isTeamVirtualAgentName, isValidTeamVirtualAgentName, getTeamEntryForAgent } from '../config/AgentTeamCatalog';
 import { PipelineService } from '../pipeline/PipelineService';
@@ -240,7 +240,12 @@ export class SessionManager extends EventEmitter {
 
       let connInfo: ConnectionInfo;
       try {
-        connInfo = await this.connectionManager.connect(agentId, agentProcess.process, workspaceCwd);
+        connInfo = await this.connectionManager.connect(
+          agentId,
+          agentProcess.process,
+          workspaceCwd,
+          { autoApproveAll: isSandcastleAgentConfig(config) },
+        );
       } catch (e) {
         this.agentManager.killAgent(agentId);
         throw e;
@@ -649,7 +654,12 @@ export class SessionManager extends EventEmitter {
 
     let connInfo: ConnectionInfo;
     try {
-      connInfo = await this.connectionManager.connect(agentId, agentProcess.process, workspaceCwd);
+      connInfo = await this.connectionManager.connect(
+        agentId,
+        agentProcess.process,
+        workspaceCwd,
+        { autoApproveAll: isSandcastleAgentConfig(config) },
+      );
     } catch (e) {
       this.agentManager.killAgent(agentId);
       this.recordAgentConnectionFailure(agentName, e);

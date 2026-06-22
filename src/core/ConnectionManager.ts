@@ -7,7 +7,7 @@ import { Readable, Writable } from 'node:stream';
 import { AcpClientImpl } from './AcpClientImpl';
 import { FileSystemHandler } from '../handlers/FileSystemHandler';
 import { TerminalHandler } from '../handlers/TerminalHandler';
-import { PermissionHandler } from '../handlers/PermissionHandler';
+import { PermissionHandler, type PermissionHandlerOptions } from '../handlers/PermissionHandler';
 import { SessionUpdateHandler } from '../handlers/SessionUpdateHandler';
 import { DebugTraceStore } from './DebugTraceStore';
 import { log, logError, logTraffic } from '../utils/Logger';
@@ -35,7 +35,12 @@ export class ConnectionManager {
    * Create an ACP connection from a child process.
    * Sets up streams, creates connection, and performs initialization handshake.
    */
-  async connect(agentId: string, process: ChildProcess, workspaceCwd: string): Promise<ConnectionInfo> {
+  async connect(
+    agentId: string,
+    process: ChildProcess,
+    workspaceCwd: string,
+    permissionOptions?: PermissionHandlerOptions,
+  ): Promise<ConnectionInfo> {
     if (!process.stdout || !process.stdin) {
       throw new Error('Agent process missing stdio streams');
     }
@@ -54,7 +59,7 @@ export class ConnectionManager {
     // Create handlers with workspace root for security boundary enforcement
     const fsHandler = new FileSystemHandler(workspaceCwd);
     const terminalHandler = new TerminalHandler(workspaceCwd);
-    const permissionHandler = new PermissionHandler();
+    const permissionHandler = new PermissionHandler(permissionOptions);
 
     // Create client implementation
     const client = new AcpClientImpl(

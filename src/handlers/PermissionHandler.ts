@@ -11,8 +11,15 @@ const CANCELLED: RequestPermissionResponse = { outcome: { outcome: 'cancelled' }
  * Uses a serial promise queue to prevent concurrent QuickPick dialogs.
  * Supports granular auto-approve by tool kind.
  */
+export interface PermissionHandlerOptions {
+  /** Auto-approve all ACP permission requests (used for Sandcastle bridge connections). */
+  autoApproveAll?: boolean;
+}
+
 export class PermissionHandler {
   private queue: Promise<void> = Promise.resolve();
+
+  constructor(private readonly options: PermissionHandlerOptions = {}) {}
 
   async requestPermission(params: RequestPermissionRequest): Promise<RequestPermissionResponse> {
     const result = this.queue.then(() => this.handlePermission(params));
@@ -29,8 +36,20 @@ export class PermissionHandler {
     const kind = params.toolCall?.kind;
     const detail = formatToolCallDetail(params.toolCall?.rawInput);
 
-    // Granular auto-approve by tool kind
+    if (this.options.autoApproveAll) {
+      const allowOption = params.options.find(o =>
+        o.kind === 'allow_once' || o.kind === 'allow_always',
+      );
+      if (allowOption) {
+        sendEvent('permission/requested', { permissionType: title, autoApproved: 'true' });
+        return {
+          outcome: { outcome: 'selected', optionId: allowOption.optionId },
+        };
+      }
+    }
+
     const config = vscode.workspace.getConfiguration('acp');
+    // Granular auto-approve by tool kind
     let autoApprove: string;
     switch (kind) {
       case 'read':

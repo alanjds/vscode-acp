@@ -542,6 +542,16 @@
           "default": "ask",
           "description": "Automatically approve agent permission requests. 'ask' always prompts, 'allowAll' approves everything."
         },
+        "acp.sandcastle.promotion": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "autoApply",
+            "autoReject"
+          ],
+          "default": "ask",
+          "description": "How Sandcastle workspace changes are promoted after a run. 'ask' shows Apply/Reject once (View Diff does not loop). 'autoApply' merges without prompting (yolo). 'autoReject' discards without prompting."
+        },
         "acp.defaultWorkingDirectory": {
           "type": "string",
           "default": "",

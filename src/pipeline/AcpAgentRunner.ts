@@ -90,6 +90,7 @@ export class AcpAgentRunner {
         agentInstance.id,
         agentInstance.process,
         cwd,
+        { autoApproveAll: isSandcastleAgentConfig(config) },
       );
       throwIfAborted();
 

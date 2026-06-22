@@ -12,6 +12,10 @@ export interface SandcastlePreview {
   worktreePath: string;
 }
 
+export type SandcastlePromotionMode = 'ask' | 'autoApply' | 'autoReject';
+
+type PromotionChoice = 'diff' | 'apply' | 'reject';
+
 export class SandcastlePromotionUi {
   async preview(connection: SandcastleConnection, sessionId: string): Promise<SandcastlePreview> {
     const response = await connection.extMethod('sandcastle/preview', { sessionId });
@@ -62,6 +66,14 @@ export class SandcastlePromotionUi {
     await connection.extMethod('sandcastle/reject', { sessionId });
   }
 
+  getPromotionMode(): SandcastlePromotionMode {
+    const mode = vscode.workspace.getConfiguration('acp').get<string>('sandcastle.promotion', 'ask');
+    if (mode === 'autoApply' || mode === 'autoReject') {
+      return mode;
+    }
+    return 'ask';
+  }
+
   async promote(connection: SandcastleConnection, sessionId: string): Promise<'applied' | 'rejected' | 'cancelled'> {
     const preview = await this.preview(connection, sessionId);
     if (preview.filesChanged === 0) {
@@ -70,28 +82,54 @@ export class SandcastlePromotionUi {
       return 'rejected';
     }
 
-    while (true) {
-      const choice = await vscode.window.showInformationMessage(
-        `Sandcastle run changed ${preview.filesChanged} file(s).`,
-        { modal: true },
-        'View Diff',
-        'Apply',
-        'Reject',
-      );
-      if (!choice) {
-        return 'cancelled';
-      }
-      if (choice === 'View Diff') {
-        await this.showDiff(preview);
-        continue;
-      }
-      if (choice === 'Reject') {
-        await this.reject(connection, sessionId);
-        return 'rejected';
-      }
-      if (await this.apply(connection, sessionId)) {
-        return 'applied';
-      }
+    const mode = this.getPromotionMode();
+    if (mode === 'autoApply') {
+      return (await this.apply(connection, sessionId)) ? 'applied' : 'cancelled';
     }
+    if (mode === 'autoReject') {
+      await this.reject(connection, sessionId);
+      return 'rejected';
+    }
+
+    return this.promptPromotionChoice(connection, sessionId, preview, true);
+  }
+
+  private async promptPromotionChoice(
+    connection: SandcastleConnection,
+    sessionId: string,
+    preview: SandcastlePreview,
+    allowViewDiff: boolean,
+  ): Promise<'applied' | 'rejected' | 'cancelled'> {
+    const items: Array<vscode.QuickPickItem & { choice: PromotionChoice }> = [];
+    if (allowViewDiff) {
+      items.push({
+        label: '$(diff) View Diff',
+        description: `${preview.filesChanged} file(s) changed`,
+        choice: 'diff',
+      });
+    }
+    items.push(
+      { label: '$(check) Apply', description: 'Merge sandbox changes into the workspace', choice: 'apply' },
+      { label: '$(close) Reject', description: 'Discard sandbox changes', choice: 'reject' },
+    );
+
+    const selection = await vscode.window.showQuickPick(items, {
+      title: 'Sandcastle changes ready',
+      placeHolder: 'Promote sandbox changes to the workspace',
+      ignoreFocusOut: true,
+    });
+    if (!selection) {
+      return 'cancelled';
+    }
+
+    if (selection.choice === 'diff') {
+      await this.showDiff(preview);
+      return this.promptPromotionChoice(connection, sessionId, preview, false);
+    }
+    if (selection.choice === 'reject') {
+      await this.reject(connection, sessionId);
+      return 'rejected';
+    }
+    return (await this.apply(connection, sessionId)) ? 'applied' : 'cancelled';
   }
 }

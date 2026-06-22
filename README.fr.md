@@ -128,6 +128,8 @@ Les sessions **ACP natives** sont longues : le processus accumule le contexte et
 4. Promouvoir : **ACP: Sandcastle Apply Changes** ou **ACP: Sandcastle Reject Changes**
 5. Pour la prochaine tâche isolée, repartir avec Reject ou **Nouvelle conversation**
 
+En fin de run **pipeline**, la promotion peut s’ouvrir automatiquement selon `acp.sandcastle.promotion` (`ask`, `autoApply`, `autoReject`). Voir [Promotion Apply/Reject (changements en cours)](doc_fr/changements-sandcastle-promotion-en-cours.md).
+
 ---
 
 ## Agents préconfigurés
@@ -418,6 +420,7 @@ La communication avec les agents utilise ACP (JSON-RPC 2.0 sur stdio).
 | Pipelines | [doc_fr/pipelines-langgraph.md](doc_fr/pipelines-langgraph.md) | [docs/pipeline-a2a.md](docs/pipeline-a2a.md) |
 | Équipes d’agents | [doc_fr/agent-teams.md](doc_fr/agent-teams.md) | [docs/agent-teams.md](docs/agent-teams.md) |
 | Sandcastle | [docs/sandcastle-changelog-fr.md](docs/sandcastle-changelog-fr.md) | [docs/sandcastle-architecture.md](docs/sandcastle-architecture.md) |
+| Promotion Apply/Reject (changements en cours) | [doc_fr/changements-sandcastle-promotion-en-cours.md](doc_fr/changements-sandcastle-promotion-en-cours.md) | — |
 | ADR | [doc_fr/adr/](doc_fr/adr/) | [docs/adr/](docs/adr/) |
 
 ---
@@ -438,6 +441,10 @@ La communication avec les agents utilise ACP (JSON-RPC 2.0 sur stdio).
 - [Marketplace](https://marketplace.visualstudio.com/items?itemName=damien-huyet.acp-client)
 - [Agent Client Protocol](https://agentclientprotocol.com/)
 - [Dépôt GitHub](https://github.com/maurice30120/vscode-acp)
+
+## Divers
+
+- [Un poème sur le code](doc_fr/poeme-sur-le-code.md)
 
 ## Licence
 

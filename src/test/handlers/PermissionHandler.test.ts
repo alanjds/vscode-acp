@@ -90,6 +90,22 @@ suite('PermissionHandler', () => {
     assert.deepStrictEqual(callOrder, [0, 1, 2]);
   });
 
+  test('autoApproveAll skips prompt for Sandcastle bridge connections', async () => {
+    let promptCalled = false;
+
+    vscode.window.showQuickPick = async function() {
+      promptCalled = true;
+      return undefined;
+    };
+
+    const handler = new PermissionHandler({ autoApproveAll: true });
+    const result = await handler.requestPermission(makeParams('execute'));
+
+    assert.strictEqual(promptCalled, false);
+    assert.strictEqual(result.outcome.outcome, 'selected');
+    assert.strictEqual((result.outcome as { optionId: string }).optionId, 'allow_once');
+  });
+
   test('autoApprove with allow for read skips prompt', async () => {
     let promptCalled = false;
 

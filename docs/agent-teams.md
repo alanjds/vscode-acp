@@ -224,6 +224,33 @@ Each team compiles to a pipeline v2 with these steps:
 - Native agents write directly to the workspace
 - All other roles (`planner`, `reviewer`, `tester`) are read-only (`sideEffects: none`)
 
+### Two gates: plan approval vs Sandcastle promotion
+
+Teams and pipelines use **two independent human or config gates**. Do not confuse them:
+
+```
+planner → [GATE 1: human — plan] → implementer (sandbox) → [GATE 2: Sandcastle — patch] → reviewer
+```
+
+The promotion verdict controls the remaining workflow: **Apply** and **no changes** continue to reviewer/tester; **Reject** ends the run as rejected; closing the picker ends it as cancelled and cleans up the ephemeral sandbox; an Apply failure ends it as an error. No completed team snapshot is recorded for stopped runs.
+
+| Gate | When | Who decides | Setting |
+|------|------|-------------|---------|
+| **Plan approval** | After planner, before implementer | Human (Approve/Reject + edit `<proposed_plan>`) | Always required — not controlled by Sandcastle settings |
+| **Sandcastle promotion** | After a workspace `implementer` run | Human or auto per config | `acp.sandcastle.promotion` (`ask` / `autoApply` / `autoReject`) |
+
+Gate 1 is a **human LangGraph interrupt** (`type: approval`). It is never skipped because the implementer uses Sandcastle, because `acp.sandcastle.promotion` is `autoApply`, or because Sandcastle auto-approves tool permissions inside the sandbox.
+
+With `acp.sandcastle.promotion: autoApply`, only **patch promotion** is automatic after the implementer finishes. You must still approve the plan in the chat UI before implementation starts.
+
+**Manual test (Feature Team with Sandcastle implementer):**
+
+1. Connect to **Feature Team** (not a standalone Sandcastle agent)
+2. Send a request
+3. Confirm the plan block and **Approve plan** / **Reject plan** buttons appear; timeline shows **Plan approval (human)**
+4. Approve → implementer runs in Sandcastle
+5. Only then: QuickPick Apply/Reject (if `promotion: ask`) or automatic apply (if `autoApply`)
+
 ### Approval Flow
 
 1. Planner generates a proposed plan
@@ -257,7 +284,7 @@ Feature Team (planning...)
 │   ✓ Plan generated
 │
 Feature Team
-└── Approval Required
+└── Plan approval (human)
     
     <proposed_plan>
     1. Create user profile model in src/models/UserProfile.ts
@@ -265,7 +292,7 @@ Feature Team
     3. Add tests in tests/userProfile.test.ts
     </proposed_plan>
     
-    [Edit Plan] [Approve] [Reject]
+    [Edit Plan] [Approve plan] [Reject plan]
 
 User clicks Approve
 

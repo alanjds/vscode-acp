@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events';
 import type { SessionNotification } from '@agentclientprotocol/sdk';
 import { Command, INTERRUPT, MemorySaver } from '@langchain/langgraph';
 
-import { getAgentConfigs } from '../config/AgentConfig';
+import { getAgentConfigs, isSandcastleAgentConfig, type AgentConfigEntry } from '../config/AgentConfig';
 import {
   getPipelineDefinitionForAgent,
   getPipelineDefinitions,
@@ -12,7 +12,8 @@ import {
 } from '../config/PipelineCatalog';
 import { getTeamEntryForAgent } from '../config/AgentTeamCatalog';
 import { defaultGitCommandRunner } from '../git/GitCommandRunner';
-import { AcpAgentRunner } from './AcpAgentRunner';
+import { SandcastleApplyError } from '../sandcastle/SandcastlePromotionUi';
+import { AcpAgentRunner, type AcpAgentRunResult } from './AcpAgentRunner';
 import type { CompiledTeamMetadata } from '../pipeline/AgentTeamCompiler';
 import type { TeamRoleId } from '../config/AgentTeamConfig';
 import { assertSingleProposedPlan } from './ProposedPlan';
@@ -44,6 +45,7 @@ export interface PipelineStatusEvent {
   role?: TeamRoleId;
   agentName?: string;
   teamId?: string;
+  implementerUsesSandcastle?: boolean;
 }
 
 export interface PipelinePlanReadyEvent {
@@ -53,6 +55,7 @@ export interface PipelinePlanReadyEvent {
   role?: TeamRoleId;
   agentName?: string;
   teamId?: string;
+  implementerUsesSandcastle?: boolean;
 }
 
 export interface PipelineSessionUpdateEvent {
@@ -97,8 +100,11 @@ export interface PipelineServiceDependencies {
   getPipelineDefinitions?: () => PipelineDefinition[];
   getPipelineDefinitionForAgent?: (agentName: string) => PipelineDefinition | null;
   getAgentConfigs?: () => Record<string, unknown>;
-  runAcpAgent?: AcpRunCallback;
+  runAcpAgent?: (...args: Parameters<AcpRunCallback>) => Promise<string | AcpAgentRunResult>;
 }
+
+class SandcastlePromotionRejectedError extends Error {}
+class SandcastlePromotionCancelledError extends Error {}
 
 export class PipelineService extends EventEmitter {
   private readonly runs: Map<string, PipelineRunState> = new Map();
@@ -134,6 +140,16 @@ export class PipelineService extends EventEmitter {
       );
       return this.handleGraphResult(sessionId, state, result, 'Pipeline completed.');
     } catch (e: any) {
+      if (e instanceof SandcastlePromotionRejectedError) {
+        this.emitStatus(sessionId, 'rejected', 'Sandcastle changes were rejected.', 'implementer');
+        this.runs.delete(sessionId);
+        return '';
+      }
+      if (e instanceof SandcastlePromotionCancelledError) {
+        this.emitStatus(sessionId, 'cancelled', 'Sandcastle promotion was cancelled.', 'implementer');
+        this.runs.delete(sessionId);
+        return '';
+      }
       if (this.isPipelineAborted(sessionId, state, e)) {
         this.runs.delete(sessionId);
         throw e;
@@ -167,7 +183,12 @@ export class PipelineService extends EventEmitter {
         this.runs.delete(sessionId);
         throw e;
       }
-      this.emitStatus(sessionId, 'error', e.message || 'Pipeline implementation failed.');
+      this.emitStatus(
+        sessionId,
+        'error',
+        e.message || 'Pipeline implementation failed.',
+        e instanceof SandcastleApplyError ? 'implementer' : undefined,
+      );
       this.runs.delete(sessionId);
       throw e;
     }
@@ -267,7 +288,7 @@ export class PipelineService extends EventEmitter {
     const runner = new AcpAgentRunner(this.workspaceCwd);
     const collected: SessionNotification[] = [];
     try {
-      const output = await runner.run(reviewerRole, reviewerPrompt, {
+      const result = await runner.run(reviewerRole, reviewerPrompt, {
         signal: abortController.signal,
         onSessionUpdate: update => {
           collected.push(update);
@@ -282,7 +303,7 @@ export class PipelineService extends EventEmitter {
           } satisfies PipelineSessionUpdateEvent);
         },
       });
-      return output;
+      return result.text;
     } finally {
       if (this.reviewerRerunAbortController === abortController) {
         this.reviewerRerunAbortController = null;
@@ -364,6 +385,10 @@ export class PipelineService extends EventEmitter {
       state.pendingApproval = interrupt;
       const teamContext = this.readTeamContext(state.pipeline);
       const plannerRole = teamContext?.roleByStepId[interrupt.stepId];
+      const implementerUsesSandcastle = this.implementerUsesSandcastle(state.pipeline);
+      const approvalMessage = implementerUsesSandcastle
+        ? 'Plan ready — approve before Sandcastle implementation.'
+        : 'Plan ready for review.';
       this.emit('plan-ready', {
         sessionId,
         plan: interrupt.plan,
@@ -371,8 +396,19 @@ export class PipelineService extends EventEmitter {
         role: plannerRole,
         agentName: plannerRole ? teamContext?.agentByRole[plannerRole] : undefined,
         teamId: teamContext?.teamId,
+        implementerUsesSandcastle,
       } satisfies PipelinePlanReadyEvent);
-      this.emitStatus(sessionId, 'awaiting_approval', 'Plan ready for review.', interrupt.stepId, undefined, teamContext);
+      this.emitStatus(
+        sessionId,
+        'awaiting_approval',
+        approvalMessage,
+        interrupt.stepId,
+        undefined,
+        teamContext,
+        undefined,
+        undefined,
+        implementerUsesSandcastle,
+      );
       return interrupt.plan;
     }
 
@@ -477,21 +513,40 @@ export class PipelineService extends EventEmitter {
 
     const primitive = this.findPrimitiveForExecutorKind(state.pipeline, kind);
 
+    if (primitive.sideEffects === 'workspace' && !state.approvedPlan) {
+      throw new Error('Workspace side effects require an approved plan.');
+    }
+
     if (this.dependencies.runAcpAgent) {
-      return this.dependencies.runAcpAgent(
+      const result = await this.dependencies.runAcpAgent(
         kind,
         promptText,
         onSessionUpdate,
         state.abortController.signal,
       );
+      return this.resolveAgentRunResult(result);
     }
 
     const runner = new AcpAgentRunner(() => this.workspaceCwd());
-    return runner.run(primitive.agent, promptText, {
+    const result = await runner.run(primitive.agent, promptText, {
       onSessionUpdate,
       signal: state.abortController.signal,
       sideEffects: primitive.sideEffects,
     });
+    return this.resolveAgentRunResult(result);
+  }
+
+  private resolveAgentRunResult(result: string | AcpAgentRunResult): string {
+    if (typeof result === 'string') {
+      return result;
+    }
+    if (result.promotion === 'rejected') {
+      throw new SandcastlePromotionRejectedError();
+    }
+    if (result.promotion === 'cancelled') {
+      throw new SandcastlePromotionCancelledError();
+    }
+    return result.text;
   }
 
   private isPipelineAborted(sessionId: string, state: PipelineRunState, error: unknown): boolean {
@@ -547,6 +602,15 @@ export class PipelineService extends EventEmitter {
     return { configurable: { thread_id: sessionId } };
   }
 
+  private implementerUsesSandcastle(pipeline: PipelineDefinition): boolean {
+    const implementer = pipeline.primitives.implementer;
+    if (!implementer?.agent) {
+      return false;
+    }
+    const config = this.readAgentConfigs()[implementer.agent] as AgentConfigEntry | undefined;
+    return config ? isSandcastleAgentConfig(config) : false;
+  }
+
   private emitStatus(
     sessionId: string,
     status: PipelineStatus,
@@ -556,6 +620,7 @@ export class PipelineService extends EventEmitter {
     teamContext?: CompiledTeamMetadata,
     role?: TeamRoleId,
     agentName?: string,
+    implementerUsesSandcastle?: boolean,
   ): void {
     this.emit('status', {
       sessionId,
@@ -566,6 +631,7 @@ export class PipelineService extends EventEmitter {
       role,
       agentName,
       teamId: teamContext?.teamId,
+      implementerUsesSandcastle,
     } satisfies PipelineStatusEvent);
   }
 

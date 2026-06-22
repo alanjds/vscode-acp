@@ -32,8 +32,8 @@ export type HostToWebviewMessage =
   | { type: 'sessionInfoUpdate'; title?: string | null }
   | { type: 'externalUserMessage'; text: string }
   | { type: 'fileSearchResults'; requestId: number; results: FileSearchResult[] }
-  | { type: 'pipelinePlanReady'; plan: string; role?: PipelinePhase; agentName?: string; teamId?: string }
-  | { type: 'pipelineStatus'; status?: string; message?: string; stepId?: string; role?: PipelinePhase; agentName?: string; teamId?: string }
+  | { type: 'pipelinePlanReady'; plan: string; role?: PipelinePhase; agentName?: string; teamId?: string; implementerUsesSandcastle?: boolean }
+  | { type: 'pipelineStatus'; status?: string; message?: string; stepId?: string; role?: PipelinePhase; agentName?: string; teamId?: string; implementerUsesSandcastle?: boolean }
   | { type: 'reviewerRerunReady'; output: string }
   | { type: 'markdownRendered'; items: MarkdownRenderedItem[] }
   | { type: 'debugSnapshot'; snapshot: DebugSnapshot }

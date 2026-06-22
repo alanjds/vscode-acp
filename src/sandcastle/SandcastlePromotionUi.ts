@@ -13,6 +13,13 @@ export interface SandcastlePreview {
 }
 
 export type SandcastlePromotionMode = 'ask' | 'autoApply' | 'autoReject';
+export type SandcastlePromotionOutcome = 'applied' | 'no_changes' | 'rejected' | 'cancelled';
+
+export class SandcastleApplyError extends Error {
+  constructor() {
+    super('Sandcastle changes could not be applied.');
+  }
+}
 
 type PromotionChoice = 'diff' | 'apply' | 'reject';
 
@@ -74,17 +81,20 @@ export class SandcastlePromotionUi {
     return 'ask';
   }
 
-  async promote(connection: SandcastleConnection, sessionId: string): Promise<'applied' | 'rejected' | 'cancelled'> {
+  async promote(connection: SandcastleConnection, sessionId: string): Promise<SandcastlePromotionOutcome> {
     const preview = await this.preview(connection, sessionId);
     if (preview.filesChanged === 0) {
       await this.discard(connection, sessionId);
       void vscode.window.showInformationMessage('Sandcastle run completed with no file changes.');
-      return 'rejected';
+      return 'no_changes';
     }
 
     const mode = this.getPromotionMode();
     if (mode === 'autoApply') {
-      return (await this.apply(connection, sessionId)) ? 'applied' : 'cancelled';
+      if (!(await this.apply(connection, sessionId))) {
+        throw new SandcastleApplyError();
+      }
+      return 'applied';
     }
     if (mode === 'autoReject') {
       await this.reject(connection, sessionId);
@@ -99,7 +109,7 @@ export class SandcastlePromotionUi {
     sessionId: string,
     preview: SandcastlePreview,
     allowViewDiff: boolean,
-  ): Promise<'applied' | 'rejected' | 'cancelled'> {
+  ): Promise<SandcastlePromotionOutcome> {
     const items: Array<vscode.QuickPickItem & { choice: PromotionChoice }> = [];
     if (allowViewDiff) {
       items.push({
@@ -130,6 +140,9 @@ export class SandcastlePromotionUi {
       await this.reject(connection, sessionId);
       return 'rejected';
     }
-    return (await this.apply(connection, sessionId)) ? 'applied' : 'cancelled';
+    if (!(await this.apply(connection, sessionId))) {
+      throw new SandcastleApplyError();
+    }
+    return 'applied';
   }
 }

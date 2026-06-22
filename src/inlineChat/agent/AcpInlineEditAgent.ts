@@ -20,10 +20,10 @@ export class AcpInlineEditAgent implements InlineEditAgent {
   async generateEdit(request: InlineEditRequest, options?: InlineEditOptions): Promise<InlineEditResult> {
     const agentName = this.resolveAgentName();
     const prompt = this.buildPrompt(request);
-    const responseText = await this.runner.run(agentName, prompt, {
+    const result = await this.runner.run(agentName, prompt, {
       signal: options?.signal,
     });
-    return this.parseResponse(request, responseText);
+    return this.parseResponse(request, result.text);
   }
 
   private resolveAgentName(): string {

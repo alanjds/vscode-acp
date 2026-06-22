@@ -224,6 +224,33 @@ Chaque équipe se compile en un pipeline v2 avec ces étapes :
 - Les agents natifs écrivent directement dans le workspace
 - Tous les autres rôles (`planner`, `reviewer`, `tester`) sont en lecture seule (`sideEffects: none`)
 
+### Deux gates : approbation du plan vs promotion Sandcastle
+
+Les équipes et pipelines utilisent **deux gates indépendantes**. Ne les confondez pas :
+
+```
+planner → [GATE 1 : humain — plan] → implementer (sandbox) → [GATE 2 : Sandcastle — patch] → reviewer
+```
+
+Le verdict de promotion contrôle la suite : **Apply** et **aucun changement** continuent vers reviewer/tester ; **Reject** termine le run comme rejeté ; fermer la palette l'annule et nettoie le sandbox éphémère ; un échec d'Apply termine le run en erreur. Aucun snapshot d'équipe terminé n'est enregistré pour ces runs interrompus.
+
+| Gate | Quand | Qui décide | Réglage |
+|------|-------|------------|---------|
+| **Approbation du plan** | Après planner, avant implementer | Humain (Approuver/Rejeter + édition du `<proposed_plan>`) | Toujours obligatoire — indépendante de Sandcastle |
+| **Promotion Sandcastle** | Après un run implementer avec effets workspace | Humain ou auto selon config | `acp.sandcastle.promotion` (`ask` / `autoApply` / `autoReject`) |
+
+La gate 1 est une **interrupt LangGraph** (`type: approval`). Elle n'est jamais contournée parce que l'implementer est Sandcastle, parce que `acp.sandcastle.promotion` vaut `autoApply`, ou parce que Sandcastle auto-approuve les permissions outils dans le sandbox.
+
+Avec `acp.sandcastle.promotion: autoApply`, seule la **promotion du patch** est automatique après l'implementer. Vous devez toujours approuver le plan dans le chat avant le début de l'implémentation.
+
+**Test manuel (Feature Team avec implementer Sandcastle) :**
+
+1. Connecter **Feature Team** (pas un agent Sandcastle seul)
+2. Envoyer une demande
+3. Vérifier le bloc plan et les boutons **Approuver le plan** / **Rejeter le plan** ; la timeline affiche **Approbation du plan (humain)**
+4. Approuver → l'implementer tourne dans Sandcastle
+5. Ensuite seulement : QuickPick Apply/Reject (si `promotion: ask`) ou apply auto (si `autoApply`)
+
 ### Flux d'approbation
 
 1. Le planner génère un plan proposé
@@ -257,7 +284,7 @@ Feature Team (planification en cours...)
 │   ✓ Plan généré
 │
 Feature Team
-└── Approbation requise
+└── Approbation du plan (humain)
     
     <proposed_plan>
     1. Créer le modèle de profil utilisateur dans src/models/UserProfile.ts
@@ -265,7 +292,7 @@ Feature Team
     3. Ajouter les tests dans tests/userProfile.test.ts
     </proposed_plan>
     
-    [Modifier le Plan] [Approuver] [Rejeter]
+    [Modifier le Plan] [Approuver le plan] [Rejeter le plan]
 
 L'utilisateur clique sur Approuver
 

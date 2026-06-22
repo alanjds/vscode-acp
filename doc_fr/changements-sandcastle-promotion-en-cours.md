@@ -60,7 +60,7 @@ flowchart TD
   G --> H[QuickPick: Apply / Reject seulement]
   D -->|Apply| E
   D -->|Reject| F
-  D -->|Échap / fermeture| I[cancelled — sandbox intact]
+  D -->|Échap / fermeture| I[cancelled — sandbox nettoyé]
   E --> J[git apply --check + git apply sur workspace]
   J --> K[discardSessionSandbox — worktree supprimé]
   F --> K
@@ -73,7 +73,7 @@ flowchart TD
 | **View Diff** | Ouvre un document `.diff` à côté (métadonnées branche + patch binaire) | Aucun (preview déjà obtenu) | Lecture seule |
 | **Apply** | Toast succès ou erreur | `sandcastle/apply` | Patch écrit en fichier temporaire → `git apply --check` puis `git apply` sur le **workspace principal** → sandbox détruit |
 | **Reject** | Toast confirmation | `sandcastle/reject` | Aucune modification du workspace → sandbox détruit |
-| **Annuler** (QuickPick fermé avec Échap) | Rien | Aucun | Sandbox **conservé** ; relancer `promote()` ou utiliser les commandes palette |
+| **Annuler** (QuickPick fermé avec Échap) | Rien | `sandcastle/reject` par le runner | Pipeline `cancelled`, sandbox éphémère détruit, reviewer/tester non exécutés |
 
 **Apply modifie quoi exactement ?** Le patch Git est appliqué sur `session.cwd` (votre workspace VS Code), **pas** sur le worktree Docker. Le worktree sert uniquement à produire le diff et à isoler l’agent.
 
@@ -118,10 +118,10 @@ Le test de régression `promote ask shows apply/reject only once after viewing d
 
 | Situation | Comportement |
 |-----------|--------------|
-| **0 fichier modifié** | `filesChanged === 0` → `discard()` + message « Sandcastle run completed with no file changes. » → outcome `rejected` |
-| **Échec `git apply`** | Toast d’erreur ; le sandbox reste disponible pour réessayer Apply ou Reject |
+| **0 fichier modifié** | `filesChanged === 0` → `discard()` + outcome `no_changes` → reviewer/tester continuent |
+| **Échec `git apply`** | Toast d’erreur → pipeline `error`, reviewer/tester non exécutés |
 | **Reject via commande palette** | Une **modale de confirmation** séparée (« Reject all changes… ») — distincte du QuickPick de `promote()` |
-| **Fermeture du QuickPick** | Outcome `cancelled` ; le worktree Sandcastle reste en place |
+| **Fermeture du QuickPick** | Outcome `cancelled` ; le runner détruit le worktree et arrête le pipeline |
 
 ### Commandes manuelles (chat persistant)
 
@@ -175,12 +175,19 @@ La branche sandbox est créée dans `ensureSandbox()` : `sandcastle/acp/<provide
 
 ## Permissions sandbox vs gate de promotion
 
-Deux couches de sécurité complémentaires :
+Trois gates à distinguer pour les équipes/pipelines avec implementer Sandcastle :
 
-| Couche | Quand | Comportement |
-|--------|-------|--------------|
-| **1. Pendant le run** | L’agent lit/écrit/exécute dans le worktree | `autoApproveAll` sur les connexions Sandcastle → **aucun prompt** permission ACP (contrairement aux agents natifs qui respectent `acp.autoApprove.*`) |
-| **2. Après le run** | Promotion vers le workspace principal | Gate Apply/Reject (ou mode auto) → **seule** modification possible du dépôt principal |
+| Gate | Quand | Comportement |
+|------|-------|--------------|
+| **0. Approbation du plan** | Après le planner, avant l’implementer | Interrupt humaine obligatoire — **indépendante** de `acp.sandcastle.promotion` |
+| **1. Pendant le run** | L’agent lit/écrit/exécute dans le worktree | `autoApproveAll` sur les connexions Sandcastle → **aucun prompt** permission ACP |
+| **2. Après le run** | Promotion vers le workspace principal | Gate Apply/Reject (ou mode auto via `acp.sandcastle.promotion`) |
+
+```
+planner → [GATE 0 : humain — plan] → implementer (sandbox) → [GATE 2 : Sandcastle — patch] → reviewer
+```
+
+`acp.sandcastle.promotion: autoApply` n’affecte que la **gate 2**. Voir [doc_fr/agent-teams.md](agent-teams.md) — section « Deux gates ».
 
 C’est le « yolo contrôlé » d’[ADR-0011](adr/0011-sandbox-worktree.md) adapté à Sandcastle : le risque est contenu par l’isolation Docker/worktree, pas par des popups répétés à chaque outil. La gate Git (`apply --check`) reste le filet avant d’écrire dans le workspace.
 
@@ -190,7 +197,7 @@ C’est le « yolo contrôlé » d’[ADR-0011](adr/0011-sandbox-worktree.md) ad
 
 | Réglage | Valeurs | Effet |
 |---------|---------|-------|
-| `acp.sandcastle.promotion` | `ask` (défaut), `autoApply`, `autoReject` | Comportement de `promote()` en fin de run pipeline |
+| `acp.sandcastle.promotion` | `ask` (défaut), `autoApply`, `autoReject` | Comportement de `promote()` en fin de run pipeline **implementer** — n'auto-approuve **pas** le plan |
 | `acp.autoApprove.read` / `.edit` / `.execute` | `ask`, `allow` | Agents **natifs** uniquement ; ignorés quand `autoApproveAll` est actif (Sandcastle) |
 | `acp.autoApprovePermissions` | `ask`, `allowAll` | Réglage global legacy ; distinct de la gate Sandcastle |
 
@@ -228,5 +235,5 @@ npm run sandcastle:smoke:cursor   # Reject doit garder le workspace principal in
 |----------|---------|
 | Comment promouvoir en **chat Codex Sandcastle** ? | Commandes palette Show Diff → Apply (ou Reject). Pas de popup auto. |
 | View Diff boucle-t-il ? | Non avec le QuickPick actuel ; oui avec l’ancienne modale. |
-| Je ferme le QuickPick sans choisir ? | Sandbox intact, outcome `cancelled`. |
+| Je ferme le QuickPick sans choisir ? | Pipeline annulé, sandbox éphémère nettoyé, aucune revue lancée. |
 | `autoApply` est-il sans risque ? | L’agent a eu carte blanche *dans* le sandbox ; `autoApply` saute seulement la revue humaine, pas `git apply --check`. |

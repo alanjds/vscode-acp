@@ -215,6 +215,7 @@ export class ChatWebviewController implements vscode.Disposable {
       role: event.role,
       agentName: event.agentName,
       teamId: event.teamId,
+      implementerUsesSandcastle: event.implementerUsesSandcastle,
     });
   };
 
@@ -232,6 +233,7 @@ export class ChatWebviewController implements vscode.Disposable {
       role: event.role,
       agentName: event.agentName,
       teamId: event.teamId,
+      implementerUsesSandcastle: event.implementerUsesSandcastle,
     });
   };
 

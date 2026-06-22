@@ -81,7 +81,7 @@ export type AppAction =
   | { type: 'appendToolCall'; toolCallId: string; title: string; status: ToolCallStatus }
   | { type: 'updateToolCall'; toolCallId: string; title?: string; status: ToolCallStatus }
   | { type: 'appendPlan'; plan: PlanUpdate }
-  | { type: 'appendPipelinePlan'; plan: string; role?: PipelinePhase; agentName?: string }
+  | { type: 'appendPipelinePlan'; plan: string; role?: PipelinePhase; agentName?: string; implementerUsesSandcastle?: boolean }
   | { type: 'updatePipelinePlanStatus'; status: PipelinePlanStatus; message?: string }
   | { type: 'updatePipelineTimeline'; timeline: PipelineTimelineStep[] }
   | { type: 'setActivePipelineRole'; role: PipelinePhase | null; agentName?: string | null }
@@ -776,6 +776,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
               status: 'pending',
               role: action.role,
               agentName: action.agentName,
+              implementerUsesSandcastle: action.implementerUsesSandcastle,
             },
           ],
         },

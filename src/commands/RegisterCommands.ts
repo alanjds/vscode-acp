@@ -12,14 +12,10 @@ import { SessionManager } from '../core/SessionManager';
 import { ChatWebviewProvider } from '../ui/ChatWebviewProvider';
 import { ChatEditorPanelManager } from '../ui/ChatEditorPanelManager';
 import { SessionTreeProvider } from '../ui/SessionTreeProvider';
-import { PipelineService } from '../pipeline/PipelineService';
-import { serializeCompiledTeamPipeline } from '../pipeline/AgentTeamCompiler';
 import { getOutputChannel, getTrafficChannel, logError } from '../utils/Logger';
 import { sendEvent } from '../utils/TelemetryManager';
-import { SandcastlePromotionUi } from '../sandcastle/SandcastlePromotionUi';
 
 export const EDITOR_CONTEXT_LINK_STATE_KEY = 'acp.editorContextLinked';
-export const PIPELINE_ENABLED_CONTEXT_KEY = 'acp.pipelineEnabled';
 
 const FOCUS_CHAT_COMMAND = 'acp-chat.focus';
 
@@ -30,7 +26,6 @@ interface RegisterCommandsDependencies {
   chatWebviewProvider: ChatWebviewProvider;
   chatEditorPanelManager: ChatEditorPanelManager;
   historyStore: SessionHistoryStore;
-  pipelineService: PipelineService;
 }
 
 export function registerCommands({
@@ -40,7 +35,6 @@ export function registerCommands({
   chatWebviewProvider,
   chatEditorPanelManager,
   historyStore,
-  pipelineService,
 }: RegisterCommandsDependencies): vscode.Disposable[] {
   const resolveAgentName = async (agentNameOrItem?: string | any): Promise<string | undefined> => {
     if (typeof agentNameOrItem === 'string') {
@@ -293,22 +287,6 @@ export function registerCommands({
     sessionTreeProvider.refresh();
   });
 
-  const setPipelineEnabled = async (enabled: boolean): Promise<void> => {
-    const config = vscode.workspace.getConfiguration('acp');
-    await config.update('pipeline.enabled', enabled, vscode.ConfigurationTarget.Workspace);
-    await vscode.commands.executeCommand('setContext', PIPELINE_ENABLED_CONTEXT_KEY, enabled);
-    sessionTreeProvider.invalidate();
-    vscode.window.showInformationMessage(`ACP pipeline agents ${enabled ? 'enabled' : 'disabled'}.`);
-  };
-
-  const enablePipelineAgentsCmd = vscode.commands.registerCommand('acp.enablePipelineAgents', async () => {
-    await setPipelineEnabled(true);
-  });
-
-  const disablePipelineAgentsCmd = vscode.commands.registerCommand('acp.disablePipelineAgents', async () => {
-    await setPipelineEnabled(false);
-  });
-
   const refreshSessionsCmd = vscode.commands.registerCommand('acp.refreshSessions', (arg?: any) => {
     const agentName = typeof arg === 'string' ? arg : arg?.agentName;
     sessionTreeProvider.invalidate(agentName);
@@ -505,107 +483,6 @@ export function registerCommands({
     }
   });
 
-  const resolveActiveSandcastle = () => {
-    const activeSession = sessionManager.getActiveSession();
-    if (!activeSession) {
-      throw new Error('No active ACP session.');
-    }
-    const config = getAgentConfig(activeSession.agentName);
-    if (!config || !isSandcastleAgentConfig(config)) {
-      throw new Error('The active agent is not managed by Sandcastle.');
-    }
-    const connection = sessionManager.getConnectionForSession(activeSession.sessionId);
-    if (!connection) {
-      throw new Error('The active Sandcastle connection is unavailable.');
-    }
-    return { activeSession, connection: connection.connection };
-  };
-
-  const sandcastleShowDiffCmd = vscode.commands.registerCommand('acp.sandcastle.showDiff', async () => {
-    try {
-      const { activeSession, connection } = resolveActiveSandcastle();
-      const ui = new SandcastlePromotionUi();
-      await ui.showDiff(await ui.preview(connection, activeSession.sessionId));
-    } catch (error) {
-      void vscode.window.showErrorMessage(error instanceof Error ? error.message : String(error));
-    }
-  });
-
-  const sandcastleApplyCmd = vscode.commands.registerCommand('acp.sandcastle.apply', async () => {
-    try {
-      const { activeSession, connection } = resolveActiveSandcastle();
-      await new SandcastlePromotionUi().apply(connection, activeSession.sessionId);
-    } catch (error) {
-      void vscode.window.showErrorMessage(error instanceof Error ? error.message : String(error));
-    }
-  });
-
-  const sandcastleRejectCmd = vscode.commands.registerCommand('acp.sandcastle.reject', async () => {
-    try {
-      const { activeSession, connection } = resolveActiveSandcastle();
-      const confirm = await vscode.window.showWarningMessage(
-        'Reject all changes in the active Sandcastle sandbox?',
-        { modal: true },
-        'Reject',
-      );
-      if (confirm === 'Reject') {
-        await new SandcastlePromotionUi().reject(connection, activeSession.sessionId);
-      }
-    } catch (error) {
-      void vscode.window.showErrorMessage(error instanceof Error ? error.message : String(error));
-    }
-  });
-
-  const showCompiledTeamPipelineCmd = vscode.commands.registerCommand('acp.showCompiledTeamPipeline', async (agentNameOrItem?: string | any) => {
-    const agentName = await resolveAgentName(agentNameOrItem);
-    if (!agentName) { return; }
-
-    const pipeline = pipelineService.getCompiledPipelineForTeam(agentName.replace(/ \(invalid\)$/, ''));
-    if (!pipeline) {
-      vscode.window.showWarningMessage(`"${agentName}" is not a valid agent team.`);
-      return;
-    }
-
-    const doc = await vscode.workspace.openTextDocument({
-      content: serializeCompiledTeamPipeline(pipeline),
-      language: 'json',
-    });
-    await vscode.window.showTextDocument(doc, { preview: true });
-  });
-
-  const rerunTeamReviewerCmd = vscode.commands.registerCommand('acp.rerunTeamReviewer', async (agentNameOrItem?: string | any) => {
-    const activeSession = sessionManager.getActiveSession();
-    const agentName = typeof agentNameOrItem === 'string'
-      ? agentNameOrItem
-      : activeSession?.agentName;
-    if (!agentName) {
-      vscode.window.showWarningMessage('Connect to an agent team before re-running the reviewer.');
-      return;
-    }
-
-    if (!pipelineService.getLastTeamRunSnapshot()) {
-      vscode.window.showWarningMessage('No completed team run is available for reviewer re-run.');
-      return;
-    }
-
-    try {
-      await vscode.window.withProgress(
-        {
-          location: vscode.ProgressLocation.Notification,
-          title: `Re-running reviewer for ${agentName}...`,
-          cancellable: true,
-        },
-        async (_progress, token) => {
-          token.onCancellationRequested(() => pipelineService.cancelReviewerRerun());
-          const output = await pipelineService.rerunTeamReviewer(agentName.replace(/ \(invalid\)$/, ''));
-          chatWebviewProvider.notifyReviewerRerun(output);
-        },
-      );
-    } catch (e: any) {
-      await showClassifiedAgentError('Reviewer re-run failed', e);
-    }
-  });
-
   return [
     connectAgentCmd,
     connectAgentWithCurrentContextCmd,
@@ -622,8 +499,6 @@ export function registerCommands({
     setModeCmd,
     setModelCmd,
     refreshAgentsCmd,
-    enablePipelineAgentsCmd,
-    disablePipelineAgentsCmd,
     refreshSessionsCmd,
     openSessionCmd,
     openSessionWithCurrentContextCmd,
@@ -635,11 +510,6 @@ export function registerCommands({
     enableEditorContextLinkCmd,
     disableEditorContextLinkCmd,
     browseRegistryCmd,
-    sandcastleShowDiffCmd,
-    sandcastleApplyCmd,
-    sandcastleRejectCmd,
-    showCompiledTeamPipelineCmd,
-    rerunTeamReviewerCmd,
   ];
 }
 

@@ -364,6 +364,7 @@ export function normalizePipelinePlanHistoryItem(value: unknown): PipelinePlanHi
       ? candidate.role
       : undefined,
     agentName: typeof candidate.agentName === 'string' ? candidate.agentName : undefined,
+    implementerUsesSandcastle: candidate.implementerUsesSandcastle === true ? true : undefined,
   };
 }
 

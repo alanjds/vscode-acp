@@ -550,7 +550,7 @@
             "autoReject"
           ],
           "default": "ask",
-          "description": "How Sandcastle workspace changes are promoted after a run. 'ask' shows Apply/Reject once (View Diff does not loop). 'autoApply' merges without prompting (yolo). 'autoReject' discards without prompting."
+          "description": "How Sandcastle workspace changes are promoted after a run. Applies only to patch promotion after the implementer step — it does not auto-approve the plan. 'ask' shows Apply/Reject once (View Diff does not loop). 'autoApply' merges without prompting (yolo). 'autoReject' discards without prompting."
         },
         "acp.defaultWorkingDirectory": {
           "type": "string",
@@ -592,7 +592,7 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.21.1",
-    "@ai-hero/sandcastle": "0.6.4",
+    "@ai-hero/sandcastle": "^0.6.4",
     "@langchain/core": "^1.1.49",
     "@langchain/langgraph": "^1.4.2",
     "@vscode/extension-telemetry": "^1.5.0",

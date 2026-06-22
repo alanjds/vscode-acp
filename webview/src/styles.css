@@ -497,6 +497,12 @@ body {
   font-weight: 600;
 }
 
+.pipeline-plan-subtitle {
+  margin-top: 4px;
+  font-size: 0.86em;
+  opacity: 0.85;
+}
+
 .pipeline-plan-status {
   margin-top: 2px;
   font-size: 0.86em;

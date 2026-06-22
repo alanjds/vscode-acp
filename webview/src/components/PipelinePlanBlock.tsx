@@ -18,9 +18,14 @@ export function PipelinePlanBlock({
   const [draft, setDraft] = useState(item.plan);
   const isPending = item.status === 'pending';
   const isBusy = item.status === 'implementing';
-  const title = item.role === 'planner' && item.agentName
-    ? `Proposed Plan — Planner (${item.agentName})`
-    : 'Proposed Plan';
+  const title = isPending
+    ? 'Proposed plan — approval required'
+    : item.role === 'planner' && item.agentName
+      ? `Proposed Plan — Planner (${item.agentName})`
+      : 'Proposed Plan';
+  const subtitle = isPending && item.implementerUsesSandcastle
+    ? 'File changes will be isolated in Sandcastle after you approve the plan.'
+    : undefined;
 
   useEffect(() => {
     if (isPending) {
@@ -33,6 +38,7 @@ export function PipelinePlanBlock({
       <div className="pipeline-plan-header">
         <div>
           <div className="pipeline-plan-title">{title}</div>
+          {subtitle ? <div className="pipeline-plan-subtitle">{subtitle}</div> : null}
           {item.message ? <div className="pipeline-plan-status"><MarkdownDisplay>{item.message}</MarkdownDisplay></div> : null}
         </div>
         {isBusy ? <span className="spinner" /> : null}
@@ -51,14 +57,14 @@ export function PipelinePlanBlock({
               type="button"
               onClick={onReject}
             >
-              Reject
+              Reject plan
             </button>
             <button
               className="pipeline-plan-btn primary"
               type="button"
               onClick={() => onApprove(draft)}
             >
-              Approve
+              Approve plan
             </button>
           </div>
         </>

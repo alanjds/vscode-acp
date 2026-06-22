@@ -163,6 +163,7 @@ export type PipelinePlanHistoryItem = {
   message?: string;
   role?: PipelinePhase;
   agentName?: string;
+  implementerUsesSandcastle?: boolean;
 };
 
 export type PipelineRoleOutputHistoryItem = {

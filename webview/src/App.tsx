@@ -250,6 +250,7 @@ export function App(): JSX.Element {
               plan: message.plan,
               role: normalizePipelinePhase(message.role),
               agentName: typeof message.agentName === 'string' ? message.agentName : undefined,
+              implementerUsesSandcastle: message.implementerUsesSandcastle === true,
             });
             if (typeof message.teamId === 'string') {
               dispatch({

@@ -6,7 +6,7 @@ import { AgentManager } from '../core/AgentManager';
 import { ConnectionInfo, ConnectionManager } from '../core/ConnectionManager';
 import { SessionUpdateHandler } from '../handlers/SessionUpdateHandler';
 import { getAgentConfig, isSandcastleAgentConfig } from '../config/AgentConfig';
-import { SandcastlePromotionUi } from '../sandcastle/SandcastlePromotionUi';
+import { SandcastlePromotionUi, type SandcastlePromotionOutcome } from '../sandcastle/SandcastlePromotionUi';
 import { log, logError } from '../utils/Logger';
 import { RunAbortedError } from './RunAbortedError';
 
@@ -16,12 +16,17 @@ export interface AcpAgentRunOptions {
   sideEffects?: 'none' | 'workspace';
 }
 
+export interface AcpAgentRunResult {
+  text: string;
+  promotion?: SandcastlePromotionOutcome;
+}
+
 export class AcpAgentRunner {
   constructor(
     private readonly workspaceCwd: () => string,
   ) {}
 
-  async run(agentName: string, promptText: string, options: AcpAgentRunOptions = {}): Promise<string> {
+  async run(agentName: string, promptText: string, options: AcpAgentRunOptions = {}): Promise<AcpAgentRunResult> {
     const config = getAgentConfig(agentName);
     if (!config) {
       throw new Error(`Pipeline agent "${agentName}" is not configured in acp.agents.`);
@@ -114,16 +119,20 @@ export class AcpAgentRunner {
         throw new RunAbortedError();
       }
 
+      let promotion: SandcastlePromotionOutcome | undefined;
       if (isSandcastleAgentConfig(config)) {
         const promotionUi = new SandcastlePromotionUi();
         if (options.sideEffects === 'workspace') {
-          await promotionUi.promote(connInfo.connection, sessionId);
+          promotion = await promotionUi.promote(connInfo.connection, sessionId);
+          if (promotion === 'cancelled') {
+            await promotionUi.discard(connInfo.connection, sessionId);
+          }
         } else {
           await promotionUi.discard(connInfo.connection, sessionId);
         }
       }
 
-      return collectedText.trim();
+      return { text: collectedText.trim(), promotion };
     } finally {
       options.signal?.removeEventListener('abort', onAbort);
       sessionUpdateHandler.removeListener(listener);

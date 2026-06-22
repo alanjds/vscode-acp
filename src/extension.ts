@@ -18,16 +18,15 @@ import { getEditorContextSnapshot, initializeOpenEditorsTracker, trackLastKnownE
 import { PipelineService } from './pipeline/PipelineService';
 import {
   EDITOR_CONTEXT_LINK_STATE_KEY,
-  PIPELINE_ENABLED_CONTEXT_KEY,
   registerCommands,
 } from './commands/RegisterCommands';
-import { isPipelineEnabled } from './config/PipelineConfig';
 import { log, disposeChannels } from './utils/Logger';
 import { initTelemetry, sendEvent } from './utils/TelemetryManager';
 import { version as extensionVersion } from '../package.json';
-import { InlineChatController } from './inlineChat/InlineChatController';
-import { AcpInlineEditAgent } from './inlineChat/agent/AcpInlineEditAgent';
-import { PatchApplyService } from './inlineChat/patch/PatchApplyService';
+import { activateFeaturePlugins } from './plugins/FeaturePluginRegistry';
+import { InlineChatPlugin } from './plugins/inlineChat/InlineChatPlugin';
+import { OrchestrationPlugin } from './plugins/orchestration/OrchestrationPlugin';
+import { SandcastlePlugin } from './plugins/sandcastle/SandcastlePlugin';
 
 export function activate(context: vscode.ExtensionContext): void {
   log('ACP Client extension activating...');
@@ -52,12 +51,6 @@ export function activate(context: vscode.ExtensionContext): void {
     () => workspaceIdentity().cwd,
   );
   sessionManager.setPipelineService(pipelineService);
-
-  const inlineChatController = new InlineChatController(
-    context,
-    new AcpInlineEditAgent(workspaceIdentity, sessionManager),
-    new PatchApplyService(),
-  );
 
   // Persistent client-side session-history cache (used as the tier-2 tree
   // source for agents that support session/load or session/resume but not
@@ -97,7 +90,6 @@ export function activate(context: vscode.ExtensionContext): void {
   );
   chatWebviewProvider.setEditorContextLinked(initialEditorContextLinked);
   void vscode.commands.executeCommand('setContext', EDITOR_CONTEXT_LINK_STATE_KEY, initialEditorContextLinked);
-  void vscode.commands.executeCommand('setContext', PIPELINE_ENABLED_CONTEXT_KEY, isPipelineEnabled());
   const chatViewRegistration = vscode.window.registerWebviewViewProvider(
     ChatWebviewProvider.viewType,
     chatWebviewProvider,
@@ -109,36 +101,6 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   const statusBarManager = new StatusBarManager(sessionManager);
-  const pipelineYamlWatcher = vscode.workspace.createFileSystemWatcher('**/.acp/pipelines/*.yaml');
-  const pipelineYmlWatcher = vscode.workspace.createFileSystemWatcher('**/.acp/pipelines/*.yml');
-  const refreshPipelineAgents = () => {
-    sessionTreeProvider.invalidate();
-  };
-  const teamYamlWatcher = vscode.workspace.createFileSystemWatcher('**/.acp/teams/*.yaml');
-  const teamYmlWatcher = vscode.workspace.createFileSystemWatcher('**/.acp/teams/*.yml');
-  teamYamlWatcher.onDidCreate(refreshPipelineAgents);
-  teamYamlWatcher.onDidChange(refreshPipelineAgents);
-  teamYamlWatcher.onDidDelete(refreshPipelineAgents);
-  teamYmlWatcher.onDidCreate(refreshPipelineAgents);
-  teamYmlWatcher.onDidChange(refreshPipelineAgents);
-  teamYmlWatcher.onDidDelete(refreshPipelineAgents);
-  pipelineYamlWatcher.onDidCreate(refreshPipelineAgents);
-  pipelineYamlWatcher.onDidChange(refreshPipelineAgents);
-  pipelineYamlWatcher.onDidDelete(refreshPipelineAgents);
-  pipelineYmlWatcher.onDidCreate(refreshPipelineAgents);
-  pipelineYmlWatcher.onDidChange(refreshPipelineAgents);
-  pipelineYmlWatcher.onDidDelete(refreshPipelineAgents);
-  const pipelineConfigWatcher = vscode.workspace.onDidChangeConfiguration(event => {
-    if (
-      event.affectsConfiguration('acp.agents')
-      || event.affectsConfiguration('acp.pipeline.enabled')
-      || event.affectsConfiguration('acp.defaultWorkingDirectory')
-      || event.affectsConfiguration('acp.instructions.maxBytes')
-    ) {
-      void vscode.commands.executeCommand('setContext', PIPELINE_ENABLED_CONTEXT_KEY, isPipelineEnabled());
-      refreshPipelineAgents();
-    }
-  });
 
   // Notify chat webview when active session changes
   sessionManager.on('active-session-changed', () => {
@@ -205,15 +167,25 @@ export function activate(context: vscode.ExtensionContext): void {
     chatWebviewProvider,
     chatEditorPanelManager,
     historyStore,
-    pipelineService,
   });
   const openDebugSnapshotCmd = vscode.commands.registerCommand('acp.openDebugSnapshot', async () => {
     sendEvent('command/openDebugSnapshot');
     await debugWebviewPanel.open();
   });
-  const openInlineChatCmd = vscode.commands.registerCommand('damien.inlineChat.open', async () => {
-    await inlineChatController.open();
-  });
+  const featurePlugins = activateFeaturePlugins([
+    {
+      plugin: new OrchestrationPlugin(),
+      context: { sessionManager, sessionTreeProvider, chatWebviewProvider, pipelineService },
+    },
+    {
+      plugin: new SandcastlePlugin(),
+      context: { sessionManager },
+    },
+    {
+      plugin: new InlineChatPlugin(),
+      context: { extensionContext: context, sessionManager, workspaceIdentity },
+    },
+  ]);
 
   // --- Register disposables ---
   context.subscriptions.push(
@@ -224,14 +196,8 @@ export function activate(context: vscode.ExtensionContext): void {
     chatController,
     chatEditorPanelManager,
     statusBarManager,
-    pipelineYamlWatcher,
-    pipelineYmlWatcher,
-    teamYamlWatcher,
-    teamYmlWatcher,
-    pipelineConfigWatcher,
     openDebugSnapshotCmd,
-    openInlineChatCmd,
-    inlineChatController,
+    featurePlugins,
     ...commandDisposables,
     {
       dispose: () => {

@@ -45,7 +45,7 @@ export function PipelineRoleTimeline({ timeline }: PipelineRoleTimelineProps): J
 export function createDefaultTeamTimeline(includeTester = false): PipelineTimelineStep[] {
   const steps: PipelineTimelineStep[] = [
     { id: 'planner', label: 'Planner', status: 'pending' },
-    { id: 'approval', label: 'Approval', status: 'pending' },
+    { id: 'approval', label: 'Plan approval (human)', status: 'pending' },
     { id: 'implementer', label: 'Implementer', status: 'pending' },
     { id: 'reviewer', label: 'Reviewer', status: 'pending' },
   ];
@@ -114,7 +114,7 @@ export function applyPipelineStatusToTimeline(
       }
       break;
     case 'rejected':
-      setStepStatus(next, 'approval', 'error');
+      setStepStatus(next, stepId === 'implementer' ? 'implementer' : 'approval', 'error');
       break;
     case 'error':
       if (stepId) {

@@ -252,9 +252,9 @@ Quand `acp.pipeline.enabled` est à `true`, chaque pipeline valide apparaît com
 
 1. Se connecter à l’agent pipeline
 2. Envoyer un prompt — LangGraph exécute le workflow
-3. Relire ou modifier le plan à l’étape d’approbation
+3. Relire ou modifier le plan à l’étape d’approbation (**gate humaine obligatoire**, même si l’implementer est Sandcastle ou si `acp.sandcastle.promotion` vaut `autoApply`)
 4. Approuver pour continuer, ou rejeter pour arrêter
-5. Les étapes suivantes invoquent les agents ACP configurés (les agents Sandcastle isolent les étapes qui modifient le workspace)
+5. Les étapes suivantes invoquent les agents ACP configurés ; la promotion Sandcastle (Apply/Reject) intervient **après** l’implementer, pas avant l’approbation du plan
 
 Voir [doc_fr/pipelines-langgraph.md](doc_fr/pipelines-langgraph.md) · English: [docs/pipeline-a2a.md](docs/pipeline-a2a.md)
 

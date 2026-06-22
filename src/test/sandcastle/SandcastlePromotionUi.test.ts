@@ -49,7 +49,7 @@ suite('SandcastlePromotionUi', () => {
 
     const outcome = await ui.promote(connection, 'session-2');
 
-    assert.strictEqual(outcome, 'rejected');
+    assert.strictEqual(outcome, 'no_changes');
     assert.deepStrictEqual(calls, ['sandcastle/preview', 'sandcastle/reject']);
   });
 
@@ -129,5 +129,52 @@ suite('SandcastlePromotionUi', () => {
     assert.strictEqual(outcome, 'applied');
     assert.deepStrictEqual(quickPickCalls, [3, 2]);
     assert.deepStrictEqual(calls, ['sandcastle/preview', 'sandcastle/apply']);
+  });
+
+  test('promote returns rejected when the user rejects changes', async () => {
+    vscode.window.showQuickPick = async (items: any) =>
+      items.find((item: any) => item.choice === 'reject');
+    const calls: string[] = [];
+    const connection = {
+      extMethod: async (method: string) => {
+        calls.push(method);
+        return method === 'sandcastle/preview'
+          ? { diff: 'diff', filesChanged: 1, branch: 'b', baseRef: 'main', worktreePath: '/tmp/wt' }
+          : { success: true };
+      },
+    };
+
+    assert.strictEqual(await new SandcastlePromotionUi().promote(connection, 'session-5'), 'rejected');
+    assert.deepStrictEqual(calls, ['sandcastle/preview', 'sandcastle/reject']);
+  });
+
+  test('promote returns cancelled without rejecting when the picker closes', async () => {
+    vscode.window.showQuickPick = async () => undefined;
+    const calls: string[] = [];
+    const connection = {
+      extMethod: async (method: string) => {
+        calls.push(method);
+        return { diff: 'diff', filesChanged: 1, branch: 'b', baseRef: 'main', worktreePath: '/tmp/wt' };
+      },
+    };
+
+    assert.strictEqual(await new SandcastlePromotionUi().promote(connection, 'session-6'), 'cancelled');
+    assert.deepStrictEqual(calls, ['sandcastle/preview']);
+  });
+
+  test('promote throws when apply fails', async () => {
+    vscode.workspace.getConfiguration = () => ({
+      get: (key: string, defaultValue?: unknown) => key === 'sandcastle.promotion' ? 'autoApply' : defaultValue,
+    }) as vscode.WorkspaceConfiguration;
+    const connection = {
+      extMethod: async (method: string) => method === 'sandcastle/preview'
+        ? { diff: 'diff', filesChanged: 1, branch: 'b', baseRef: 'main', worktreePath: '/tmp/wt' }
+        : { success: false, message: 'Conflict.' },
+    };
+
+    await assert.rejects(
+      () => new SandcastlePromotionUi().promote(connection, 'session-7'),
+      /could not be applied/,
+    );
   });
 });

@@ -1,6 +1,6 @@
 # Roadmap ACP Client
 
-Cette roadmap regroupe les idées d'évolution et les possibilités pour ACP Client, une extension VS Code permettant de connecter l'éditeur à des agents compatibles avec l'Agent Client Protocol.
+Cette roadmap regroupe l'état d'avancement, les idées d'évolution et les possibilités pour ACP Client, une extension VS Code permettant de connecter l'éditeur à des agents compatibles avec l'Agent Client Protocol.
 
 ## Objectifs du Projet
 
@@ -9,216 +9,270 @@ Cette roadmap regroupe les idées d'évolution et les possibilités pour ACP Cli
 - Rendre les workflows agentiques plus sûrs grâce à une gestion claire des permissions, du contexte envoyé et des actions terminal/fichier.
 - Explorer des scénarios multi-agents, notamment la séparation entre planification et implémentation.
 
-## Priorités Court Terme
+---
 
-- Renforcer le sandbox v1 : compléter les garde-fous applicatifs sur le terminal et le réseau, expliciter ses limites dans l'UI et évaluer une isolation OS optionnelle.
+## Réalisé
+
+### Chat, sessions et contexte
+
+- Chat interactif : Markdown, streaming assistant, outils repliables, blocs de réflexion.
+- Arbre des sessions par agent ; reprise via `session/list`, `session/load`, `session/resume` quand l'agent le supporte, sinon cache local par workspace.
+- Options de session dynamiques (modèle, mode, niveau de raisonnement, …).
+- Mentions de fichiers (`@`), commandes slash, persistance du chat (barre latérale ou éditeur).
+- Contexte éditeur opt-in (fichier, curseur, sélection, langage, éditeurs ouverts).
+- Transfert de contexte entre agents/sessions ; familles de contexte dans l'arbre.
+- Permissions configurables (`ask` / `allowAll`) via `PermissionHandler`.
+
+### Orchestration multi-agents
+
+- Pipelines LangGraph v2 déclaratifs (`.acp/pipelines/*.yaml`) exposés comme agents virtuels.
+- Équipes d'agents (`.acp/teams/*.yaml`) compilées en pipeline v2 à l'exécution (planner → approbation → implementer → reviewer → tester).
+- Pipeline `plan-execute-verify` et catalogue d'exemples dans `.acp/pipelines/save/`.
+- Instructions partagées par rôle via `InstructionResolver` et fichiers `.acp/agents/*.md`.
+- Runs éphémères (`EphemeralRun`, `EphemeralSandcastleRun`) pour les étapes pipeline et l'inline chat.
+- Bloc UI d'approbation de plan (`PipelinePlanBlock`) dans la webview.
+
+### Skills workspace (base livrée)
+
+- Catalogue `.agents/skills/**/SKILL.md` : frontmatter, `disable-model-invocation`, cache par mtime.
+- Injection du catalogue au premier prompt (`<available_skills>`) ; expansion `/skill-name` vers le contenu complet.
+- Settings `acp.skills.*` ; désactivation par agent (`skills: false` dans la config).
+- Agents ciblés par défaut : Cursor CLI, Codex Sandcastle, Cursor Sandcastle.
+- Symlink `.cursor/skills` → `.agents/skills` pour Cursor CLI (`SkillsWorkspacePrep`).
+- Mount `.agents` dans le conteneur Sandcastle (`SandboxMounts`) pour lecture des skills en isolation.
+- Branchement dans `SessionManager` (chat persistant) et `EphemeralRun` (pipeline / inline).
+- Tests unitaires : `SkillsCatalog`, `SkillsPromptBuilder`, `SkillsWorkspacePrep`.
+
+### Sandcastle (ex-sandbox v1)
+
+- Agents **Codex Sandcastle** et **Cursor Sandcastle** : Docker + worktree git isolé.
+- Bridge ACP (`transport: "sandcastle"`) ; historique de conversation borné côté bridge (ADR-0014).
+- Promotion **Apply** / **Reject** ; UI QuickPick et modes `ask` / `autoApply` / `autoReject`.
+- Erreurs provider enrichies (quota, authentification).
+- Documentation : `docs/sandcastle-architecture.md`, `docs/sandcastle-first-test.md`, ADR-0013/0014.
+- Tests automatisés Sandcastle (bridge, promotion, runs éphémères, historique prompt).
+
+### Outils développeur et qualité
+
+- Trafic protocole ACP (canal ACP Traffic).
+- Instantanés debug en mémoire (voir, copier, exporter) — ADR-0008.
+- Registre d'agents ACP découvrables.
+- Chat inline expérimental (API `editorInsets`).
+- Erreurs agent classifiées (`AgentError` : command-not-found, auth, quota, handshake, …).
+- Runtime extension modulaire + sessions virtuelles pour pipelines/équipes (ADR-0015).
+- ~40 fichiers de tests couvrant sessions, pipelines, sandcastle, permissions, webview, etc.
+
+### Architecture et documentation
+
+- `extension.ts` allégé → `ExtensionRuntime` + `RuntimeResources` (rollback à l'activation).
+- Plugins optionnels : `OrchestrationPlugin`, `SandcastlePlugin`, `InlineChatPlugin` via `FeaturePluginRegistry`.
+- Seam transport : ACP natif / virtual (`VirtualSessionRuntime`) / Sandcastle — ADR-0015.
+- `OrchestrationRuntime` découplé de `SessionManager` ; webview extensible via `registerFeatureMessageHandler`.
+- `SandcastlePromotion` centralise Apply/Reject ; commandes dans le plugin Sandcastle.
+- Carte des contextes (`CONTEXT-MAP.md`) + glossaires par domaine (`src/*/CONTEXT.md`).
+- 15 ADR couvrant sessions, pipelines, Sandcastle, debug, inline chat, runtime.
+- Diagnostic de dispersion documenté (vocabulaire session, frontières Discussion/ChatHistory/BridgeTranscript).
+
+---
+
+## En Cours — Court Terme
+
+- **Sandcastle** : base livrée ; reste à renforcer (garde-fous terminal/réseau, limites dans l'UI, isolation OS optionnelle) et à valider en conditions réelles.
 - Stabiliser la liste des sessions et les mécanismes de reprise selon les capacités réellement exposées par chaque agent.
-- Améliorer le contexte VS Code envoyé aux agents avec des contrôles plus visibles et une meilleure prévisibilité pour l'utilisateur.
-- Renforcer les messages d'erreur autour du lancement des agents, de l'authentification et des commandes introuvables.
+- Améliorer le contexte VS Code envoyé aux agents : contrôles plus visibles et meilleure prévisibilité.
+- Renforcer les messages d'erreur autour du lancement des agents, de l'authentification et des commandes introuvables (base `AgentError` en place, à étendre).
 - Documenter plus clairement les agents préconfigurés, leurs prérequis et leurs limites.
 
-## Possibilités Moyen Terme
+### Architecture et nettoyage (en cours)
 
-- Ajouter des profils d'agents pour sauvegarder des combinaisons de modèle, mode, niveau de raisonnement, permissions et répertoire de travail.
-- Proposer une recherche dans l'historique des sessions, avec filtres par agent, date, titre et contenu.
-- Permettre l'export et l'import de sessions pour faciliter le partage ou l'archivage.
-- Améliorer le pipeline planification puis implémentation avec un suivi plus détaillé des étapes, des statuts et des erreurs.
-- Ajouter des modèles de prompts réutilisables pour les tâches fréquentes : revue de code, génération de tests, refactorisation, documentation.
+Travail amorcé avec ADR-0015 et `CONTEXT-MAP.md` ; à poursuivre sans bloquer les features.
 
-## Idées Long Terme
+**Modules à approfondir** (interfaces plus petites, implémentations plus localisées) :
 
-- Expérimenter des workflows multi-agents où plusieurs agents peuvent comparer, critiquer ou compléter leurs réponses.
-- Ajouter un mode de comparaison pour envoyer le même prompt à plusieurs agents et afficher les résultats côte à côte.
-- Introduire des automatisations pilotées par session, par exemple relancer une vérification, générer un résumé ou préparer une suite de tâches.
-- Étendre la compatibilité vers d'autres protocoles ou passerelles lorsque cela améliore l'interopérabilité avec l'écosystème agentique.
+- `SessionManager` (~1100 lignes) — clarifier load vs resume, réduire les branches transport.
+- `PipelineService` (~750 lignes) — extraire compilation, exécution et persistance des étapes.
+- `ChatWebviewController` (~700 lignes) — isoler l'état pipeline de l'état chat générique.
+- `RegisterCommands` / `SessionTreeProvider` — scinder par domaine (session, sandcastle, debug).
+
+**Dette documentée à traiter** (voir `CONTEXT-MAP.md`, section diagnostic) :
+
+- Vocabulaire « session » surchargé — imposer les termes canoniques (ProtocolSession, Conversation, SessionRecord, BridgeConversation).
+- Écart resume vs load : `ChatHistory` pas toujours réinitialisée au resume.
+- `EphemeralRun` duplique le cycle spawn/connect hors `ConnectedAgent` — consolidation structurelle future.
+- Fuite domaine Pipeline → état webview partagé (timeline pipeline dans l'état chat générique).
+- Alignement `docs/` (EN) et `doc_fr/` — pas de synchronisation automatique aujourd'hui.
+
+**Seams et runtime** :
+
+- Slot unique `VirtualSessionRuntime` — prévoir registre multi-transports si un second runtime virtual apparaît (inline-only, comparaison, …).
+- Réduire l'indirection webview → plugin → runtime → `SessionManager` → runtime (traçabilité, tests ciblés).
+- ADR pour chaque nouvelle frontière majeure ; tenir les `CONTEXT.md` à jour avec le code.
+
+**Nettoyage ciblé** :
+
+- Retirer ou archiver le code legacy sandbox pré-Sandcastle (ADR-0011) une fois Sandcastle validé.
+- Factoriser les chemins Sandcastle natif / éphémère / pipeline derrière des adapters testables.
+- Harmoniser les patterns d'erreur et de cancellation (`RunAbortedError`, `AbortSignal`) sur tous les transports.
+
+### Skills workspace (à renforcer)
+
+Base fonctionnelle en place ; l'expérience reste surtout invisible et limitée à quelques agents.
+
+**UX et découverte** :
+
+- Autocomplétion `/skill` dans le compositeur (comme les mentions `@`).
+- Panneau ou liste des skills du workspace (nom, description, chemin, état).
+- Afficher dans l'UI quels skills seront injectés / ont été utilisés sur la session.
+
+**Robustesse** :
+
+- Watcher sur `.agents/skills` (aujourd'hui cache invalidé seulement au mtime de la racine).
+- Validation des `SKILL.md` (frontmatter manquant, doublons de noms) avec erreurs visibles dans le log ACP.
+- Stratégie claire pour `EphemeralRun` : éviter de réinjecter le catalogue complet à chaque étape pipeline si inutile.
+
+**Couverture agents et orchestration** :
+
+- Étendre ou documenter le support pour les agents ACP natifs (Claude, Vibe, Gemini, Codex CLI, …).
+- Skills par rôle dans les équipes / pipelines (ex. `tester` → skill TDD).
+- Rapprocher skills et `InstructionResolver` : format partageable, pas de duplication instructions vs skills.
+- Vérifier le parcours inline chat et Sandcastle multi-tours (lecture skill dans le conteneur + invocation `/skill`).
+
+**Documentation** :
+
+- Guide dédié `docs/skills.md` (format, settings, agents supportés, limites Sandcastle).
+- Glossaire `src/skills/CONTEXT.md` aligné sur `CONTEXT-MAP.md`.
+
+---
+
+## Moyen Terme
+
+- Profils d'agents déclaratifs en YAML (`.acp/agents/*.yaml`) — aujourd'hui seuls les fichiers `.md` d'instructions existent pour les équipes.
+- Recherche dans l'historique des sessions (agent, date, titre, contenu).
+- Export et import de sessions.
+- Pipeline planification → implémentation : suivi plus détaillé des étapes, statuts et erreurs (approbation de plan partiellement couverte).
+- Modèles de prompts réutilisables (revue, tests, refactor, documentation).
+
+---
+
+## Long Terme
+
+- Workflows multi-agents : comparer, critiquer ou compléter les réponses entre agents.
+- Mode comparaison : même prompt à plusieurs agents, résultats côte à côte.
+- Automatisations pilotées par session (relance de vérification, résumé, suite de tâches).
+- Compatibilité avec d'autres protocoles ou passerelles.
+
+---
 
 ## Pistes Techniques et UX
 
-- Augmenter la couverture de tests sur les flux critiques : sessions, reprise, permissions, contexte éditeur, webview et pipeline.
-- Améliorer la persistance locale afin de mieux gérer les workspaces multiples, les sessions supprimées et les agents non disponibles.
-- Durcir la politique de sécurité autour des accès fichiers, des commandes terminal et des approvals automatiques.
-- Ajouter une télémétrie optionnelle centrée sur la fiabilité : erreurs de connexion, échecs de reprise, latence de session et causes d'annulation.
-- Clarifier les états UI lorsque l'agent ne supporte pas certaines capacités ACP, au lieu de masquer implicitement les actions.
+| Piste | Statut |
+|-------|--------|
+| Couverture de tests sur flux critiques | Partiel — bonne base sandcastle/pipelines/sessions ; webview et edge cases à compléter |
+| Persistance locale (workspaces multiples, sessions supprimées, agents indisponibles) | Partiel — `SessionHistoryStore` en place ; cas limites à durcir |
+| Politique de sécurité fichiers / terminal / approvals | Partiel — permissions ACP + auto-approve Sandcastle ; policies déclaratives à venir |
+| Télémétrie optionnelle (fiabilité) | À faire |
+| États UI quand l'agent ne supporte pas certaines capacités ACP | À faire |
+| Dates debug en fuseau horaire local | À faire |
+| Architecture : modules profonds, seams explicites | Partiel — ADR-0015, plugins, CONTEXT-MAP ; gros fichiers et dette vocabulaire restants |
+| Documentation bilingue alignée (`docs/` / `doc_fr/`) | Partiel — glossaires FR avec termes EN ; pas de sync systématique |
+| Skills workspace | Partiel — injection prompt OK ; UI, watcher, orchestration par rôle et doc à compléter |
+
+---
 
 ## Nouvelles Idées à Explorer
 
-- Prévisualiser et éditer le contexte qui sera injecté avant l'envoi au nouvel agent.
-- Conserver un historique des plans proposés, approuvés, rejetés ou modifiés.
-- Comparer le plan approuvé avec les changements réellement produits par l'agent d'implémentation.
-- Ajouter un centre de diagnostic capable de générer un bundle de support filtré à partir des snapshots de debug.
-- Proposer des politiques de permissions par workspace ou par profil d'agent.
+- Prévisualiser et éditer le contexte injecté avant envoi à un nouvel agent.
+- Historique des plans proposés, approuvés, rejetés ou modifiés.
+- Comparer le plan approuvé avec les changements réellement produits par l'implémenteur.
+- Centre de diagnostic : bundle de support filtré depuis les snapshots debug.
+- Politiques de permissions par workspace ou par profil d'agent.
+
+---
 
 ## Fonctionnalités Inspirées d'Omnigent
 
-Cette section détaille les fonctionnalités observées dans Omnigent qui peuvent être adaptées à ACP Client. Le périmètre volontairement retenu reste local et centré VS Code : les fonctions cloud, serveur déployé, comptes multi-utilisateurs, invitation de teammates, co-drive distant et partage d'agents entre utilisateurs sont hors scope pour cette roadmap.
+Périmètre volontairement local et centré VS Code : cloud, serveur déployé, multi-utilisateurs, co-drive distant et partage d'agents entre utilisateurs restent hors scope.
 
-### 1. Agents déclaratifs en YAML
+### 1. Agents déclaratifs en YAML — à faire
 
-Omnigent permet de définir un agent dans un fichier YAML unique : nom, prompt ou fichier d'instructions, runtime, modèle, outils, sous-agents, accès OS, terminaux et politiques. ACP Client devrait proposer un équivalent local via `.acp/agents/*.yaml`.
+Objectif : agents réutilisables versionnés via `.acp/agents/*.yaml`, visibles comme agents virtuels locaux.
 
-Objectif :
+Reste à prévoir :
 
-- Créer des agents réutilisables versionnés avec le workspace.
-- Eviter de tout configurer dans les settings VS Code globaux.
-- Permettre à un projet de fournir ses propres agents spécialisés.
-- Faire apparaître ces agents dans la vue Agents comme des agents virtuels locaux.
+- `AgentProfileCatalog` chargeant `.acp/agents/*.yaml`.
+- Validation du schéma YAML et erreurs dans le log ACP.
+- Fusion profil local + configuration agent + options de session ACP.
+- Watcher sur `.acp/agents/*.yaml`.
+- Documentation dans `docs/agent-profiles.md`.
 
-Exemple cible :
+> Remarque v1 : si les profils exigent une forte customisation du prompt système, cadrer autour de `pi Agent` (`--system-prompt`, `--append-system-prompt`).
 
-```yaml
-version: 1
-id: code-reviewer
-title: Code Reviewer
-agent: Codex CLI
-instructions: .acp/agents/code-reviewer.md
-model: gpt-5
-mode: review
-workingDirectory: .
-permissions:
-  fileSystem: ask
-  terminal: ask
-sandbox:
-  enabled: true
-```
+### 2. Instructions partagées — partiel
 
-Travail à prévoir :
+**Fait** : `InstructionResolver` + fichiers `.acp/agents/*.md` pour les équipes d'agents.
 
-- Ajouter un `AgentProfileCatalog` qui charge `.acp/agents/*.yaml`.
-- Valider le schéma YAML et remonter les erreurs dans le log ACP.
-- Fusionner profil local, configuration agent existante et options de session ACP.
-- Ajouter un watcher sur `.acp/agents/*.yaml`.
-- Documenter le format dans `docs/agent-profiles.md`.
+Reste à prévoir :
 
-Remarque v1 :
-
-- Si ces profils exigent une forte customisation du comportement agent, par exemple modifier le prompt système natif plutôt que seulement injecter un fichier `instructions`, la v1 sera cadrée autour de `pi Agent`. Le CLI `pi` expose déjà `--system-prompt` et `--append-system-prompt`, ce qui permet de tester proprement les profils spécialisés sans imposer immédiatement un adaptateur profond à tous les agents ACP.
-
-### 2. Instructions partagées par agent
-
-Les équipes d'agents savent déjà charger un fichier `instructions` relatif au workspace avec contrôle du chemin et de la taille. Ce mécanisme doit maintenant être généralisé au-delà des fichiers `.acp/teams/*.yaml`.
-
-Objectif :
-
-- Factoriser les prompts longs.
-- Versionner les rôles d'agents avec le code.
-- Préparer un mécanisme propre de partage local des skills ou consignes projet.
-
-Travail à prévoir :
-
-- Réutiliser `InstructionResolver` dans les futurs profils d'agents et les pipelines autonomes.
+- Généraliser aux futurs profils d'agents YAML et pipelines autonomes.
 - Afficher dans l'UI quel fichier d'instructions sera injecté.
-- Prévoir une prévisualisation du prompt final avant lancement.
-- Définir un format partageable pour distribuer des ensembles d'instructions ou de skills avec un workspace.
+- Prévisualisation du prompt final avant lancement.
+- Format partageable pour distribuer instructions/skills avec un workspace.
+- Lier explicitement aux skills workspace (voir section court terme) : éviter deux mécanismes parallèles non documentés.
 
-### 3. Comparaison multi-agent
+### 3. Comparaison multi-agent — à faire
 
-Omnigent met en avant des agents qui interrogent plusieurs modèles ou harnesses et comparent leurs réponses. ACP Client pourrait ajouter un mode local de comparaison.
+Envoyer le même prompt à plusieurs agents ACP, affichage côte à côte, synthèse optionnelle.
 
-Objectif :
+Reste à prévoir : profil `comparison` dans les pipelines, bloc UI côte à côte, annulation simultanée, synthèse par agent choisi.
 
-- Envoyer le même prompt à plusieurs agents ACP.
-- Afficher les réponses côte à côte.
-- Permettre une étape de synthèse ou de débat.
-- Utiliser ce mode pour brainstorming, revue de plan, diagnostic et choix d'implémentation.
+### 4. Politiques déclaratives de sécurité — à faire
 
-Travail à prévoir :
+Verdicts `allow` / `deny` / `ask` composables pour shell, fichiers, réseau.
 
-- Ajouter un profil `comparison` dans les pipelines.
-- Créer un bloc UI côte à côte dans la webview.
-- Gérer l'annulation simultanée de toutes les branches.
-- Ajouter une synthèse optionnelle par un agent choisi.
+**Fait** : permissions ACP de base + sandbox Sandcastle.
 
-### 4. Politiques déclaratives de sécurité
+Reste à prévoir : moteur de policies, application aux handlers et runs Sandcastle, UI des politiques actives, journalisation dans les snapshots debug.
 
-Omnigent possède un système de politiques avec verdicts `ALLOW`, `DENY` et `ASK`, applicable aux actions shell, fichiers, outils et risques. ACP Client a déjà les permissions ACP et le sandbox, mais doit gagner en granularité.
+### 5. Sandcastle — partiel
 
-Objectif :
+**Fait** : remplace le sandbox v1 (worktree git + bridge ACP + Docker) ; promotion Apply/Reject ; tests automatisés.
 
-- Remplacer progressivement le simple `ask` ou `allowAll` par des règles composables.
-- Définir des politiques par workspace, profil d'agent, pipeline ou session.
-- Bloquer ou demander confirmation pour les commandes risquées.
-- Encadrer les accès fichiers, les commandes git, les changements de répertoire et le réseau.
+Reste à prévoir :
 
-Exemple cible :
+- Allowlist réseau applicative.
+- Blocage des chemins hors sandbox au niveau terminal.
+- Résumé clair des limites dans l'UI.
+- Isolation OS optionnelle (macOS seatbelt, container) sans rendre le flux obligatoire.
+- Scénarios manuels et smoke tests en conditions réelles.
 
-```yaml
-policies:
-  shell:
-    default: ask
-    deny:
-      - "rm -rf"
-      - "git reset --hard"
-  files:
-    writable:
-      - .
-    readonly:
-      - docs
-  network:
-    allow:
-      - github.com
-      - registry.npmjs.org
-```
+### 6. Gestion avancée des sessions — partiel
 
-Travail à prévoir :
+**Fait** : chargement/reprise de session, cache local workspace, sessions virtuelles pipeline.
 
-- Créer un moteur local de verdict `allow`, `deny`, `ask`.
-- L'appliquer aux handlers `FileSystemHandler`, `TerminalHandler` et aux runs sandbox.
-- Ajouter une UI de session pour voir les politiques actives.
-- Journaliser les décisions dans les debug snapshots.
+Reste à prévoir :
 
-### 5. Sandboxing renforcé
+- Vue détaillée de session (agent, cwd, modèle, statut, dernier message).
+- Mieux distinguer session active, restaurée et session pipeline interne.
+- Recherche dans l'historique.
 
-Omnigent sélectionne un sandbox OS selon la plateforme. ACP Client dispose déjà d'un sandbox par git worktree, qui protège surtout le workspace principal mais ne fournit pas une isolation OS complète.
+> Piste : lancer une session dans un conteneur Docker non préparé, y installer l'agent et s'authentifier — à cadrer (secrets).
 
-Objectif :
+### 7. Exemples prêts à l'emploi — partiel
 
-- Garder le git worktree comme UX principale.
-- Ajouter des garde-fous applicatifs plus stricts pour terminal, fichiers et réseau.
-- Préparer plus tard une isolation OS optionnelle si elle reste simple à utiliser.
+**Fait** : pipelines dans `.acp/pipelines/save/`, équipe `feature-team` dans `.acp/teams/`, doc `docs/agent-teams.md`.
 
-Travail à prévoir :
+Reste à prévoir :
 
-- Finaliser l'allowlist réseau applicative.
-- Bloquer les chemins hors sandbox au niveau terminal quand c'est détectable.
-- Ajouter un résumé clair des limites du sandbox dans l'UI.
-- Evaluer une intégration macOS seatbelt ou container optionnel sans rendre le flux obligatoire.
+- Catalogue stable dans `.acp/examples` ou `docs/examples`.
+- Exemple de comparaison multi-agent avec synthèse.
+- Tests manuels reproductibles par exemple publié.
 
-### 6. Gestion avancée des sessions locales
-
-ACP Client sait déjà charger ou reprendre une session existante et rattacher le chat à celle-ci. La gestion locale doit encore gagner en lisibilité et en capacité de recherche.
-
-> Piste intéressante : permettre de lancer une session dans un environnement non préparé, par exemple un conteneur Docker, puis d'y installer l'agent et d'y effectuer son authentification. Cette piste devra être cadrée pour éviter de stocker ou de manipuler directement les secrets dans l'extension.
-
-Objectif :
-
-- Clarifier les sessions internes de pipeline et les sessions utilisateur.
-- Retrouver rapidement une session locale ou distante.
-
-Travail à prévoir :
-
-- Ajouter une vue détaillée de session : agent, cwd, modèle, statut, dernier message.
-- Mieux distinguer session active, session restaurée et session pipeline interne.
-- Ajouter une recherche dans l'historique.
-
-### 7. Exemples prêts à l'emploi
-
-ACP Client contient déjà des pipelines dans `.acp/pipelines/save` et une équipe d'exemple dans `.acp/teams`. Il reste à transformer cette collection en exemples documentés et faciles à découvrir.
-
-Objectif :
-
-- Fournir des exemples concrets dans `.acp/examples` ou `docs/examples`.
-- Accélérer l'adoption des pipelines et profils agents.
-- Servir de tests manuels pour les scénarios multi-agents.
-
-Travail à prévoir :
-
-- Sélectionner un petit catalogue d'exemples stables et les documenter.
-- Ajouter un exemple de comparaison multi-agent avec synthèse finale.
-- Ajouter des tests manuels reproductibles pour chaque exemple publié.
-
-
+---
 
 ## Priorités Suggérées
 
-1. Renforcer le sandbox au-delà de la v1 : policies applicatives, contrôle réseau, UX des limites et isolation OS optionnelle (voir section 5 et `docs/plans/omnigent/08-stronger-sandboxing.md`).
-2. Généraliser et documenter le partage d'instructions ou de skills entre profils, pipelines et workspaces.
+1. **Renforcer et tester Sandcastle** — policies applicatives, contrôle réseau, UX des limites, isolation OS optionnelle (section 5, `docs/plans/omnigent/08-stronger-sandboxing.md`).
+2. **Architecture et clean** — approfondir `SessionManager` / `PipelineService` / webview, corriger resume vs load, réduire duplication `EphemeralRun` (voir section court terme).
+3. **Profils agents YAML** — `.acp/agents/*.yaml` et `AgentProfileCatalog` (section 1).
+4. **Généraliser les instructions partagées** — au-delà des équipes, avec prévisualisation UI (section 2).
+5. **Renforcer les skills workspace** — autocomplétion, watcher, validation, orchestration par rôle, doc (section court terme).

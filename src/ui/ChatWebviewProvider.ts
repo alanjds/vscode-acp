@@ -69,10 +69,6 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     this.controller.notifySessionInfoUpdate(title);
   }
 
-  notifyReviewerRerun(output: string): void {
-    this.controller.notifyReviewerRerun(output);
-  }
-
   showInfoMessage(message: string): void {
     this.controller.showInfoMessage(message);
   }

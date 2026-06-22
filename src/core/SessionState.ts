@@ -114,23 +114,6 @@ export class SessionState {
     return this.loadingSessionIds.has(sessionId);
   }
 
-  // --- Pipeline Check ---
-
-  isPipelineSession(sessionId: string | null | undefined): boolean {
-    if (!sessionId) {
-      return false;
-    }
-    const session = this.sessions.get(sessionId);
-    if (!session) {
-      return false;
-    }
-    return (
-      session.agentId.startsWith('pipeline_agent_') ||
-      session.agentName.startsWith('pipeline/') ||
-      session.agentName === 'pipeline-planner'
-    );
-  }
-
   // --- Cleanup ---
 
   dispose(): void {

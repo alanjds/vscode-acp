@@ -322,30 +322,18 @@ export function registerCommands({
 
     try {
       await vscode.commands.executeCommand(FOCUS_CHAT_COMMAND);
-      let opened = false;
-      const caps = sessionManager.getCachedCapabilities(agentName);
-      if (caps?.load) {
-        await vscode.window.withProgress(
-          {
-            location: vscode.ProgressLocation.Notification,
-            title: 'Loading session...',
-            cancellable: false,
-          },
-          async () => {
-            await sessionManager.loadSession(agentName, sessionId, { shareCurrentContext });
-          },
-        );
-        opened = true;
-      } else if (caps?.resume) {
-        await sessionManager.resumeSession(agentName, sessionId, { shareCurrentContext });
-        opened = true;
+      const opened = await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: 'Opening session...',
+          cancellable: false,
+        },
+        () => sessionManager.openSession(agentName, sessionId, { shareCurrentContext }),
+      );
+      if (!opened.historyReplayed) {
         vscode.window.showInformationMessage('Resumed session (history not replayed).');
-      } else {
-        vscode.window.showErrorMessage(
-          `Agent "${agentName}" does not support loading or resuming sessions.`,
-        );
       }
-      if (opened && shareCurrentContext && !hasShareableContext) {
+      if (shareCurrentContext && !hasShareableContext) {
         vscode.window.showInformationMessage('Opened session. No current discussion context was available to share.');
       }
     } catch (e: any) {

@@ -81,6 +81,7 @@ suite('Extension Test Suite', () => {
 
     const commands = await vscode.commands.getCommands(true);
     const expectedCommands = [
+	      'damien.inlineChat.open',
 	      'acp.connectAgent',
 	      'acp.connectAgentWithCurrentContext',
 	      'acp.newConversation',
@@ -96,6 +97,11 @@ suite('Extension Test Suite', () => {
       'acp.disableEditorContextLink',
       'acp.enablePipelineAgents',
       'acp.disablePipelineAgents',
+      'acp.showCompiledTeamPipeline',
+      'acp.rerunTeamReviewer',
+	      'acp.sandcastle.showDiff',
+	      'acp.sandcastle.apply',
+	      'acp.sandcastle.reject',
       'acp.setMode',
       'acp.setModel',
       'acp.refreshAgents',

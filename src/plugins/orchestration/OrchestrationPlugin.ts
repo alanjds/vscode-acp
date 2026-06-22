@@ -4,28 +4,32 @@ import { getAgentNames } from '../../config/AgentConfig';
 import { isPipelineEnabled } from '../../config/PipelineConfig';
 import type { SessionManager } from '../../core/SessionManager';
 import { serializeCompiledTeamPipeline } from '../../pipeline/AgentTeamCompiler';
-import type { PipelineService } from '../../pipeline/PipelineService';
-import type { ChatWebviewProvider } from '../../ui/ChatWebviewProvider';
+import { PipelineService } from '../../pipeline/PipelineService';
+import type { ChatWebviewController } from '../../ui/ChatWebviewController';
 import type { SessionTreeProvider } from '../../ui/SessionTreeProvider';
 import { classifyAgentError } from '../../core/AgentError';
 import { getOutputChannel } from '../../utils/Logger';
 import type { FeaturePlugin } from '../FeaturePlugin';
+import { OrchestrationRuntime } from './OrchestrationRuntime';
 
 export const PIPELINE_ENABLED_CONTEXT_KEY = 'acp.pipelineEnabled';
 
 export interface OrchestrationPluginContext {
   sessionManager: SessionManager;
   sessionTreeProvider: SessionTreeProvider;
-  chatWebviewProvider: ChatWebviewProvider;
-  pipelineService: PipelineService;
+  chatController: ChatWebviewController;
+  workspaceCwd: () => string;
 }
 
 export class OrchestrationPlugin implements FeaturePlugin<OrchestrationPluginContext> {
   readonly id = 'orchestration';
 
   activate(context: OrchestrationPluginContext): vscode.Disposable {
-    const { sessionManager, sessionTreeProvider, chatWebviewProvider, pipelineService } = context;
+    const { sessionManager, sessionTreeProvider, chatController } = context;
+    const pipelineService = new PipelineService(context.workspaceCwd);
+    const runtime = new OrchestrationRuntime(pipelineService, sessionManager, chatController);
     const disposables: vscode.Disposable[] = [];
+    disposables.push(runtime.activate());
     const refresh = () => sessionTreeProvider.invalidate();
 
     for (const pattern of ['**/.acp/pipelines/*.yaml', '**/.acp/pipelines/*.yml', '**/.acp/teams/*.yaml', '**/.acp/teams/*.yml']) {
@@ -104,7 +108,7 @@ export class OrchestrationPlugin implements FeaturePlugin<OrchestrationPluginCon
             async (_progress, token) => {
               token.onCancellationRequested(() => pipelineService.cancelReviewerRerun());
               const output = await pipelineService.rerunTeamReviewer(agentName.replace(/ \(invalid\)$/, ''));
-              chatWebviewProvider.notifyReviewerRerun(output);
+              chatController.postMessage({ type: 'reviewerRerunReady', output });
             },
           );
         } catch (error) {
@@ -125,4 +129,3 @@ export class OrchestrationPlugin implements FeaturePlugin<OrchestrationPluginCon
     return vscode.Disposable.from(...disposables);
   }
 }
-

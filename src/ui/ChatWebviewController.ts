@@ -19,12 +19,6 @@ import {
   type IndexedFile,
 } from './FileSearchIndex';
 import { getReactShellHtmlContent } from './WebviewHtml';
-import {
-  PipelinePlanReadyEvent,
-  PipelineService,
-  PipelineSessionUpdateEvent,
-  PipelineStatusEvent,
-} from '../pipeline/PipelineService';
 import { ChatWebviewStateStore } from './ChatWebviewStateStore';
 import {
   ChatWebviewSharedState,
@@ -38,6 +32,8 @@ type WebviewMessage = {
   type: string;
   [key: string]: unknown;
 };
+
+export type ChatWebviewMessageHandler = (message: WebviewMessage) => void | Promise<void>;
 
 export type ChatWebviewEndpointKind = 'view' | 'editorPanel';
 
@@ -93,8 +89,7 @@ export class ChatWebviewController implements vscode.Disposable {
   private readonly endpoints = new Map<string, ChatWebviewEndpoint>();
   private readonly updateListener: SessionUpdateListener;
   private editorContextLinked = false;
-  private readonly pipelineService: PipelineService | null;
-  private readonly getEditorContext: GetEditorContext;
+  private readonly featureMessageHandlers = new Map<string, ChatWebviewMessageHandler>();
   private fileSearchIndexPromise: Promise<{ index: ReturnType<typeof createFileSearchIndex>; files: IndexedFile[] }> | null = null;
   private readonly fileSearchDisposables: vscode.Disposable[] = [];
   private nextEndpointId = 0;
@@ -104,19 +99,10 @@ export class ChatWebviewController implements vscode.Disposable {
     private readonly sessionManager: SessionManager,
     private readonly sessionUpdateHandler: SessionUpdateHandler,
     private readonly stateStore: ChatWebviewStateStore,
-    pipelineServiceOrGetEditorContext: PipelineService | GetEditorContext | null = null,
-    getEditorContext: GetEditorContext = () => null,
+    private readonly getEditorContext: GetEditorContext = () => null,
     private readonly debugTraceStore?: DebugTraceStore,
     private readonly openDebugSnapshot?: OpenDebugSnapshot,
   ) {
-    if (typeof pipelineServiceOrGetEditorContext === 'function') {
-      this.pipelineService = null;
-      this.getEditorContext = pipelineServiceOrGetEditorContext;
-    } else {
-      this.pipelineService = pipelineServiceOrGetEditorContext;
-      this.getEditorContext = getEditorContext;
-    }
-
     marked.setOptions({
       breaks: true,
       gfm: true,
@@ -133,9 +119,6 @@ export class ChatWebviewController implements vscode.Disposable {
       this.handleSessionUpdate(update);
     };
     this.sessionUpdateHandler.addListener(this.updateListener);
-    this.pipelineService?.on('status', this.handlePipelineStatus);
-    this.pipelineService?.on('plan-ready', this.handlePipelinePlanReady);
-    this.pipelineService?.on('session-update', this.handlePipelineSessionUpdate);
 
     this.stateStore.onDidChange((snapshot, sourceEndpointId) => {
       if (!sourceEndpointId) {
@@ -203,61 +186,6 @@ export class ChatWebviewController implements vscode.Disposable {
     };
   }
 
-  private readonly handlePipelineStatus = (event: PipelineStatusEvent) => {
-    if (event.sessionId !== this.sessionManager.getActiveSessionId()) {
-      return;
-    }
-    this.postMessage({
-      type: 'pipelineStatus',
-      status: event.status,
-      message: event.message,
-      stepId: event.stepId,
-      role: event.role,
-      agentName: event.agentName,
-      teamId: event.teamId,
-      implementerUsesSandcastle: event.implementerUsesSandcastle,
-    });
-  };
-
-  private readonly handlePipelinePlanReady = (event: PipelinePlanReadyEvent) => {
-    if (event.plan) {
-      this.sessionManager.recordAssistantMessageChunk(event.sessionId, event.plan);
-    }
-
-    if (event.sessionId !== this.sessionManager.getActiveSessionId()) {
-      return;
-    }
-    this.postMessage({
-      type: 'pipelinePlanReady',
-      plan: event.plan,
-      role: event.role,
-      agentName: event.agentName,
-      teamId: event.teamId,
-      implementerUsesSandcastle: event.implementerUsesSandcastle,
-    });
-  };
-
-  private readonly handlePipelineSessionUpdate = (event: PipelineSessionUpdateEvent) => {
-    persistSessionUpdateToHistory(
-      this.sessionManager,
-      event.sessionId,
-      event.update?.update,
-    );
-
-    if (event.sessionId !== this.sessionManager.getActiveSessionId()) {
-      return;
-    }
-    this.postMessage({
-      type: 'sessionUpdate',
-      update: event.update.update,
-      sessionId: event.sessionId,
-      phase: event.phase,
-      role: event.role,
-      agentName: event.agentName,
-      teamId: event.teamId,
-    });
-  };
-
   private renderMarkdown(text: string): string {
     return HtmlSanitizer.renderMarkdown(text);
   }
@@ -272,12 +200,6 @@ export class ChatWebviewController implements vscode.Disposable {
         break;
       case 'cancelTurn':
         await this.handleCancelTurn();
-        break;
-      case 'approvePipelinePlan':
-        await this.handleApprovePipelinePlan(String(message.plan ?? ''));
-        break;
-      case 'rejectPipelinePlan':
-        await this.handleRejectPipelinePlan();
         break;
       case 'setMode':
         await this.handleSetMode(String(message.modeId ?? ''));
@@ -321,6 +243,9 @@ export class ChatWebviewController implements vscode.Disposable {
         this.postMessage({ type: 'markdownRendered', items: rendered }, endpointId);
         break;
       }
+      default:
+        await this.featureMessageHandlers.get(message.type)?.(message);
+        break;
     }
   }
 
@@ -416,7 +341,6 @@ export class ChatWebviewController implements vscode.Disposable {
       messageLength: agentText.length,
     });
 
-    this.sessionManager.recordFirstPrompt(activeId, text);
     this.sessionManager.recordUserMessage(activeId, text);
     this.postMessage({ type: 'promptStart' });
 
@@ -457,36 +381,6 @@ export class ChatWebviewController implements vscode.Disposable {
       });
       this.postMessage({ type: 'promptEnd', stopReason: 'error' });
     }
-  }
-
-  private async handleApprovePipelinePlan(plan: string): Promise<void> {
-    const activeId = this.sessionManager.getActiveSessionId();
-    if (!activeId || !this.sessionManager.isPipelineSession(activeId) || !this.pipelineService) {
-      return;
-    }
-
-    this.postMessage({ type: 'promptStart' });
-
-    try {
-      await this.pipelineService.approvePlan(activeId, plan);
-      this.postMessage({ type: 'promptEnd', stopReason: 'end_turn' });
-      this.sessionManager.touchHistory(activeId);
-    } catch (e: any) {
-      logError('Pipeline implementation failed', e);
-      this.postMessage({
-        type: 'error',
-        message: e.message || 'Pipeline implementation failed',
-      });
-      this.postMessage({ type: 'promptEnd', stopReason: 'error' });
-    }
-  }
-
-  private async handleRejectPipelinePlan(): Promise<void> {
-    const activeId = this.sessionManager.getActiveSessionId();
-    if (!activeId || !this.sessionManager.isPipelineSession(activeId) || !this.pipelineService) {
-      return;
-    }
-    this.pipelineService.rejectPlan(activeId);
   }
 
   private async handleCancelTurn(): Promise<void> {
@@ -684,6 +578,18 @@ export class ChatWebviewController implements vscode.Disposable {
     }
   }
 
+  registerFeatureMessageHandler(type: string, handler: ChatWebviewMessageHandler): vscode.Disposable {
+    if (this.featureMessageHandlers.has(type)) {
+      throw new Error(`A chat feature handler is already registered for "${type}".`);
+    }
+    this.featureMessageHandlers.set(type, handler);
+    return new vscode.Disposable(() => {
+      if (this.featureMessageHandlers.get(type) === handler) {
+        this.featureMessageHandlers.delete(type);
+      }
+    });
+  }
+
   private postMessageToEndpoint(endpointId: string, message: WebviewMessage): void {
     const endpoint = this.endpoints.get(endpointId);
     if (!endpoint) {
@@ -739,10 +645,6 @@ export class ChatWebviewController implements vscode.Disposable {
     this.postMessage({ type: 'sessionInfoUpdate', title: title ?? null });
   }
 
-  notifyReviewerRerun(output: string): void {
-    this.postMessage({ type: 'reviewerRerunReady', output });
-  }
-
   showInfoMessage(message: string): void {
     this.postMessage({ type: 'info', message });
   }
@@ -780,9 +682,7 @@ export class ChatWebviewController implements vscode.Disposable {
 
   dispose(): void {
     this.sessionUpdateHandler.removeListener(this.updateListener);
-    this.pipelineService?.off('status', this.handlePipelineStatus);
-    this.pipelineService?.off('plan-ready', this.handlePipelinePlanReady);
-    this.pipelineService?.off('session-update', this.handlePipelineSessionUpdate);
+    this.featureMessageHandlers.clear();
     for (const disposable of this.fileSearchDisposables) {
       disposable.dispose();
     }

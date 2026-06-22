@@ -109,6 +109,7 @@ function registerSession(manager: SessionManager, partial: Partial<any> & { sess
     configOptions: partial.configOptions || null,
     availableCommands: partial.availableCommands || [],
     title: partial.title,
+    transport: partial.transport ?? (partial.agentId?.startsWith('pipeline_agent_') ? 'virtual' : 'acp'),
   };
   const state = (manager as any).sessionState;
   state.addSession(session);
@@ -124,7 +125,20 @@ function registerSession(manager: SessionManager, partial: Partial<any> & { sess
 function createPipelineManager(pipelineService?: any) {
   const manager = createManager().manager;
   if (pipelineService) {
-    manager.setPipelineService(pipelineService);
+    manager.registerVirtualSessionRuntime({
+      canHandle: (agentName: string) => agentName === 'Plan Execute Verify',
+      createSession: (agentName: string) => ({
+        sessionId: `pipeline_${Date.now()}`,
+        agentId: `pipeline_agent_${Date.now()}`,
+        displayName: agentName,
+      }),
+      sendPrompt: async (sessionId: string, text: string, agentName: string) => {
+        await pipelineService.createPlan?.(sessionId, text, agentName);
+        return { stopReason: 'end_turn' } as any;
+      },
+      cancel: (sessionId: string) => pipelineService.cancel?.(sessionId),
+      dispose: () => pipelineService.dispose?.(),
+    });
   }
   return manager;
 }
@@ -827,6 +841,31 @@ suite('SessionManager', () => {
 
   // ============ Pipeline agent tests ============
 
+  test('openSession chooses load and reports replayed history', async () => {
+    const { manager } = createManager();
+    (manager as any).ensureConnected = async () => undefined;
+    (manager as any).sessionState.setCapabilities('Agent A', { load: true, resume: true, list: false });
+    (manager as any).loadSession = async () => ({ sessionId: 'loaded' });
+    (manager as any).resumeSession = async () => { throw new Error('resume should not be called'); };
+
+    const opened = await manager.openSession('Agent A', 'loaded');
+
+    assert.strictEqual(opened.session.sessionId, 'loaded');
+    assert.strictEqual(opened.historyReplayed, true);
+  });
+
+  test('openSession falls back to resume without replayed history', async () => {
+    const { manager } = createManager();
+    (manager as any).ensureConnected = async () => undefined;
+    (manager as any).sessionState.setCapabilities('Agent A', { load: false, resume: true, list: false });
+    (manager as any).resumeSession = async () => ({ sessionId: 'resumed' });
+
+    const opened = await manager.openSession('Agent A', 'resumed');
+
+    assert.strictEqual(opened.session.sessionId, 'resumed');
+    assert.strictEqual(opened.historyReplayed, false);
+  });
+
   test('connectToAgent creates pipeline session for pipeline virtual agent', async () => {
     const pipelineService = {};
     const manager = createPipelineManager(pipelineService);
@@ -843,7 +882,7 @@ suite('SessionManager', () => {
     assert.strictEqual(result.agentName, 'Plan Execute Verify');
     assert.strictEqual(manager.getActiveSessionId(), result.sessionId);
     assert.strictEqual((manager as any).sessionState.getAgentSession('Plan Execute Verify'), result.sessionId);
-    assert.strictEqual(manager.isPipelineSession(result.sessionId), true);
+    assert.strictEqual(manager.isVirtualSession(result.sessionId), true);
     assert.strictEqual(upsertCalls.length, 1);
     assert.deepStrictEqual(upsertCalls[0], ['Plan Execute Verify', '/test', result.sessionId]);
   });
@@ -898,7 +937,7 @@ suite('SessionManager', () => {
     assert.strictEqual((manager as any).sessionState.getAgentSession('Plan Execute Verify'), 'pipeline_existing');
   });
 
-  test('isPipelineSession returns false for non-pipeline sessions', () => {
+  test('isVirtualSession returns false for native ACP sessions', () => {
     const { manager } = createManager();
     registerSession(manager, {
       sessionId: 's1',
@@ -906,13 +945,13 @@ suite('SessionManager', () => {
       agentId: 'agent-1',
     });
 
-    assert.strictEqual(manager.isPipelineSession('s1'), false);
-    assert.strictEqual(manager.isPipelineSession('unknown'), false);
-    assert.strictEqual(manager.isPipelineSession(null), false);
-    assert.strictEqual(manager.isPipelineSession(undefined), false);
+    assert.strictEqual(manager.isVirtualSession('s1'), false);
+    assert.strictEqual(manager.isVirtualSession('unknown'), false);
+    assert.strictEqual(manager.isVirtualSession(null), false);
+    assert.strictEqual(manager.isVirtualSession(undefined), false);
   });
 
-  test('isPipelineSession returns true for pipeline agent sessions', () => {
+  test('isVirtualSession returns true for plugin-owned sessions', () => {
     const { manager } = createManager();
     registerSession(manager, {
       sessionId: 'pipeline_s1',
@@ -920,7 +959,7 @@ suite('SessionManager', () => {
       agentId: 'pipeline_agent_1',
     });
 
-    assert.strictEqual(manager.isPipelineSession('pipeline_s1'), true);
+    assert.strictEqual(manager.isVirtualSession('pipeline_s1'), true);
   });
 
   test('getConnectionForSession returns connection for ACP session', () => {

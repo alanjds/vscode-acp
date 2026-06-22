@@ -19,15 +19,13 @@ import { ContextFamilyInfo, SessionHistoryStore } from './SessionHistoryStore';
 import { classifyAgentError } from './AgentError';
 import { resolveWorkspaceIdentity, type WorkspaceIdentity } from './WorkspaceIdentity';
 import { getAgentConfigs, isSandcastleAgentConfig } from '../config/AgentConfig';
-import { getPipelineDefinitionForAgent, isPipelineVirtualAgentName } from '../config/PipelineCatalog';
-import { isTeamVirtualAgentName, isValidTeamVirtualAgentName, getTeamEntryForAgent } from '../config/AgentTeamCatalog';
-import { PipelineService } from '../pipeline/PipelineService';
 import { SessionState } from './SessionState';
 import { SessionUpdateBuffer } from './SessionUpdateBuffer';
 import { SessionAuthHandler } from './SessionAuthHandler';
 import { DiscussionContextHandler } from './DiscussionContextHandler';
 import { log, logError } from '../utils/Logger';
 import { sendEvent, sendError } from '../utils/TelemetryManager';
+import type { VirtualSessionRuntime } from './VirtualSessionRuntime';
 
 export type { AgentCapabilitySummary } from './SessionState';
 export type { SharedDiscussionContext } from './DiscussionContextHandler';
@@ -52,10 +50,17 @@ export interface SessionInfo {
   availableCommands: AvailableCommand[];
   /** Latest title supplied via `session_info_update`, if any. */
   title?: string;
+  /** Identifies sessions whose conversation lifecycle is owned by a plugin. */
+  transport?: 'acp' | 'virtual';
 }
 
 export interface OpenSessionOptions {
   shareCurrentContext?: boolean;
+}
+
+export interface OpenedSession {
+  session: SessionInfo;
+  historyReplayed: boolean;
 }
 
 /**
@@ -70,7 +75,7 @@ export class SessionManager extends EventEmitter {
   private readonly updateBuffer: SessionUpdateBuffer;
   private readonly authHandler: SessionAuthHandler;
   private readonly discussionContextHandler: DiscussionContextHandler;
-  private pipelineService: PipelineService | null = null;
+  private virtualSessionRuntime: VirtualSessionRuntime | null = null;
 
   private testConfigs: Record<string, any> | null = null;
 
@@ -91,8 +96,21 @@ export class SessionManager extends EventEmitter {
     this.discussionContextHandler.setHistoryStore(store);
   }
 
-  setPipelineService(service: PipelineService): void {
-    this.pipelineService = service;
+  registerVirtualSessionRuntime(runtime: VirtualSessionRuntime): { dispose(): void } {
+    if (this.virtualSessionRuntime) {
+      throw new Error('A virtual session runtime is already registered.');
+    }
+    this.virtualSessionRuntime = runtime;
+    let disposed = false;
+    return {
+      dispose: () => {
+        if (disposed) { return; }
+        disposed = true;
+        if (this.virtualSessionRuntime === runtime) {
+          this.virtualSessionRuntime = null;
+        }
+      },
+    };
   }
 
   /** Public accessor for downstream UI. */
@@ -158,12 +176,8 @@ export class SessionManager extends EventEmitter {
    * Internally creates a session via ACP protocol.
    */
   async connectToAgent(agentName: string, options: OpenSessionOptions = {}): Promise<SessionInfo> {
-    if (isTeamVirtualAgentName(agentName) && !isValidTeamVirtualAgentName(agentName)) {
-      const entry = getTeamEntryForAgent(agentName);
-      throw new Error(`Invalid agent team: ${entry?.errors.join('; ') ?? 'configuration error'}`);
-    }
-    if (isPipelineVirtualAgentName(agentName)) {
-      return this.connectToPipelineAgent(agentName, options);
+    if (this.virtualSessionRuntime?.canHandle(agentName)) {
+      return this.connectToVirtualAgent(agentName, options);
     }
 
     // If we already have a live session with this agent, reuse it
@@ -289,7 +303,11 @@ export class SessionManager extends EventEmitter {
     }
   }
 
-  private async connectToPipelineAgent(agentName: string, options: OpenSessionOptions = {}): Promise<SessionInfo> {
+  private async connectToVirtualAgent(agentName: string, options: OpenSessionOptions = {}): Promise<SessionInfo> {
+    const runtime = this.virtualSessionRuntime;
+    if (!runtime) {
+      throw new Error('Virtual session runtime is not available.');
+    }
     const existingSessionId = this.sessionState.getAgentSession(agentName);
     if (existingSessionId && this.sessionState.getSession(existingSessionId)) {
       this.sessionState.setActiveSessionId(existingSessionId);
@@ -311,12 +329,11 @@ export class SessionManager extends EventEmitter {
     }
 
     const cwd = this.getWorkspaceCwd();
-    const sessionId = `pipeline_${Date.now()}`;
-    const pipeline = getPipelineDefinitionForAgent(agentName, cwd);
-    const displayName = pipeline?.title ?? agentName;
+    const descriptor = runtime.createSession(agentName, cwd);
+    const { sessionId, agentId, displayName } = descriptor;
     const sessionInfo: SessionInfo = {
       sessionId,
-      agentId: `pipeline_agent_${Date.now()}`,
+      agentId,
       agentName,
       agentDisplayName: displayName,
       cwd,
@@ -324,7 +341,7 @@ export class SessionManager extends EventEmitter {
       initResponse: {
         protocolVersion: PROTOCOL_VERSION,
         agentInfo: {
-          name: 'acp-pipeline',
+          name: 'virtual-session',
           title: displayName,
           version: '0.1.0',
         },
@@ -335,6 +352,7 @@ export class SessionManager extends EventEmitter {
       configOptions: null,
       availableCommands: [],
       title: displayName,
+      transport: 'virtual',
     };
 
     this.sessionState.addSession(sessionInfo);
@@ -389,8 +407,8 @@ export class SessionManager extends EventEmitter {
     log(`Disconnecting agent ${agentName}`);
     sendEvent('agent/disconnect', { agentName });
 
-    if (this.sessionState.isPipelineSession(session.sessionId)) {
-      this.pipelineService?.cancel(session.sessionId);
+    if (session.transport === 'virtual') {
+      this.virtualSessionRuntime?.cancel(session.sessionId);
     } else {
       this.agentManager.killAgent(session.agentId);
       this.connectionManager.removeConnection(session.agentId);
@@ -549,22 +567,12 @@ export class SessionManager extends EventEmitter {
     this.emit('session-info-changed', sessionId, update);
   }
 
-  /**
-   * Record the first user prompt of a session so the history-store tree can
-   * use it as a label fallback when no title arrives.
-   */
-  recordFirstPrompt(sessionId: string, prompt: string): void {
-    this.discussionContextHandler.recordFirstPrompt(
-      this.sessionState.getSession(sessionId),
-      sessionId,
-      prompt,
-    );
-  }
-
-  /** Persist a raw user message in the discussion transcript. */
+  /** Persist a user message and establish the history label atomically. */
   recordUserMessage(sessionId: string, text: string): void {
+    const session = this.sessionState.getSession(sessionId);
+    this.discussionContextHandler.recordFirstPrompt(session, sessionId, text);
     this.discussionContextHandler.recordUserMessage(
-      this.sessionState.getSession(sessionId),
+      session,
       sessionId,
       text,
     );
@@ -714,6 +722,33 @@ export class SessionManager extends EventEmitter {
       );
     }
     return { sessions, nextCursor: response?.nextCursor ?? undefined };
+  }
+
+  /**
+   * Open an existing conversation through the best capability advertised by
+   * the agent. Callers do not need to coordinate capability discovery with
+   * load/resume ordering.
+   */
+  async openSession(
+    agentName: string,
+    sessionId: string,
+    options: OpenSessionOptions = {},
+  ): Promise<OpenedSession> {
+    await this.ensureConnected(agentName);
+    const capabilities = this.sessionState.getCachedCapabilities(agentName);
+    if (capabilities?.load) {
+      return {
+        session: await this.loadSession(agentName, sessionId, options),
+        historyReplayed: true,
+      };
+    }
+    if (capabilities?.resume) {
+      return {
+        session: await this.resumeSession(agentName, sessionId, options),
+        historyReplayed: false,
+      };
+    }
+    throw new Error(`Agent "${agentName}" does not support loading or resuming sessions.`);
   }
 
   /**
@@ -986,8 +1021,9 @@ export class SessionManager extends EventEmitter {
     return this.connectionManager.getConnection(session.agentId);
   }
 
-  isPipelineSession(sessionId: string | null | undefined): boolean {
-    return this.sessionState.isPipelineSession(sessionId);
+  isVirtualSession(sessionId: string | null | undefined): boolean {
+    if (!sessionId) { return false; }
+    return this.sessionState.getSession(sessionId)?.transport === 'virtual';
   }
 
   private recordAgentConnectionFailure(agentName: string, error: unknown): void {
@@ -1012,12 +1048,11 @@ export class SessionManager extends EventEmitter {
       throw new Error(`Session not found: ${sessionId}`);
     }
 
-    if (this.sessionState.isPipelineSession(session.sessionId)) {
-      if (!this.pipelineService) {
-        throw new Error('Pipeline service is not available.');
+    if (session.transport === 'virtual') {
+      if (!this.virtualSessionRuntime) {
+        throw new Error('Virtual session runtime is not available.');
       }
-      await this.pipelineService.createPlan(sessionId, textWithSharedContext, session.agentName);
-      return { stopReason: 'end_turn' } as PromptResponse;
+      return this.virtualSessionRuntime.sendPrompt(sessionId, textWithSharedContext, session.agentName);
     }
 
     const connInfo = this.connectionManager.getConnection(session.agentId);
@@ -1044,8 +1079,8 @@ export class SessionManager extends EventEmitter {
    * Cancel an active prompt turn.
    */
   async cancelTurn(sessionId: string): Promise<void> {
-    if (this.sessionState.isPipelineSession(sessionId)) {
-      this.pipelineService?.cancel(sessionId);
+    if (this.isVirtualSession(sessionId)) {
+      this.virtualSessionRuntime?.cancel(sessionId);
       return;
     }
 

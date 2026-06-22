@@ -35,10 +35,9 @@ suite('ChatWebviewController', () => {
       getSession: (sessionId: string) => sessions.get(sessionId),
       getSessionContextFamily: () => null,
       hasPendingSharedDiscussionContext: () => false,
-      recordFirstPrompt: (_sessionId: string, prompt: string) => {
+      recordUserMessage: (_sessionId: string, prompt: string) => {
         recordedPrompts.push(prompt);
       },
-      recordUserMessage: () => undefined,
       recordUserMessageChunk: () => undefined,
       recordAssistantMessageChunk: () => undefined,
       sendPrompt: async (_sessionId: string, prompt: string) => {

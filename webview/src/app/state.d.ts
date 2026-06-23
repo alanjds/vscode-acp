@@ -157,8 +157,6 @@ export type AppAction = {
     text: string;
     title: string;
 } | {
-    type: 'resetPipelineTimeline';
-} | {
     type: 'finalizeTeamRoleTurn';
 } | {
     type: 'loadSessionStart';

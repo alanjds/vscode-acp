@@ -3,6 +3,7 @@ import { normalizePipelinePhase as normalizeSharedPipelinePhase } from '../../..
 import {
   applyPipelineStatusToTimeline,
   createDefaultTeamTimeline,
+  resolveTeamTimeline,
 } from './OrchestrationProjector';
 import type { AppAction } from './state';
 
@@ -104,7 +105,7 @@ export function mapOrchestrationMessageToActions(
         actions.push({
           type: 'updatePipelineTimeline',
           timeline: applyPipelineStatusToTimeline(
-            currentTimeline.length > 0 ? currentTimeline : createDefaultTeamTimeline(false),
+            resolveTeamTimeline(currentTimeline),
             typeof message.status === 'string' ? message.status : undefined,
             typeof message.stepId === 'string' ? message.stepId : undefined,
           ),

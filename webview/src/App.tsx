@@ -15,7 +15,6 @@ import type {
   FileSearchResult,
   ModelOption,
   ModeOption,
-  PersistedWebviewState,
   SessionConfigOption,
   SlashCommand,
 } from './chatTypes';
@@ -24,7 +23,7 @@ import {
   getSlashFilteredCommands,
 } from './app/composer';
 import { buildHistoryBlocks, getToolCollapseState } from './app/history';
-import { routeHostMessage } from './app/hostMessageRouter';
+import { routeHostMessage, applyHostMessageRouterUiEffects } from './app/hostMessageRouter';
 import {
   appReducer,
   buildWebviewPersistedBundle,
@@ -46,7 +45,7 @@ import { useFileMentions } from './app/useFileMentions';
 import { useSessionDisplay } from './app/useSessionDisplay';
 
 export function App(): JSX.Element {
-  const [state, dispatch] = useReducer(appReducer, getState<PersistedWebviewState>(), createInitialState);
+  const [state, dispatch] = useReducer(appReducer, getState<unknown>(), createInitialState);
   const [cursorPosition, setCursorPosition] = useState(0);
   
   const stateRef = useRef(state);
@@ -117,24 +116,38 @@ export function App(): JSX.Element {
     ? 'Send a message to revise the plan, or approve/reject below.'
     : placeholder;
 
-  // Sync shared UI state to extension host and VS Code serializer
-  useEffect(() => {
-    if (skipSharedSyncRef.current) {
-      skipSharedSyncRef.current = false;
-      return;
+  const syncPersistedBundle = (bumpShared: boolean, bumpOrchestration: boolean) => {
+    if (bumpShared) {
+      sharedVersionRef.current += 1;
+      sharedUpdatedAtRef.current = Date.now();
     }
-
-    sharedVersionRef.current += 1;
-    sharedUpdatedAtRef.current = Date.now();
+    if (bumpOrchestration) {
+      orchestrationVersionRef.current += 1;
+      orchestrationUpdatedAtRef.current = Date.now();
+    }
     const bundle = buildWebviewPersistedBundle(
-      state,
+      stateRef.current,
       sharedVersionRef.current,
       sharedUpdatedAtRef.current,
       orchestrationVersionRef.current,
       orchestrationUpdatedAtRef.current,
     );
     setState(bundle);
-    postMessage({ type: 'sharedStateChanged', state: bundle.shared });
+    if (bumpShared) {
+      postMessage({ type: 'sharedStateChanged', state: bundle.shared });
+    }
+    if (bumpOrchestration) {
+      postMessage({ type: 'orchestrationStateChanged', state: bundle.orchestration });
+    }
+  };
+
+  // Sync shared UI state to extension host and VS Code serializer
+  useEffect(() => {
+    if (skipSharedSyncRef.current) {
+      skipSharedSyncRef.current = false;
+      return;
+    }
+    syncPersistedBundle(true, false);
   }, [
     state.persisted,
     state.promptText,
@@ -151,21 +164,9 @@ export function App(): JSX.Element {
       skipOrchestrationSyncRef.current = false;
       return;
     }
-
-    orchestrationVersionRef.current += 1;
-    orchestrationUpdatedAtRef.current = Date.now();
-    const bundle = buildWebviewPersistedBundle(
-      state,
-      sharedVersionRef.current,
-      sharedUpdatedAtRef.current,
-      orchestrationVersionRef.current,
-      orchestrationUpdatedAtRef.current,
-    );
-    setState(bundle);
-    postMessage({ type: 'orchestrationStateChanged', state: bundle.orchestration });
+    syncPersistedBundle(false, true);
   }, [state.orchestration]);
 
-  // Handle restored markdown items (désactivé - rendu côté frontend)
   useEffect(() => {
     postMessage({ type: 'ready' });
 
@@ -182,31 +183,21 @@ export function App(): JSX.Element {
         },
       });
 
-      if (result.ui?.nextSharedVersion !== undefined) {
-        sharedVersionRef.current = result.ui.nextSharedVersion;
-      }
-      if (result.ui?.nextSharedUpdatedAt !== undefined) {
-        sharedUpdatedAtRef.current = result.ui.nextSharedUpdatedAt;
-      }
-      if (result.ui?.nextOrchestrationVersion !== undefined) {
-        orchestrationVersionRef.current = result.ui.nextOrchestrationVersion;
-      }
-      if (result.ui?.nextOrchestrationUpdatedAt !== undefined) {
-        orchestrationUpdatedAtRef.current = result.ui.nextOrchestrationUpdatedAt;
-      }
-      if (result.ui?.skipSharedSync) {
-        skipSharedSyncRef.current = true;
-      }
-      if (result.ui?.skipOrchestrationSync) {
-        skipOrchestrationSyncRef.current = true;
-      }
-      if (result.ui?.nextTurnCounter !== undefined) {
-        turnCounterRef.current = result.ui.nextTurnCounter;
-      }
-      if (result.ui?.fileResults) {
-        setFileResults(result.ui.fileResults);
-        setFileSelectedIdx(result.ui.fileSelectedIdx ?? 0);
-      }
+      applyHostMessageRouterUiEffects(
+        result.ui,
+        {
+          sharedVersionRef,
+          sharedUpdatedAtRef,
+          orchestrationVersionRef,
+          orchestrationUpdatedAtRef,
+          skipSharedSyncRef,
+          skipOrchestrationSyncRef,
+          turnCounterRef,
+          fileSearchRequestIdRef,
+        },
+        setFileResults,
+        setFileSelectedIdx,
+      );
 
       for (const action of result.actions) {
         dispatch(action);

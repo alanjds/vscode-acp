@@ -127,7 +127,7 @@ export class PipelineRunEngine extends EventEmitter {
     try {
       const result = await this.graphCoordinator.invokeInitial(sessionId, state, userPrompt);
       return this.graphCoordinator.handleGraphResult(sessionId, state, result, 'Pipeline completed.');
-    } catch (e: any) {
+    } catch (e: unknown) {
       if (this.handlePipelineStepStop(sessionId, e)) {
         return '';
       }
@@ -135,7 +135,8 @@ export class PipelineRunEngine extends EventEmitter {
         this.registry.delete(sessionId);
         throw e;
       }
-      this.emitStatus(sessionId, 'error', e.message || 'Pipeline failed.');
+      const message = e instanceof Error && e.message ? e.message : 'Pipeline failed.';
+      this.emitStatus(sessionId, 'error', message);
       this.registry.delete(sessionId);
       throw e;
     }
@@ -156,7 +157,7 @@ export class PipelineRunEngine extends EventEmitter {
     try {
       const result = await this.graphCoordinator.resumeAfterApproval(sessionId, state, approvedOutput);
       return this.graphCoordinator.handleGraphResult(sessionId, state, result, 'Pipeline completed.');
-    } catch (e: any) {
+    } catch (e: unknown) {
       if (this.handlePipelineStepStop(sessionId, e)) {
         return '';
       }
@@ -164,10 +165,11 @@ export class PipelineRunEngine extends EventEmitter {
         this.registry.delete(sessionId);
         throw e;
       }
+      const message = e instanceof Error && e.message ? e.message : 'Pipeline implementation failed.';
       this.emitStatus(
         sessionId,
         'error',
-        e.message || 'Pipeline implementation failed.',
+        message,
         e instanceof SandcastleApplyError ? 'implementer' : undefined,
       );
       this.registry.delete(sessionId);

@@ -1,6 +1,5 @@
 import type { AppState, PipelineAction } from './types';
 import { formatPipelineRoleLabel } from './helpers';
-import { emptyOrchestrationSlice } from '../OrchestrationProjector';
 
 const PIPELINE_ACTIONS = new Set<PipelineAction['type']>([
   'appendPipelinePlan',
@@ -10,7 +9,6 @@ const PIPELINE_ACTIONS = new Set<PipelineAction['type']>([
   'updatePipelineTimeline',
   'setActivePipelineRole',
   'appendPipelineRoleOutput',
-  'resetPipelineTimeline',
   'finalizeTeamRoleTurn',
 ]);
 
@@ -60,15 +58,23 @@ export function pipelineReducer(state: AppState, action: PipelineAction): AppSta
         },
       };
 
-    case 'setActivePipelineRole':
+    case 'setActivePipelineRole': {
+      const nextAgentName = action.agentName ?? null;
+      if (
+        state.orchestration.activeRole === action.role
+        && state.orchestration.activeAgentName === nextAgentName
+      ) {
+        return state;
+      }
       return {
         ...state,
         orchestration: {
           ...state.orchestration,
           activeRole: action.role,
-          activeAgentName: action.agentName ?? null,
+          activeAgentName: nextAgentName,
         },
       };
+    }
 
     case 'appendPipelineRoleOutput':
       return {
@@ -85,12 +91,6 @@ export function pipelineReducer(state: AppState, action: PipelineAction): AppSta
             },
           ],
         },
-      };
-
-    case 'resetPipelineTimeline':
-      return {
-        ...state,
-        orchestration: emptyOrchestrationSlice(),
       };
 
     case 'finalizeTeamRoleTurn': {

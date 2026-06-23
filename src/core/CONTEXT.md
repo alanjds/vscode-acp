@@ -62,6 +62,16 @@ _À éviter_ : runtime (ambigu), mode
 Seam partagé pour EphemeralRun — route vers ACP natif ou Sandcastle selon le ConfiguredAgent. Utilisé par PipelineExecutor et InlineEditAgent.
 _À éviter_ : runEphemeralSandcastleAgent (détail d’implémentation Sandcastle)
 
+**AgentConnectionFactory** :
+Spawn → connect pour **EphemeralRun** (court-circuit ACP). Distinct de **SessionConnector** qui gère le cycle **ConnectedAgent** longue durée — deux seams intentionnels, pas une fusion à faire.
+_À éviter_ : connectEphemeralAcpAgent (détail d’implémentation)
+
+**spawnAndConnectNativeAgent** :
+Helper partagé par **nativeSessionConnect** (connectToAgent, ensureConnected). Ne remplace pas AgentConnectionFactory : lifecycle ConnectedAgent, pas EphemeralRun.
+
+**SessionConnector** :
+Façade qui route connect/disconnect par **Transport** — `virtualSessionConnect` (virtual) · `nativeSessionConnect` (nativeAcp/sandcastle) · `disconnectAgentSession`.
+
 **VirtualAgentCatalog** :
 Résolution unifiée des noms d’agents (configured, pipeline, team) pour l’arbre Agents et les runtimes.
 _À éviter_ : getAgentNames + isPipelineVirtualAgentName + isTeamVirtualAgentName (combinaison historique)

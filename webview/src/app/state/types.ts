@@ -76,7 +76,6 @@ export type AppAction =
   | { type: 'updatePipelineTimeline'; timeline: PipelineTimelineStep[] }
   | { type: 'setActivePipelineRole'; role: PipelinePhase | null; agentName?: string | null }
   | { type: 'appendPipelineRoleOutput'; role: PipelinePhase; agentName?: string; text: string; title: string }
-  | { type: 'resetPipelineTimeline' }
   | { type: 'finalizeTeamRoleTurn' }
   | { type: 'loadSessionStart' }
   | { type: 'loadSessionEnd'; ok: boolean }

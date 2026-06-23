@@ -2,11 +2,6 @@ import type { JSX } from 'react';
 
 import type { PipelineTimelineStep, PipelineTimelineStepStatus } from '../chatTypes';
 
-export {
-  applyPipelineStatusToTimeline,
-  createDefaultTeamTimeline,
-} from '../app/OrchestrationProjector';
-
 export interface PipelineRoleTimelineProps {
   timeline: PipelineTimelineStep[];
 }

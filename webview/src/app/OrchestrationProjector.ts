@@ -7,6 +7,7 @@ import type {
   PipelinePlanStatus,
   PipelineTimelineStep,
 } from '../../../src/ui/OrchestrationStateCore';
+import { emptyOrchestrationState } from '../../../src/ui/OrchestrationStateCore';
 import type { PipelineTimelineStepStatus } from '../../../src/ui/PipelineTypes';
 
 export type OrchestrationSlice = OrchestrationState;
@@ -24,15 +25,11 @@ export type OrchestrationViewModel = {
 };
 
 export function emptyOrchestrationSlice(): OrchestrationSlice {
-  return {
-    version: 0,
-    updatedAt: 0,
-    timeline: [],
-    activeRole: null,
-    activeAgentName: null,
-    plan: null,
-    roleOutputs: [],
-  };
+  return emptyOrchestrationState();
+}
+
+export function resolveTeamTimeline(timeline: PipelineTimelineStep[]): PipelineTimelineStep[] {
+  return timeline.length > 0 ? timeline : createDefaultTeamTimeline(false);
 }
 
 export function projectOrchestrationView(slice: OrchestrationSlice): OrchestrationViewModel {

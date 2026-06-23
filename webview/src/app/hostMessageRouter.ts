@@ -14,7 +14,7 @@ import {
   shouldFinalizeTeamRoleTurn,
   type OrchestrationHostMessage,
 } from './orchestrationEvents';
-import { createDefaultTeamTimeline } from './OrchestrationProjector';
+import { resolveTeamTimeline } from './OrchestrationProjector';
 import { mapSessionUpdateToActions } from './sessionUpdates';
 import type { AppAction, AppState } from './state/types';
 import { shouldAcceptIncomingOrchestrationState } from '../../../src/ui/OrchestrationStateCore';
@@ -22,13 +22,15 @@ import { shouldAcceptIncomingSharedState } from '../../../src/ui/ChatWebviewShar
 import type { ChatWebviewSharedState } from '../chatTypes';
 import type { OrchestrationState } from '../../../src/ui/OrchestrationState';
 
-export type HostMessageRouterRefs = {
-  sharedVersion: number;
-  sharedUpdatedAt: number;
-  orchestrationVersion: number;
-  orchestrationUpdatedAt: number;
-  fileSearchRequestId: number;
-  turnCounter: number;
+export type HostMessageRouterUiEffectRefs = {
+  sharedVersionRef: { current: number };
+  sharedUpdatedAtRef: { current: number };
+  orchestrationVersionRef: { current: number };
+  orchestrationUpdatedAtRef: { current: number };
+  skipSharedSyncRef: { current: boolean };
+  skipOrchestrationSyncRef: { current: boolean };
+  turnCounterRef: { current: number };
+  fileSearchRequestIdRef: { current: number };
 };
 
 export type HostMessageRouterUiEffects = {
@@ -41,6 +43,51 @@ export type HostMessageRouterUiEffects = {
   nextSharedUpdatedAt?: number;
   nextOrchestrationVersion?: number;
   nextOrchestrationUpdatedAt?: number;
+};
+
+export function applyHostMessageRouterUiEffects(
+  ui: HostMessageRouterUiEffects | undefined,
+  refs: HostMessageRouterUiEffectRefs,
+  setFileResults: (results: FileSearchResult[]) => void,
+  setFileSelectedIdx: (idx: number) => void,
+): void {
+  if (!ui) {
+    return;
+  }
+
+  if (ui.nextSharedVersion !== undefined) {
+    refs.sharedVersionRef.current = ui.nextSharedVersion;
+  }
+  if (ui.nextSharedUpdatedAt !== undefined) {
+    refs.sharedUpdatedAtRef.current = ui.nextSharedUpdatedAt;
+  }
+  if (ui.nextOrchestrationVersion !== undefined) {
+    refs.orchestrationVersionRef.current = ui.nextOrchestrationVersion;
+  }
+  if (ui.nextOrchestrationUpdatedAt !== undefined) {
+    refs.orchestrationUpdatedAtRef.current = ui.nextOrchestrationUpdatedAt;
+  }
+  if (ui.skipSharedSync) {
+    refs.skipSharedSyncRef.current = true;
+  }
+  if (ui.skipOrchestrationSync) {
+    refs.skipOrchestrationSyncRef.current = true;
+  }
+  if (ui.nextTurnCounter !== undefined) {
+    refs.turnCounterRef.current = ui.nextTurnCounter;
+  }
+  if (ui.fileResults) {
+    setFileResults(ui.fileResults);
+    setFileSelectedIdx(ui.fileSelectedIdx ?? 0);
+  }
+}
+export type HostMessageRouterRefs = {
+  sharedVersion: number;
+  sharedUpdatedAt: number;
+  orchestrationVersion: number;
+  orchestrationUpdatedAt: number;
+  fileSearchRequestId: number;
+  turnCounter: number;
 };
 
 export type HostMessageRouteResult = {
@@ -168,9 +215,7 @@ export function routeHostMessage(
     case 'reviewerRerunReady':
       actions.push(...mapOrchestrationMessageToActions(
         message as OrchestrationHostMessage,
-        state.orchestration.timeline.length > 0
-          ? state.orchestration.timeline
-          : createDefaultTeamTimeline(false),
+        resolveTeamTimeline(state.orchestration.timeline),
       ));
       break;
 

@@ -24,6 +24,7 @@ import type {
   ToolCallHistoryItem,
   ToolCallStatus,
 } from '../chatTypes';
+import { normalizePipelinePlanStatus as normalizeSharedPipelinePlanStatus } from '../../../src/ui/PipelineTypes';
 
 export function normalizeModesState(value: unknown): ModesState | null {
   if (!value || typeof value !== 'object') {
@@ -233,13 +234,7 @@ export function normalizePlanUpdate(value: unknown): PlanUpdate {
 }
 
 function normalizePipelinePlanStatus(value: unknown): PipelinePlanStatus {
-  return value === 'implementing'
-    || value === 'completed'
-    || value === 'rejected'
-    || value === 'error'
-    || value === 'cancelled'
-    ? value
-    : 'pending';
+  return normalizeSharedPipelinePlanStatus(value) ?? 'pending';
 }
 
 export function normalizeMarkdownRenderedItems(value: unknown): MarkdownRenderedItem[] {

@@ -147,11 +147,6 @@ export type {
   PipelineTimelineStepStatus,
 };
 
-export type PipelineTimelineState = {
-  steps: PipelineTimelineStep[];
-  teamId?: string;
-};
-
 export type PipelinePlanHistoryItem = {
   kind: 'pipelinePlan';
   plan: string;

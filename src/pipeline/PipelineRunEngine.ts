@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 
 import type { SessionNotification } from '@agentclientprotocol/sdk';
-import { Command, MemorySaver } from '@langchain/langgraph';
+import { MemorySaver } from '@langchain/langgraph';
 
 import { getAgentConfigs, isSandcastleAgentConfig, type AgentConfigEntry } from '../config/AgentConfig';
 import {
@@ -24,21 +24,17 @@ import {
 import { PipelineExecutor } from './PipelineExecutor';
 import {
   type AcpRunCallback,
-  type CompiledPipelineGraph,
-  createInitialPipelineState,
-  PipelineGraphCompiler,
 } from './PipelineGraphCompiler';
 import type { PipelinePlanReadyEvent, PipelineSessionUpdateEvent, PipelineStatus } from './PipelineEvents';
 import { PipelineRunRegistry, type PipelineRunState } from './PipelineRunRegistry';
 import { assertSingleProposedPlan } from './ProposedPlan';
 import { TeamRunSnapshotStore } from './TeamRunSnapshotStore';
-import { readApprovalInterrupt, revisePendingPlan } from './engine/PipelinePlanRevision';
+import { revisePendingPlan } from './engine/PipelinePlanRevision';
 import {
   findPlannerStepId,
-  formatPipelineRoleLabel,
-  getPipelineStepPhase,
 } from './engine/PipelineRoleLabels';
 import { createPipelineTimelineEmitter } from './engine/PipelineTimelineEmitter';
+import { PipelineGraphCoordinator } from './engine/PipelineGraphCoordinator';
 
 export interface PipelineRunEngineDependencies {
   getPipelineDefinitions?: () => PipelineDefinition[];
@@ -54,6 +50,7 @@ export class PipelineRunEngine extends EventEmitter {
   private readonly executor: PipelineExecutor;
   private readonly snapshotStore: TeamRunSnapshotStore;
   private readonly timeline = createPipelineTimelineEmitter(this);
+  private readonly graphCoordinator: PipelineGraphCoordinator;
 
   constructor(
     private readonly workspaceCwd: () => string,
@@ -73,6 +70,37 @@ export class PipelineRunEngine extends EventEmitter {
         this.emit('session-update', event);
       },
     });
+    this.graphCoordinator = new PipelineGraphCoordinator(this.executor, this.checkpointer, {
+      getRunState: sessionId => this.registry.get(sessionId),
+      setStepOutput: (sessionId, kind, output, implementOutput) => {
+        const state = this.registry.get(sessionId);
+        if (!state) {
+          return;
+        }
+        state.stepOutputs.set(kind, output);
+        if (implementOutput) {
+          state.implementOutput = output;
+        }
+      },
+      throwIfCancelled: state => this.registry.throwIfCancelled(state),
+      emitPlanReady: (sessionId, state, plan, approvalStepId, revised) => {
+        this.emitPlanReady(sessionId, state, plan, approvalStepId, revised);
+      },
+      emitStatus: (...args) => this.emitStatus(...args),
+      emitSessionUpdate: event => {
+        this.emit('session-update', event);
+      },
+      persistTeamSnapshot: (sessionId, state, result) => {
+        this.snapshotStore.persistTeamSnapshot(sessionId, state, result);
+      },
+      deleteRun: sessionId => {
+        this.registry.delete(sessionId);
+      },
+      findPrimitiveForExecutorKind: (pipeline, kind) => this.findPrimitiveForExecutorKind(pipeline, kind),
+      readTeamContext: pipeline => this.readTeamContext(pipeline),
+      runConfiguredAcpAgent: (sessionId, kind, promptText, onSessionUpdate) =>
+        this.runConfiguredAcpAgent(sessionId, kind, promptText, onSessionUpdate),
+    });
   }
 
   async createPlan(sessionId: string, userPrompt: string, pipelineAgentName?: string): Promise<string> {
@@ -86,7 +114,7 @@ export class PipelineRunEngine extends EventEmitter {
 
     const state: PipelineRunState = {
       pipeline,
-      graph: this.compileGraph(sessionId, pipeline),
+      graph: this.graphCoordinator.compileGraph(sessionId, pipeline),
       pendingApproval: null,
       originalUserPrompt: userPrompt,
       revisionCount: 0,
@@ -97,11 +125,8 @@ export class PipelineRunEngine extends EventEmitter {
     this.registry.set(sessionId, state);
 
     try {
-      const result = await state.graph.invoke(
-        createInitialPipelineState(userPrompt),
-        this.graphConfig(sessionId),
-      );
-      return this.handleGraphResult(sessionId, state, result, 'Pipeline completed.');
+      const result = await this.graphCoordinator.invokeInitial(sessionId, state, userPrompt);
+      return this.graphCoordinator.handleGraphResult(sessionId, state, result, 'Pipeline completed.');
     } catch (e: any) {
       if (this.handlePipelineStepStop(sessionId, e)) {
         return '';
@@ -129,11 +154,8 @@ export class PipelineRunEngine extends EventEmitter {
     state.abortController = new AbortController();
 
     try {
-      const result = await state.graph.invoke(
-        new Command({ resume: { approved: true, plan: approvedOutput } }),
-        this.graphConfig(sessionId),
-      );
-      return this.handleGraphResult(sessionId, state, result, 'Pipeline completed.');
+      const result = await this.graphCoordinator.resumeAfterApproval(sessionId, state, approvedOutput);
+      return this.graphCoordinator.handleGraphResult(sessionId, state, result, 'Pipeline completed.');
     } catch (e: any) {
       if (this.handlePipelineStepStop(sessionId, e)) {
         return '';
@@ -213,34 +235,6 @@ export class PipelineRunEngine extends EventEmitter {
     };
   }
 
-  private handleGraphResult(
-    sessionId: string,
-    state: PipelineRunState,
-    result: any,
-    completionMessage: string,
-  ): string {
-    this.registry.throwIfCancelled(state);
-    const interrupt = readApprovalInterrupt(result);
-    if (interrupt) {
-      assertSingleProposedPlan(interrupt.plan);
-      state.pendingApproval = interrupt;
-      this.emitPlanReady(sessionId, state, interrupt.plan, interrupt.stepId, false);
-      return interrupt.plan;
-    }
-
-    this.snapshotStore.persistTeamSnapshot(sessionId, state, result);
-    this.emitStatus(
-      sessionId,
-      'completed',
-      completionMessage,
-      undefined,
-      undefined,
-      this.readTeamContext(state.pipeline),
-    );
-    this.registry.delete(sessionId);
-    return typeof result?.lastOutput === 'string' ? result.lastOutput : '';
-  }
-
   private emitPlanReady(
     sessionId: string,
     state: PipelineRunState,
@@ -274,58 +268,6 @@ export class PipelineRunEngine extends EventEmitter {
       teamContext,
       implementerUsesSandcastle,
     );
-  }
-
-  private compileGraph(sessionId: string, pipeline: PipelineDefinition): CompiledPipelineGraph {
-    const teamContext = this.readTeamContext(pipeline);
-    const compiler = new PipelineGraphCompiler(
-      async (kind, promptText, onSessionUpdate) => {
-        const output = await this.runConfiguredAcpAgent(sessionId, kind, promptText, onSessionUpdate);
-        const state = this.registry.get(sessionId);
-        if (state) {
-          state.stepOutputs.set(kind, output);
-          if (kind === 'implementer') {
-            state.implementOutput = output;
-          }
-        }
-        return output;
-      },
-      {
-        onStepStart: (stepId, primitive, branchId) => {
-          const phase = getPipelineStepPhase(pipeline, stepId);
-          const role = teamContext?.roleByStepId[stepId];
-          const statusMessage = role
-            ? `${formatPipelineRoleLabel(role)} (${primitive.agent})…`
-            : `Running ${branchId ? `${stepId}/${branchId}` : stepId} with ${primitive.agent}...`;
-          this.emitStatus(
-            sessionId,
-            phase,
-            statusMessage,
-            stepId,
-            branchId,
-            teamContext,
-            role,
-            primitive.agent,
-          );
-        },
-        onStepSessionUpdate: (stepId, update, branchId) => {
-          const role = teamContext?.roleByStepId[stepId];
-          const agentName = role ? teamContext?.agentByRole[role] : undefined;
-          this.emit('session-update', {
-            sessionId,
-            phase: branchId ? `${stepId}/${branchId}` : stepId,
-            update,
-            stepId,
-            branchId,
-            role,
-            agentName,
-            teamId: teamContext?.teamId,
-          });
-        },
-      },
-      this.checkpointer,
-    );
-    return compiler.compile(pipeline);
   }
 
   private readTeamContext(pipeline: PipelineDefinition): CompiledTeamMetadata | undefined {
@@ -407,10 +349,6 @@ export class PipelineRunEngine extends EventEmitter {
     if (missing.length > 0) {
       throw new Error(`Missing configured ACP pipeline agent(s): ${missing.join(', ')}.`);
     }
-  }
-
-  private graphConfig(sessionId: string): { configurable: { thread_id: string } } {
-    return { configurable: { thread_id: sessionId } };
   }
 
   private implementerUsesSandcastle(pipeline: PipelineDefinition): boolean {

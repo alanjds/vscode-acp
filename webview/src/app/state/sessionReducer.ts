@@ -2,9 +2,9 @@ import type { ChatWebviewSharedState, CurrentTurn } from '../../chatTypes';
 import { normalizeSharedState } from '../../../../src/ui/ChatWebviewSharedStateCore';
 import { normalizeOrchestrationState } from '../../../../src/ui/OrchestrationStateCore';
 import { normalizePersistedState, normalizeSessionSnapshot } from '../normalizers';
+import { emptyOrchestrationSlice } from '../OrchestrationProjector';
 import type { AppState, SessionAction } from './types';
 import { clamp, commitCurrentTurnToHistory, ensureSessionState, MAX_INPUT_HEIGHT, MIN_INPUT_HEIGHT } from './helpers';
-import { emptyOrchestrationSlice } from './pipelineChatProjection';
 
 const SESSION_ACTIONS = new Set<SessionAction['type']>([
   'showSessionConnected',
@@ -19,6 +19,7 @@ const SESSION_ACTIONS = new Set<SessionAction['type']>([
   'loadSessionStart',
   'loadSessionEnd',
   'hydrateSharedState',
+  'hydrateOrchestrationState',
 ]);
 
 export function isSessionAction(action: { type: string }): action is SessionAction {
@@ -52,10 +53,6 @@ export function normalizeSharedBootstrapState(value: unknown): Partial<{
     currentTurn: shared.currentTurn as CurrentTurn | null,
     collapsedTools: shared.collapsedTools,
   };
-}
-
-export function normalizeOrchestrationBootstrapState(value: unknown): ReturnType<typeof emptyOrchestrationSlice> {
-  return normalizeOrchestrationState(value) as ReturnType<typeof emptyOrchestrationSlice>;
 }
 
 export function sessionReducer(state: AppState, action: SessionAction): AppState {
@@ -238,6 +235,12 @@ export function sessionReducer(state: AppState, action: SessionAction): AppState
         composerUnlocked: action.state.composerUnlocked ?? action.state.hasActiveSession,
         currentTurn: action.state.currentTurn,
         collapsedTools: action.state.collapsedTools,
+      };
+
+    case 'hydrateOrchestrationState':
+      return {
+        ...state,
+        orchestration: normalizeOrchestrationState(action.state),
       };
 
     default:

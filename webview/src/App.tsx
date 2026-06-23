@@ -16,7 +16,6 @@ import type {
   ModelOption,
   ModeOption,
   PersistedWebviewState,
-  ChatWebviewSharedState,
   SessionConfigOption,
   SlashCommand,
 } from './chatTypes';
@@ -24,27 +23,13 @@ import {
   expandFileMentionsForPrompt,
   getSlashFilteredCommands,
 } from './app/composer';
-import { buildHistoryBlocks, getRestoreMarkdownItems, getToolCollapseState } from './app/history';
-import {
-  normalizeConfigOptions,
-  normalizeModelsState,
-  normalizeModesState,
-  normalizeSessionSnapshot,
-  normalizeSessionUpdate,
-} from './app/normalizers';
-import { mapSessionUpdateToActions } from './app/sessionUpdates';
-import {
-  mapOrchestrationMessageToActions,
-  mapSessionOrchestrationMetaToActions,
-  normalizePipelinePhase,
-  shouldFinalizeTeamRoleTurn,
-  type OrchestrationHostMessage,
-} from './app/orchestrationEvents';
+import { buildHistoryBlocks, getToolCollapseState } from './app/history';
+import { routeHostMessage } from './app/hostMessageRouter';
 import {
   appReducer,
   buildWebviewPersistedBundle,
   createInitialState,
-  selectPipelineChatProjection,
+  selectOrchestrationView,
 } from './app/state';
 import { MessageBubble } from './components/MessageBubble';
 import { ChatComposer } from './components/ChatComposer';
@@ -55,27 +40,26 @@ import { SessionBanner } from './components/SessionBanner';
 import { PlanBlock } from './components/PlanBlock';
 import { PipelinePlanBlock } from './components/PipelinePlanBlock';
 import { PipelineRoleTimeline } from './components/PipelineRoleTimeline';
-import { createDefaultTeamTimeline } from './app/OrchestrationProjector';
 import { PipelineRoleOutputBlock } from './components/PipelineRoleOutputBlock';
 import { getState, onMessage, postMessage, setState } from './vscode';
 import { useFileMentions } from './app/useFileMentions';
 import { useSessionDisplay } from './app/useSessionDisplay';
-import { shouldAcceptIncomingSharedState } from '../../src/ui/ChatWebviewSharedStateCore';
 
 export function App(): JSX.Element {
   const [state, dispatch] = useReducer(appReducer, getState<PersistedWebviewState>(), createInitialState);
   const [cursorPosition, setCursorPosition] = useState(0);
   
   const stateRef = useRef(state);
-  const restoreMarkdownItemsRef = useRef(getRestoreMarkdownItems(state.persisted.chatHistory));
   const turnCounterRef = useRef(0);
-  const loadMarkdownRequestedRef = useRef(false);
   const messagesRef = useRef<HTMLDivElement | null>(null);
   const promptInputRef = useRef<HTMLDivElement | null>(null);
   const pendingCursorPositionRef = useRef<number | null>(null);
   const sharedVersionRef = useRef(0);
   const sharedUpdatedAtRef = useRef(0);
   const skipSharedSyncRef = useRef(false);
+  const orchestrationVersionRef = useRef(state.orchestration.version);
+  const orchestrationUpdatedAtRef = useRef(state.orchestration.updatedAt);
+  const skipOrchestrationSyncRef = useRef(false);
 
   stateRef.current = state;
 
@@ -125,7 +109,7 @@ export function App(): JSX.Element {
     [excludedToolIndexes, state.persisted.chatHistory],
   );
   const pipelineProjection = useMemo(
-    () => selectPipelineChatProjection(state),
+    () => selectOrchestrationView(state),
     [state.orchestration],
   );
   const hasPendingPipelinePlan = pipelineProjection.hasPendingPlan;
@@ -146,6 +130,8 @@ export function App(): JSX.Element {
       state,
       sharedVersionRef.current,
       sharedUpdatedAtRef.current,
+      orchestrationVersionRef.current,
+      orchestrationUpdatedAtRef.current,
     );
     setState(bundle);
     postMessage({ type: 'sharedStateChanged', state: bundle.shared });
@@ -156,180 +142,74 @@ export function App(): JSX.Element {
     state.isProcessing,
     state.currentTurn,
     state.collapsedTools,
-    state.orchestration,
     state.composerUnlocked,
   ]);
 
-  // Handle markdown rendering (désactivé - rendu côté frontend avec react-markdown)
+  // Sync orchestration slice to extension host independently of shared chat state
   useEffect(() => {
-    if (!loadMarkdownRequestedRef.current || state.isLoadingSession) {
+    if (skipOrchestrationSyncRef.current) {
+      skipOrchestrationSyncRef.current = false;
       return;
     }
-    loadMarkdownRequestedRef.current = false;
-  }, [state.isLoadingSession, state.persisted.chatHistory]);
+
+    orchestrationVersionRef.current += 1;
+    orchestrationUpdatedAtRef.current = Date.now();
+    const bundle = buildWebviewPersistedBundle(
+      state,
+      sharedVersionRef.current,
+      sharedUpdatedAtRef.current,
+      orchestrationVersionRef.current,
+      orchestrationUpdatedAtRef.current,
+    );
+    setState(bundle);
+    postMessage({ type: 'orchestrationStateChanged', state: bundle.orchestration });
+  }, [state.orchestration]);
 
   // Handle restored markdown items (désactivé - rendu côté frontend)
   useEffect(() => {
-    restoreMarkdownItemsRef.current = [];
     postMessage({ type: 'ready' });
 
     return onMessage((message) => {
-      switch (message.type) {
-        case 'hydrateSharedState':
-        case 'sharedStateUpdated':
-          if (message.state && typeof message.state === 'object') {
-            const sharedState = message.state as ChatWebviewSharedState;
-            if (!shouldAcceptIncomingSharedState(
-              { version: sharedVersionRef.current, updatedAt: sharedUpdatedAtRef.current },
-              sharedState,
-            )) {
-              break;
-            }
-            sharedVersionRef.current = sharedState.version;
-            sharedUpdatedAtRef.current = sharedState.updatedAt;
-            skipSharedSyncRef.current = true;
-            dispatch({ type: 'hydrateSharedState', state: sharedState });
-          }
-          break;
+      const result = routeHostMessage(message, {
+        getState: () => stateRef.current,
+        refs: {
+          sharedVersion: sharedVersionRef.current,
+          sharedUpdatedAt: sharedUpdatedAtRef.current,
+          orchestrationVersion: orchestrationVersionRef.current,
+          orchestrationUpdatedAt: orchestrationUpdatedAtRef.current,
+          fileSearchRequestId: fileSearchRequestIdRef.current,
+          turnCounter: turnCounterRef.current,
+        },
+      });
 
-        case 'state':
-          if (message.session) {
-            dispatch({
-              type: 'showSessionConnected',
-              session: normalizeSessionSnapshot(message.session) ?? {},
-            });
-          } else {
-            dispatch({ type: 'showNoSession' });
-          }
-          break;
+      if (result.ui?.nextSharedVersion !== undefined) {
+        sharedVersionRef.current = result.ui.nextSharedVersion;
+      }
+      if (result.ui?.nextSharedUpdatedAt !== undefined) {
+        sharedUpdatedAtRef.current = result.ui.nextSharedUpdatedAt;
+      }
+      if (result.ui?.nextOrchestrationVersion !== undefined) {
+        orchestrationVersionRef.current = result.ui.nextOrchestrationVersion;
+      }
+      if (result.ui?.nextOrchestrationUpdatedAt !== undefined) {
+        orchestrationUpdatedAtRef.current = result.ui.nextOrchestrationUpdatedAt;
+      }
+      if (result.ui?.skipSharedSync) {
+        skipSharedSyncRef.current = true;
+      }
+      if (result.ui?.skipOrchestrationSync) {
+        skipOrchestrationSyncRef.current = true;
+      }
+      if (result.ui?.nextTurnCounter !== undefined) {
+        turnCounterRef.current = result.ui.nextTurnCounter;
+      }
+      if (result.ui?.fileResults) {
+        setFileResults(result.ui.fileResults);
+        setFileSelectedIdx(result.ui.fileSelectedIdx ?? 0);
+      }
 
-        case 'externalUserMessage':
-          if (typeof message.text === 'string') {
-            dispatch({ type: 'appendUserMessage', text: message.text });
-          }
-          break;
-
-        case 'fileSearchResults':
-          if (
-            typeof message.requestId === 'number' &&
-            message.requestId === fileSearchRequestIdRef.current &&
-            Array.isArray(message.results)
-          ) {
-            setFileResults(
-              message.results.filter((result): result is FileSearchResult =>
-                typeof result?.path === 'string' && typeof result?.name === 'string',
-              ),
-            );
-            setFileSelectedIdx(0);
-          }
-          break;
-
-        case 'promptStart':
-          turnCounterRef.current += 1;
-          dispatch({
-            type: 'promptStart',
-            turnId: `turn-${Date.now()}-${turnCounterRef.current}`,
-          });
-          break;
-
-        case 'promptEnd': {
-          const current = stateRef.current;
-          if (shouldFinalizeTeamRoleTurn(
-            current.orchestration.activeRole,
-            current.currentTurn?.assistantText,
-          )) {
-            dispatch({ type: 'finalizeTeamRoleTurn' });
-          } else {
-            dispatch({ type: 'promptEnd' });
-          }
-          break;
-        }
-
-        case 'clearChat':
-          dispatch({ type: 'clearChat' });
-          break;
-
-        case 'error':
-          dispatch({
-            type: 'appendErrorMessage',
-            text: typeof message.message === 'string' ? message.message : 'An error occurred',
-          });
-          break;
-
-        case 'info':
-          dispatch({
-            type: 'appendInfoMessage',
-            text: typeof message.message === 'string' ? message.message : 'Information',
-          });
-          break;
-
-        case 'pipelinePlanReady':
-        case 'pipelinePlanApprovalFailed':
-        case 'pipelineStatus':
-        case 'reviewerRerunReady':
-          for (const action of mapOrchestrationMessageToActions(
-            message as OrchestrationHostMessage,
-            stateRef.current.orchestration.timeline.length > 0
-              ? stateRef.current.orchestration.timeline
-              : createDefaultTeamTimeline(false),
-          )) {
-            dispatch(action);
-          }
-          break;
-
-        case 'sessionUpdate':
-          for (const action of mapSessionUpdateToActions(
-            normalizeSessionUpdate(message.update),
-            normalizePipelinePhase(message.phase ?? message.role),
-          )) {
-            dispatch(action);
-          }
-          for (const action of mapSessionOrchestrationMetaToActions(
-            normalizePipelinePhase(message.role ?? message.phase),
-            typeof message.agentName === 'string' ? message.agentName : undefined,
-          )) {
-            dispatch(action);
-          }
-          break;
-
-        case 'modesUpdate': {
-          const modes = normalizeModesState(message.modes);
-          if (modes) {
-            dispatch({ type: 'updateModes', modes });
-          }
-          break;
-        }
-
-        case 'modelsUpdate': {
-          const models = normalizeModelsState(message.models);
-          if (models) {
-            dispatch({ type: 'updateModels', models });
-          }
-          break;
-        }
-
-        case 'configOptionsUpdate':
-          dispatch({
-            type: 'updateConfigOptions',
-            configOptions: normalizeConfigOptions(message.configOptions),
-          });
-          break;
-
-        case 'loadSessionStart':
-          dispatch({ type: 'loadSessionStart' });
-          break;
-
-        case 'loadSessionEnd':
-          loadMarkdownRequestedRef.current = true;
-          dispatch({ type: 'loadSessionEnd', ok: Boolean(message.ok) });
-          break;
-
-        case 'sessionInfoUpdate':
-          dispatch({
-            type: 'updateSessionTitle',
-            title: typeof message.title === 'string' ? message.title : null,
-          });
-          break;
+      for (const action of result.actions) {
+        dispatch(action);
       }
     });
   }, []);

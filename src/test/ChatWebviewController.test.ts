@@ -4,7 +4,9 @@ import * as vscode from 'vscode';
 
 import { ChatWebviewController } from '../ui/ChatWebviewController';
 import { ChatWebviewStateStore } from '../ui/ChatWebviewStateStore';
+import { OrchestrationWebviewStateStore } from '../ui/OrchestrationWebviewStateStore';
 import { emptySharedState } from '../ui/ChatWebviewSharedState';
+import { emptyOrchestrationState } from '../ui/OrchestrationState';
 import type { EditorContext } from '../ui/EditorContext';
 
 suite('ChatWebviewController', () => {
@@ -76,12 +78,14 @@ suite('ChatWebviewController', () => {
       keys: () => [],
     } as unknown as vscode.Memento;
     const stateStore = new ChatWebviewStateStore(memento);
+    const orchestrationStateStore = new OrchestrationWebviewStateStore(memento);
 
     const controller = new ChatWebviewController(
       vscode.Uri.file(workspaceRoot),
       sessionManager as any,
       sessionUpdateHandler as any,
       stateStore,
+      orchestrationStateStore,
       () => editorContext,
     );
 
@@ -120,6 +124,7 @@ suite('ChatWebviewController', () => {
     return {
       controller,
       stateStore,
+      orchestrationStateStore,
       sentPrompts,
       recordedPrompts,
       messages: view.messages,
@@ -181,7 +186,30 @@ suite('ChatWebviewController', () => {
     assert.strictEqual(update.state.promptText, 'saved draft');
   });
 
-  test('clearChat clears shared store and all endpoints', async () => {
+  test('orchestrationStateChanged from sidebar hydrates editor endpoint', async () => {
+    const ctx = await createController();
+    const editor = ctx.attachEndpoint('editor-1');
+    await editor.markReady();
+    editor.messages.length = 0;
+
+    await ctx.triggerMessage({
+      type: 'orchestrationStateChanged',
+      state: {
+        ...emptyOrchestrationState(),
+        version: 1,
+        updatedAt: Date.now(),
+        activeRole: 'implementer',
+        activeAgentName: 'builder',
+      },
+    });
+
+    const update = editor.messages.find(message => message.type === 'orchestrationStateUpdated');
+    assert.ok(update);
+    assert.strictEqual(update.state.activeRole, 'implementer');
+    assert.strictEqual(update.state.activeAgentName, 'builder');
+  });
+
+  test('clearChat clears shared and orchestration stores', async () => {
     const ctx = await createController();
     ctx.stateStore.updateFromWebview({
       ...emptySharedState(),
@@ -189,6 +217,12 @@ suite('ChatWebviewController', () => {
       updatedAt: 100,
       promptText: 'draft',
       chatHistory: [{ kind: 'message', role: 'user', text: 'hello' }],
+    }, 'view-1');
+    ctx.orchestrationStateStore.updateFromWebview({
+      ...emptyOrchestrationState(),
+      version: 1,
+      updatedAt: 100,
+      activeRole: 'reviewer',
     }, 'view-1');
 
     const editor = ctx.attachEndpoint('editor-1');
@@ -199,8 +233,10 @@ suite('ChatWebviewController', () => {
     ctx.controller.clearChat();
 
     assert.strictEqual(ctx.stateStore.getSnapshot().promptText, '');
+    assert.strictEqual(ctx.orchestrationStateStore.getSnapshot().activeRole, null);
     assert.ok(ctx.messages.some(message => message.type === 'clearChat'));
     assert.ok(editor.messages.some(message => message.type === 'clearChat'));
+    assert.ok(ctx.messages.some(message => message.type === 'hydrateOrchestrationState'));
   });
 
   test('sends raw prompt when editor context link is disabled', async () => {

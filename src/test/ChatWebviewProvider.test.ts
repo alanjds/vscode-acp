@@ -5,6 +5,7 @@ import * as vscode from 'vscode';
 import { ChatWebviewController } from '../ui/ChatWebviewController';
 import { ChatWebviewProvider } from '../ui/ChatWebviewProvider';
 import { ChatWebviewStateStore } from '../ui/ChatWebviewStateStore';
+import { OrchestrationWebviewStateStore } from '../ui/OrchestrationWebviewStateStore';
 
 suite('ChatWebviewProvider', () => {
   test('resolveWebviewView attaches sidebar endpoint to controller', async () => {
@@ -25,11 +26,13 @@ suite('ChatWebviewProvider', () => {
       keys: () => [],
     } as unknown as vscode.Memento;
     const stateStore = new ChatWebviewStateStore(memento);
+    const orchestrationStateStore = new OrchestrationWebviewStateStore(memento);
     const controller = new ChatWebviewController(
       vscode.Uri.file(workspaceRoot),
       sessionManager as any,
       sessionUpdateHandler as any,
       stateStore,
+      orchestrationStateStore,
     );
     const provider = new ChatWebviewProvider(controller);
 
@@ -79,11 +82,13 @@ suite('ChatWebviewProvider', () => {
       keys: () => [],
     } as unknown as vscode.Memento;
     const stateStore = new ChatWebviewStateStore(memento);
+    const orchestrationStateStore = new OrchestrationWebviewStateStore(memento);
     const controller = new ChatWebviewController(
       vscode.Uri.file(workspaceRoot),
       sessionManager as any,
       sessionUpdateHandler as any,
       stateStore,
+      orchestrationStateStore,
     );
     const provider = new ChatWebviewProvider(controller);
 

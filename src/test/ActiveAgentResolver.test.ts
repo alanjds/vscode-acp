@@ -5,6 +5,7 @@ import {
   resolveAgent,
 } from '../config/VirtualAgentCatalog';
 import { SessionBackedActiveAgentResolver } from '../inlineChat/agent/ActiveAgentResolver';
+import { repoRoot } from './repoRoot';
 
 suite('ActiveAgentResolver', () => {
   let originalGetConfiguration: typeof vscode.workspace.getConfiguration;
@@ -47,6 +48,31 @@ suite('ActiveAgentResolver', () => {
     );
     const agent = resolver.resolveRunnableAgent();
     assert.strictEqual(resolveAgent(agent.name, '/repo')?.kind, 'configured');
+  });
+
+  test('active virtual agent session falls back to first configured agent', () => {
+    const workspaceRoot = repoRoot();
+    vscode.workspace.getConfiguration = function() {
+      return {
+        get: (key: string, defaultValue?: unknown) => {
+          if (key === 'agents') {
+            return {
+              'Cursor CLI': { command: 'echo' },
+              'Cursor Sandcastle': { transport: 'sandcastle', provider: 'cursor', model: 'composer-2' },
+              Vibe: { command: 'echo' },
+            };
+          }
+          return defaultValue;
+        },
+      } as any;
+    };
+
+    const resolver = new SessionBackedActiveAgentResolver(
+      () => workspaceRoot,
+      () => 'Feature Team',
+    );
+    const agent = resolver.resolveRunnableAgent();
+    assert.strictEqual(resolveAgent(agent.name, workspaceRoot)?.kind, 'configured');
   });
 
   test('missing displayName falls back to agent name', () => {

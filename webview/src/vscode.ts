@@ -11,6 +11,7 @@ import type {
   SessionSnapshot,
   SessionUpdate,
 } from './chatTypes';
+import type { OrchestrationState } from '../../src/ui/OrchestrationState';
 
 export type HostToWebviewMessage =
   | {
@@ -40,6 +41,8 @@ export type HostToWebviewMessage =
   | { type: 'debugSnapshot'; snapshot: DebugSnapshot }
   | { type: 'hydrateSharedState'; state: ChatWebviewSharedState }
   | { type: 'sharedStateUpdated'; state: ChatWebviewSharedState }
+  | { type: 'hydrateOrchestrationState'; state: OrchestrationState }
+  | { type: 'orchestrationStateUpdated'; state: OrchestrationState }
   | { type: string; [key: string]: unknown };
 
 export type WebviewToHostMessage =
@@ -59,7 +62,8 @@ export type WebviewToHostMessage =
   | { type: 'refreshDebugSnapshot' }
   | { type: 'copyDebugSnapshot' }
   | { type: 'exportDebugSnapshot' }
-  | { type: 'sharedStateChanged'; state: ChatWebviewSharedState };
+  | { type: 'sharedStateChanged'; state: ChatWebviewSharedState }
+  | { type: 'orchestrationStateChanged'; state: OrchestrationState };
 
 type VsCodeApi<State> = {
   postMessage(message: WebviewToHostMessage): void;

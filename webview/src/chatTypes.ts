@@ -133,22 +133,18 @@ export type PlanHistoryItem = {
   plan: PlanUpdate;
 };
 
-export type PipelinePlanStatus =
-  | 'pending'
-  | 'implementing'
-  | 'completed'
-  | 'rejected'
-  | 'error'
-  | 'cancelled';
+import type {
+  PipelinePlanStatus,
+  PipelinePhase,
+  PipelineTimelineStep,
+  PipelineTimelineStepStatus,
+} from '../../src/ui/PipelineTypes';
 
-export type PipelinePhase = 'planner' | 'implementer' | 'reviewer' | 'tester' | 'reviewer-rerun';
-
-export type PipelineTimelineStepStatus = 'pending' | 'running' | 'done' | 'error' | 'skipped';
-
-export type PipelineTimelineStep = {
-  id: string;
-  label: string;
-  status: PipelineTimelineStepStatus;
+export type {
+  PipelinePlanStatus,
+  PipelinePhase,
+  PipelineTimelineStep,
+  PipelineTimelineStepStatus,
 };
 
 export type PipelineTimelineState = {
@@ -200,12 +196,6 @@ export type ChatWebviewSharedState = {
   currentTurn: CurrentTurn | null;
   collapsedTools: Record<string, boolean>;
   composerUnlocked?: boolean;
-};
-
-export type OrchestrationWebviewState = {
-  timeline: PipelineTimelineStep[];
-  activeRole: PipelinePhase | null;
-  activeAgentName: string | null;
 };
 
 export type FileSearchResult = {

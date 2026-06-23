@@ -141,7 +141,7 @@ Après l’envoi du prochain prompt, PendingHandoff est consommé — la Discuss
 |----------|----------|--------------------------------|
 | « Session » surchargé | Même mot pour id protocole, Conversation, SessionRecord, snapshot UI, paire bridge | Toujours qualifier : ProtocolSession, Conversation, SessionRecord, BridgeConversation, SessionSnapshot |
 | Resume vs reset ChatHistory | Ouvrir via resume peut ne pas effacer ChatHistory comme load | Traiter comme écart d’implémentation ; le terme **historyReplayed** distingue load de resume |
-| EphemeralRun duplique le cycle connexion | Second chemin spawn / connect hors ConnectedAgent | Garder le terme **EphemeralRun** ; consolidation = refactor structurel futur |
+| Deux chemins de connexion agent | EphemeralRun et ConnectedAgent utilisent des adaptateurs distincts | **EphemeralRun** → `AgentConnectionFactory` ; **ConnectedAgent** → `SessionConnector` (ADR-0015 — pas de fusion des lifecycles) |
 | Inline chat orphelin | Pas d’arbre, pas de SessionRecord, pas de handoff | Accepter comme contexte séparé ; documenté dans [Inline chat](./src/inlineChat/CONTEXT.md) |
 | Champs pipeline dans l’état chat partagé | La timeline pipeline vit dans l’état webview générique | Fuite de domaine Pipeline → présentation — **ConversationProjector** unifie la projection host ; l’isolation de `OrchestrationState` (slice webview) reste un travail séparé |
 | Documentation scindée | `docs/` EN vs `doc_fr/` pas à 100 % alignés | Glossaires en français avec termes canoniques EN ; README.fr non synchronisé automatiquement |

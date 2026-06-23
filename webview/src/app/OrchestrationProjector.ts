@@ -1,34 +1,17 @@
+import type { ChatHistoryItem } from '../chatTypes';
 import type {
-  ChatHistoryItem,
+  OrchestrationPlanState,
+  OrchestrationRoleOutputState,
+  OrchestrationState,
   PipelinePhase,
   PipelinePlanStatus,
   PipelineTimelineStep,
-  PipelineTimelineStepStatus,
-} from '../chatTypes';
+} from '../../../src/ui/OrchestrationStateCore';
+import type { PipelineTimelineStepStatus } from '../../../src/ui/PipelineTypes';
 
-export type PipelinePlanState = {
-  plan: string;
-  status: PipelinePlanStatus;
-  message?: string;
-  role?: PipelinePhase;
-  agentName?: string;
-  implementerUsesSandcastle?: boolean;
-};
-
-export type PipelineRoleOutputItem = {
-  role: PipelinePhase;
-  agentName?: string;
-  text: string;
-  title: string;
-};
-
-export type OrchestrationSlice = {
-  timeline: PipelineTimelineStep[];
-  activeRole: PipelinePhase | null;
-  activeAgentName: string | null;
-  plan: PipelinePlanState | null;
-  roleOutputs: PipelineRoleOutputItem[];
-};
+export type OrchestrationSlice = OrchestrationState;
+export type PipelinePlanState = OrchestrationPlanState;
+export type PipelineRoleOutputItem = OrchestrationRoleOutputState;
 
 export type OrchestrationViewModel = {
   timeline: PipelineTimelineStep[];
@@ -42,6 +25,8 @@ export type OrchestrationViewModel = {
 
 export function emptyOrchestrationSlice(): OrchestrationSlice {
   return {
+    version: 0,
+    updatedAt: 0,
     timeline: [],
     activeRole: null,
     activeAgentName: null,
@@ -60,6 +45,10 @@ export function projectOrchestrationView(slice: OrchestrationSlice): Orchestrati
     hasTimeline: slice.timeline.length > 0,
     hasPendingPlan: slice.plan?.status === 'pending',
   };
+}
+
+export function selectOrchestrationView(state: { orchestration: OrchestrationSlice }): OrchestrationViewModel {
+  return projectOrchestrationView(state.orchestration);
 }
 
 export function createDefaultTeamTimeline(includeTester = false): PipelineTimelineStep[] {
@@ -208,3 +197,10 @@ export function migratePipelineFromChatHistory(
     orchestration: { ...orchestration, plan, roleOutputs },
   };
 }
+
+export type {
+  PipelinePhase,
+  PipelinePlanStatus,
+  PipelineTimelineStep,
+  PipelineTimelineStepStatus,
+} from '../../../src/ui/PipelineTypes';

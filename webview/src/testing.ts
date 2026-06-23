@@ -3,11 +3,23 @@ export {
   createInitialState,
   emptyPersistedState,
   emptyOrchestrationSlice,
-  selectPipelineChatProjection,
+  selectOrchestrationView,
 } from './app/state';
 export {
   shouldAcceptIncomingSharedState,
 } from '../../src/ui/ChatWebviewSharedStateCore';
+export {
+  shouldAcceptIncomingOrchestrationState,
+} from '../../src/ui/OrchestrationStateCore';
+export {
+  applyPipelineStatusToTimeline,
+  createDefaultTeamTimeline,
+  migratePipelineFromChatHistory,
+} from './app/OrchestrationProjector';
+export {
+  mapOrchestrationMessageToActions,
+  shouldFinalizeTeamRoleTurn,
+} from './app/orchestrationEvents';
 export {
   getMarkdownEditableCursorPosition,
   getMarkdownEditableText,

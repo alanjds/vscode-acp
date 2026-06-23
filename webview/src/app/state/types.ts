@@ -13,7 +13,7 @@ import type {
   SlashCommand,
   ToolCallStatus,
 } from '../../chatTypes';
-import type { OrchestrationSlice } from './pipelineChatProjection';
+import type { OrchestrationSlice } from '../OrchestrationProjector';
 
 export type AppState = {
   persisted: PersistedWebviewState;
@@ -81,7 +81,8 @@ export type AppAction =
   | { type: 'loadSessionStart' }
   | { type: 'loadSessionEnd'; ok: boolean }
   | { type: 'setRenderedMarkdown'; items: Array<{ index: number; html: string }> }
-  | { type: 'hydrateSharedState'; state: ChatWebviewSharedState };
+  | { type: 'hydrateSharedState'; state: ChatWebviewSharedState }
+  | { type: 'hydrateOrchestrationState'; state: OrchestrationSlice };
 
 export type ComposerAction = Extract<
   AppAction,
@@ -111,6 +112,7 @@ export type SessionAction = Extract<
   | { type: 'loadSessionStart' }
   | { type: 'loadSessionEnd' }
   | { type: 'hydrateSharedState' }
+  | { type: 'hydrateOrchestrationState' }
 >;
 
 export type ChatAction = Extract<

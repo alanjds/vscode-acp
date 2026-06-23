@@ -5,7 +5,7 @@ import {
   createInitialState,
   emptyPersistedState,
   emptyOrchestrationSlice,
-  selectPipelineChatProjection,
+  selectOrchestrationView,
   shouldAcceptIncomingSharedState,
   type ChatWebviewSharedState,
 } from '../../webview/src/testing';
@@ -47,6 +47,33 @@ suite('WebviewAppState', () => {
       echoed.persisted.chatHistory[0]?.kind === 'message' ? echoed.persisted.chatHistory[0].text : '',
       'hello world',
     );
+  });
+
+  test('hydrateOrchestrationState preserves shared slice', () => {
+    const initial = createInitialState(emptyPersistedState());
+    const withPrompt = appReducer(initial, { type: 'setPromptText', text: 'draft' });
+    const withOrchestration = appReducer(withPrompt, {
+      type: 'setActivePipelineRole',
+      role: 'implementer',
+      agentName: 'coder',
+    });
+
+    const hydrated = appReducer(withOrchestration, {
+      type: 'hydrateOrchestrationState',
+      state: {
+        version: 2,
+        updatedAt: 200,
+        timeline: [{ id: 'planner', label: 'Planner', status: 'done' }],
+        activeRole: 'reviewer',
+        activeAgentName: 'review-bot',
+        plan: null,
+        roleOutputs: [],
+      },
+    });
+
+    assert.strictEqual(hydrated.promptText, 'draft');
+    assert.strictEqual(hydrated.orchestration.activeRole, 'reviewer');
+    assert.strictEqual(hydrated.orchestration.activeAgentName, 'review-bot');
   });
 
   test('hydrateSharedState restores promptText without touching orchestration slice', () => {
@@ -100,7 +127,7 @@ suite('WebviewAppState', () => {
     });
 
     assert.strictEqual(state.orchestration.activeRole, 'implementer');
-    assert.strictEqual(selectPipelineChatProjection(state).hasTimeline, true);
+    assert.strictEqual(selectOrchestrationView(state).hasTimeline, true);
   });
 
   test('createInitialState migrates legacy pipeline fields from shared snapshot', () => {

@@ -20,10 +20,12 @@ import { sendEvent } from '../utils/TelemetryManager';
 import { buildPromptWithEditorContext, type EditorContext } from './EditorContext';
 import { getReactShellHtmlContent } from './WebviewHtml';
 import { ChatWebviewStateStore } from './ChatWebviewStateStore';
+import { OrchestrationWebviewStateStore } from './OrchestrationWebviewStateStore';
 import {
   ChatWebviewSharedState,
   hasChatContentFromSnapshot,
 } from './ChatWebviewSharedState';
+import type { OrchestrationState } from './OrchestrationState';
 
 type GetEditorContext = () => EditorContext | null;
 type OpenDebugSnapshot = (chatState: unknown) => void | Promise<void>;
@@ -48,6 +50,7 @@ export class ChatWebviewController implements vscode.Disposable {
     private readonly sessionManager: SessionManager,
     private readonly sessionUpdateHandler: SessionUpdateHandler,
     private readonly stateStore: ChatWebviewStateStore,
+    private readonly orchestrationStateStore: OrchestrationWebviewStateStore,
     private readonly getEditorContext: GetEditorContext = () => null,
     private readonly debugTraceStore?: DebugTraceStore,
     private readonly openDebugSnapshot?: OpenDebugSnapshot,
@@ -72,6 +75,13 @@ export class ChatWebviewController implements vscode.Disposable {
         return;
       }
       this.broadcastSharedState(snapshot, sourceEndpointId);
+    });
+
+    this.orchestrationStateStore.onDidChange((snapshot, sourceEndpointId) => {
+      if (!sourceEndpointId) {
+        return;
+      }
+      this.broadcastOrchestrationState(snapshot, sourceEndpointId);
     });
 
     log('ChatWebviewController: session update listener registered');
@@ -143,6 +153,11 @@ export class ChatWebviewController implements vscode.Disposable {
           this.stateStore.updateFromWebview(message.state as ChatWebviewSharedState, endpointId);
         }
         break;
+      case 'orchestrationStateChanged':
+        if (message.state && typeof message.state === 'object') {
+          this.orchestrationStateStore.updateFromWebview(message.state as OrchestrationState, endpointId);
+        }
+        break;
       case 'ready':
         this.markEndpointReady(endpointId);
         break;
@@ -166,6 +181,7 @@ export class ChatWebviewController implements vscode.Disposable {
   private markEndpointReady(endpointId: string): void {
     this.transport.markEndpointReady(endpointId);
     this.sendHydrateSharedState(endpointId);
+    this.sendHydrateOrchestrationState(endpointId);
     this.sendCurrentState(endpointId);
     this.transport.flushPendingMessages(endpointId);
   }
@@ -381,6 +397,11 @@ export class ChatWebviewController implements vscode.Disposable {
     this.postMessage({ type: 'hydrateSharedState', state: snapshot }, endpointId);
   }
 
+  private sendHydrateOrchestrationState(endpointId?: string): void {
+    const snapshot = this.orchestrationStateStore.getSnapshot();
+    this.postMessage({ type: 'hydrateOrchestrationState', state: snapshot }, endpointId);
+  }
+
   private sendCurrentState(endpointId?: string): void {
     const activeId = this.sessionManager.getActiveSessionId();
     const session = activeId ? this.sessionManager.getSession(activeId) : null;
@@ -405,6 +426,14 @@ export class ChatWebviewController implements vscode.Disposable {
   private broadcastSharedState(snapshot: ChatWebviewSharedState, sourceEndpointId: string): void {
     this.postMessage(
       { type: 'sharedStateUpdated', state: snapshot },
+      undefined,
+      sourceEndpointId,
+    );
+  }
+
+  private broadcastOrchestrationState(snapshot: OrchestrationState, sourceEndpointId: string): void {
+    this.postMessage(
+      { type: 'orchestrationStateUpdated', state: snapshot },
       undefined,
       sourceEndpointId,
     );
@@ -464,6 +493,9 @@ export class ChatWebviewController implements vscode.Disposable {
 
   clearChat(): void {
     this.stateStore.clear();
+    this.orchestrationStateStore.clear();
+    this.sendHydrateSharedState();
+    this.sendHydrateOrchestrationState();
     this.postMessage({ type: 'clearChat' });
   }
 

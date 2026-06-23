@@ -1,24 +1,35 @@
+import {
+  normalizePipelinePhase,
+  normalizePipelinePlanStatus,
+  normalizePipelineTimeline,
+  type PipelinePhase,
+  type PipelinePlanStatus,
+  type PipelineTimelineStep,
+} from './PipelineTypes';
+
 export const ORCHESTRATION_STATE_KEY = 'acp.orchestrationWebviewState';
 
 export interface OrchestrationPlanState {
   plan: string;
-  status: string;
+  status: PipelinePlanStatus;
   message?: string;
-  role?: string;
+  role?: PipelinePhase;
   agentName?: string;
   implementerUsesSandcastle?: boolean;
 }
 
 export interface OrchestrationRoleOutputState {
-  role: string;
+  role: PipelinePhase;
   agentName?: string;
   text: string;
   title: string;
 }
 
 export interface OrchestrationState {
-  timeline: unknown[];
-  activeRole: string | null;
+  version: number;
+  updatedAt: number;
+  timeline: PipelineTimelineStep[];
+  activeRole: PipelinePhase | null;
   activeAgentName: string | null;
   plan: OrchestrationPlanState | null;
   roleOutputs: OrchestrationRoleOutputState[];
@@ -26,6 +37,8 @@ export interface OrchestrationState {
 
 export function emptyOrchestrationState(): OrchestrationState {
   return {
+    version: 0,
+    updatedAt: 0,
     timeline: [],
     activeRole: null,
     activeAgentName: null,
@@ -34,19 +47,55 @@ export function emptyOrchestrationState(): OrchestrationState {
   };
 }
 
+export function cloneOrchestrationState(state: OrchestrationState): OrchestrationState {
+  return {
+    version: state.version,
+    updatedAt: state.updatedAt,
+    timeline: state.timeline.map(step => ({ ...step })),
+    activeRole: state.activeRole,
+    activeAgentName: state.activeAgentName,
+    plan: state.plan ? { ...state.plan } : null,
+    roleOutputs: state.roleOutputs.map(output => ({ ...output })),
+  };
+}
+
+export function shouldAcceptIncomingOrchestrationState(
+  current: Pick<OrchestrationState, 'version' | 'updatedAt'>,
+  incoming: Pick<OrchestrationState, 'version' | 'updatedAt'>,
+): boolean {
+  return incoming.version > current.version
+    || (incoming.version === current.version && incoming.updatedAt > current.updatedAt);
+}
+
+export function buildOrchestrationSnapshot(
+  parts: Omit<OrchestrationState, 'version' | 'updatedAt'>,
+  version: number,
+  updatedAt: number,
+): OrchestrationState {
+  return normalizeOrchestrationState({
+    ...parts,
+    version,
+    updatedAt,
+  });
+}
+
 function normalizePlan(value: unknown): OrchestrationPlanState | null {
   if (!value || typeof value !== 'object') {
     return null;
   }
   const candidate = value as Partial<OrchestrationPlanState>;
-  if (typeof candidate.plan !== 'string' || typeof candidate.status !== 'string') {
+  if (typeof candidate.plan !== 'string') {
+    return null;
+  }
+  const status = normalizePipelinePlanStatus(candidate.status);
+  if (!status) {
     return null;
   }
   return {
     plan: candidate.plan,
-    status: candidate.status,
+    status,
     message: typeof candidate.message === 'string' ? candidate.message : undefined,
-    role: typeof candidate.role === 'string' ? candidate.role : undefined,
+    role: normalizePipelinePhase(candidate.role) ?? undefined,
     agentName: typeof candidate.agentName === 'string' ? candidate.agentName : undefined,
     implementerUsesSandcastle: candidate.implementerUsesSandcastle === true,
   };
@@ -61,11 +110,12 @@ function normalizeRoleOutputs(value: unknown): OrchestrationRoleOutputState[] {
       return [];
     }
     const candidate = entry as Partial<OrchestrationRoleOutputState>;
-    if (typeof candidate.text !== 'string' || typeof candidate.title !== 'string' || typeof candidate.role !== 'string') {
+    const role = normalizePipelinePhase(candidate.role);
+    if (!role || typeof candidate.text !== 'string' || typeof candidate.title !== 'string') {
       return [];
     }
     return [{
-      role: candidate.role,
+      role,
       agentName: typeof candidate.agentName === 'string' ? candidate.agentName : undefined,
       text: candidate.text,
       title: candidate.title,
@@ -85,16 +135,13 @@ export function normalizeOrchestrationState(value: unknown): OrchestrationState 
   };
 
   const timeline = Array.isArray(candidate.timeline)
-    ? candidate.timeline
+    ? normalizePipelineTimeline(candidate.timeline)
     : Array.isArray(candidate.pipelineTimeline)
-      ? candidate.pipelineTimeline
+      ? normalizePipelineTimeline(candidate.pipelineTimeline)
       : [];
 
-  const activeRole = typeof candidate.activeRole === 'string'
-    ? candidate.activeRole
-    : typeof candidate.activePipelineRole === 'string'
-      ? candidate.activePipelineRole
-      : null;
+  const activeRole = normalizePipelinePhase(candidate.activeRole)
+    ?? normalizePipelinePhase(candidate.activePipelineRole);
 
   const activeAgentName = typeof candidate.activeAgentName === 'string'
     ? candidate.activeAgentName
@@ -103,6 +150,8 @@ export function normalizeOrchestrationState(value: unknown): OrchestrationState 
       : null;
 
   return {
+    version: typeof candidate.version === 'number' ? candidate.version : 0,
+    updatedAt: typeof candidate.updatedAt === 'number' ? candidate.updatedAt : 0,
     timeline,
     activeRole,
     activeAgentName,
@@ -168,3 +217,6 @@ export function normalizeWebviewSerializerState(value: unknown): WebviewSerializ
 
   return {};
 }
+
+export type { PipelinePhase, PipelinePlanStatus, PipelineTimelineStep } from './PipelineTypes';
+export { normalizePipelinePhase } from './PipelineTypes';

@@ -4,23 +4,24 @@ import {
   type SharedStateParts,
 } from '../../../../src/ui/ChatWebviewSharedStateCore';
 import {
+  buildOrchestrationSnapshot,
   extractLegacyOrchestrationFromShared,
+  normalizeOrchestrationState,
   normalizeWebviewSerializerState,
 } from '../../../../src/ui/OrchestrationStateCore';
 import type { ChatWebviewSharedState } from '../../chatTypes';
 import { normalizePersistedState } from '../normalizers';
-import { chatReducer, isChatAction } from './chatReducer';
-import { composerReducer, isComposerAction } from './composerReducer';
-import { emptyPersistedState } from './helpers';
-import { pipelineReducer, isPipelineAction } from './pipelineReducer';
 import {
   emptyOrchestrationSlice,
   migratePipelineFromChatHistory,
   type OrchestrationSlice,
 } from '../OrchestrationProjector';
+import { chatReducer, isChatAction } from './chatReducer';
+import { composerReducer, isComposerAction } from './composerReducer';
+import { emptyPersistedState } from './helpers';
+import { pipelineReducer, isPipelineAction } from './pipelineReducer';
 import {
   isSessionAction,
-  normalizeOrchestrationBootstrapState,
   normalizeSharedBootstrapState,
   sessionReducer,
 } from './sessionReducer';
@@ -34,8 +35,8 @@ export {
   MAX_INPUT_HEIGHT,
 } from './helpers';
 export { DEFAULT_INPUT_AREA_HEIGHT as DEFAULT_INPUT_HEIGHT } from '../../../../src/ui/ChatWebviewSharedStateCore';
-export { selectPipelineChatProjection, emptyOrchestrationSlice } from './pipelineChatProjection';
-export type { OrchestrationSlice, PipelineChatProjection } from './pipelineChatProjection';
+export { selectOrchestrationView, emptyOrchestrationSlice } from '../OrchestrationProjector';
+export type { OrchestrationSlice, OrchestrationViewModel } from '../OrchestrationProjector';
 
 export type WebviewPersistedBundle = {
   shared: ChatWebviewSharedState;
@@ -59,12 +60,24 @@ export function buildSharedSnapshot(state: AppState, version: number, updatedAt:
 
 export function buildWebviewPersistedBundle(
   state: AppState,
-  version: number,
-  updatedAt: number,
+  sharedVersion: number,
+  sharedUpdatedAt: number,
+  orchestrationVersion = state.orchestration.version,
+  orchestrationUpdatedAt = state.orchestration.updatedAt,
 ): WebviewPersistedBundle {
   return {
-    shared: buildSharedSnapshot(state, version, updatedAt),
-    orchestration: state.orchestration,
+    shared: buildSharedSnapshot(state, sharedVersion, sharedUpdatedAt),
+    orchestration: buildOrchestrationSnapshot(
+      {
+        timeline: state.orchestration.timeline,
+        activeRole: state.orchestration.activeRole,
+        activeAgentName: state.orchestration.activeAgentName,
+        plan: state.orchestration.plan,
+        roleOutputs: state.orchestration.roleOutputs,
+      },
+      orchestrationVersion,
+      orchestrationUpdatedAt,
+    ),
   };
 }
 
@@ -73,8 +86,8 @@ export function createInitialState(persistedValue: unknown): AppState {
   const sharedSource = wrapper.shared ?? persistedValue;
   const shared = normalizeSharedBootstrapState(sharedSource);
   const orchestration = wrapper.orchestration
-    ? normalizeOrchestrationBootstrapState(wrapper.orchestration)
-    : extractLegacyOrchestrationFromShared(persistedValue) as OrchestrationSlice;
+    ? normalizeOrchestrationState(wrapper.orchestration)
+    : extractLegacyOrchestrationFromShared(persistedValue);
   const persistedRaw = shared?.persisted ?? normalizePersistedState(sharedSource);
   const migrated = migratePipelineFromChatHistory(persistedRaw.chatHistory, orchestration);
   const persisted = { ...persistedRaw, chatHistory: migrated.chatHistory };

@@ -1,6 +1,6 @@
 import type { AppState, PipelineAction } from './types';
 import { formatPipelineRoleLabel } from './helpers';
-import { emptyOrchestrationSlice } from './pipelineChatProjection';
+import { emptyOrchestrationSlice } from '../OrchestrationProjector';
 
 const PIPELINE_ACTIONS = new Set<PipelineAction['type']>([
   'appendPipelinePlan',

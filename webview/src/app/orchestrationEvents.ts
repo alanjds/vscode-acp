@@ -1,4 +1,5 @@
 import type { PipelinePhase, PipelinePlanStatus } from '../chatTypes';
+import { normalizePipelinePhase as normalizeSharedPipelinePhase } from '../../../src/ui/PipelineTypes';
 import {
   applyPipelineStatusToTimeline,
   createDefaultTeamTimeline,
@@ -29,13 +30,7 @@ export type OrchestrationHostMessage = {
 };
 
 export function normalizePipelinePhase(value: unknown): PipelinePhase | undefined {
-  return value === 'planner'
-    || value === 'implementer'
-    || value === 'reviewer'
-    || value === 'tester'
-    || value === 'reviewer-rerun'
-    ? value
-    : undefined;
+  return normalizeSharedPipelinePhase(value) ?? undefined;
 }
 
 export function normalizePipelineStatus(value: unknown): PipelinePlanStatus | null {

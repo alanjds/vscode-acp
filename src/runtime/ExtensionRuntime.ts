@@ -12,6 +12,7 @@ import { StatusBarManager } from '../ui/StatusBarManager';
 import { ChatWebviewController } from '../ui/ChatWebviewController';
 import { ChatWebviewProvider } from '../ui/ChatWebviewProvider';
 import { ChatWebviewStateStore } from '../ui/ChatWebviewStateStore';
+import { OrchestrationWebviewStateStore } from '../ui/OrchestrationWebviewStateStore';
 import { ChatEditorPanelManager } from '../ui/ChatEditorPanelManager';
 import { DebugWebviewPanel } from '../ui/DebugWebviewPanel';
 import { getEditorContextSnapshot, initializeOpenEditorsTracker, trackLastKnownEditorContext } from '../ui/EditorContext';
@@ -107,11 +108,14 @@ function initializeExtensionRuntime(
 
   const chatStateStore = new ChatWebviewStateStore(context.workspaceState);
   resources.add(chatStateStore);
+  const orchestrationStateStore = new OrchestrationWebviewStateStore(context.workspaceState);
+  resources.add(orchestrationStateStore);
   const chatController = new ChatWebviewController(
     context.extensionUri,
     sessionManager,
     sessionUpdateHandler,
     chatStateStore,
+    orchestrationStateStore,
     () => getEditorContextSnapshot(),
     debugTraceStore,
     (chatState) => debugWebviewPanel.open(chatState),

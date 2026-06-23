@@ -5,6 +5,7 @@ import * as vscode from 'vscode';
 import { ChatEditorPanelManager } from '../ui/ChatEditorPanelManager';
 import { ChatWebviewController } from '../ui/ChatWebviewController';
 import { ChatWebviewStateStore } from '../ui/ChatWebviewStateStore';
+import { OrchestrationWebviewStateStore } from '../ui/OrchestrationWebviewStateStore';
 import { emptySharedState } from '../ui/ChatWebviewSharedState';
 
 suite('ChatEditorPanelManager', () => {
@@ -25,11 +26,13 @@ suite('ChatEditorPanelManager', () => {
       keys: () => [],
     } as unknown as vscode.Memento;
     const stateStore = new ChatWebviewStateStore(memento);
+    const orchestrationStateStore = new OrchestrationWebviewStateStore(memento);
     const controller = new ChatWebviewController(
       vscode.Uri.file(path.join(path.parse(process.cwd()).root, 'workspace')),
       sessionManager as any,
       sessionUpdateHandler as any,
       stateStore,
+      orchestrationStateStore,
     );
     const manager = new ChatEditorPanelManager(controller, stateStore);
     return { manager, stateStore, controller };

@@ -9,7 +9,7 @@ Extension VS Code qui connecte l’éditeur à des agents ACP, avec orchestratio
 | [Core](./src/core/CONTEXT.md) | Agents, Conversation, SessionRecord, Discussion, ChatHistory, transport, handoff de contexte | Chat interactif, index de persistance, cycle de vie client ACP |
 | [Pipeline et orchestration](./src/pipeline/CONTEXT.md) | VirtualAgent, Pipeline, AgentTeam, EphemeralRun, OrchestrationRun | Workflows LangGraph exposés comme agents virtuels |
 | [Sandcastle](./src/sandcastle/CONTEXT.md) | IsolatedRuntime, BridgeTranscript, Promotion, ProviderRun | Isolation worktree Docker et Apply / Reject |
-| [Inline chat](./src/inlineChat/CONTEXT.md) | InlineEdit, EditProposal, Patch | Éditions en inset éditeur, parallèles au chat principal |
+| [Inline chat](./src/inlineChat/CONTEXT.md) | InlineEdit, EditProposal, Patch, ActiveAgentResolver | Éditions en inset éditeur, parallèles au chat principal |
 
 ## Relations
 
@@ -55,7 +55,7 @@ flowchart TB
 - **Core → Pipeline** : Core achemine les prompts des VirtualAgents vers le transport virtual. L’OrchestrationRun apparaît comme une Conversation normale dans l’arbre et le chat.
 - **Pipeline → Sandcastle** : un PipelineStep peut invoquer un ConfiguredAgent Sandcastle via EphemeralRun (avec Promotion optionnelle), ou l’utilisateur peut connecter un agent Sandcastle pour une Conversation directe.
 - **Core → Sandcastle** : le ConnectedSandcastleAgent utilise le même modèle Conversation / ChatHistory / SessionRecord ; le BridgeTranscript est un contexte provider propre au bridge.
-- **Inline chat → Pipeline** : les deux peuvent utiliser EphemeralRun ; l’édition inline n’utilise pas SessionRecord ni l’index d’arbre.
+- **Inline chat → Pipeline** : les deux peuvent utiliser EphemeralRun ; l’édition inline n’utilise pas SessionRecord ni l’index d’arbre. Le seam **ActiveAgentResolver** ([Inline chat](./src/inlineChat/CONTEXT.md)) isole le choix d’agent de `SessionManager`.
 - Les termes définis une seule fois dans Core (`ConfiguredAgent`, `Conversation`, `Discussion`, `ChatHistory`, `SessionRecord`, `Transport`) sont référencés, pas redéfinis, dans les autres glossaires.
 
 ---

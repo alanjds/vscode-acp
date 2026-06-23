@@ -26,6 +26,10 @@ _À éviter_ : apply (quand on parle de Promotion Sandcastle), PatchApplyService
 Backend qui transforme une requête InlineEdit en EditProposal. Peut déléguer à un EphemeralRun sur un ConfiguredAgent.
 _À éviter_ : agent inline, fournisseur d’édition
 
+**ActiveAgentResolver** :
+Choix de l’agent exécutable pour un InlineEdit via EphemeralRun (`sideEffects: 'none'`). Règle : ConnectedAgent actif s’il n’est pas VirtualAgent ; sinon premier ConfiguredAgent non virtual du workspace. Le seam `SessionBackedActiveAgentResolver` adapte `SessionManager.getActiveSession()?.agentName` sans créer de Conversation ni SessionRecord — chemin parallèle à l’arbre principal, partage uniquement EphemeralRun.
+_À éviter_ : session inline, agent actif (préférer ConnectedAgent / ConfiguredAgent)
+
 **EditorInset** :
 Surface UI hébergeant InlineEdit dans le chrome éditeur. Webview distincte du panneau chat principal.
 _À éviter_ : panneau inline, popup
@@ -35,3 +39,4 @@ _À éviter_ : panneau inline, popup
 - InlineEdit ne crée pas de Conversation, SessionRecord ni entrée d’arbre.
 - Le ConfiguredAgent par défaut pour un InlineEdit est le ConnectedAgent actif s’il n’est pas VirtualAgent ; sinon le premier ConfiguredAgent non virtual du workspace.
 - InlineEdit partage le modèle EphemeralRun avec les primitives pipeline mais n’utilise pas ContextHandoff, Discussion ni ChatHistory.
+- Le choix d’agent pour InlineEdit passe par **ActiveAgentResolver** (voir ci-dessus) ; `AcpInlineEditAgent` consomme ce seam au lieu de `SessionManager`.

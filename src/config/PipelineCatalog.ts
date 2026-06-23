@@ -8,6 +8,7 @@ import { getValidTeamPipelines } from './AgentTeamCatalog';
 import { isPipelineEnabled } from './PipelineConfig';
 import type { CompiledTeamMetadata } from '../pipeline/AgentTeamCompiler';
 import { resolveWorkspaceIdentity } from '../core/WorkspaceIdentity';
+import { resolveAgent } from './VirtualAgentCatalog';
 import { log } from '../utils/Logger';
 import { extractTemplateVariables, validatePipelineDefinition } from './PipelineValidator';
 
@@ -141,7 +142,7 @@ export function isPipelineVirtualAgentName(
   workspaceCwd: string = resolveWorkspaceIdentity().cwd,
   agentConfigs: Record<string, unknown> = readAgentConfigs(),
 ): boolean {
-  return getPipelineDefinitionForAgent(agentName, workspaceCwd, agentConfigs) !== null;
+  return resolveAgent(agentName, workspaceCwd, agentConfigs as Record<string, import('./AgentConfig').AgentConfigEntry>)?.kind === 'pipeline';
 }
 
 export function loadWorkspacePipelineDefinitions(

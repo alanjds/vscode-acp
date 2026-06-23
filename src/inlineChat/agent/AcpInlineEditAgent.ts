@@ -1,25 +1,19 @@
-import { getAgentConfig } from '../../config/AgentConfig';
-import {
-  isVirtualAgentName,
-  listSelectableAgentNames,
-  resolveAgent,
-} from '../../config/VirtualAgentCatalog';
 import type { EphemeralAgentRunner } from '../../core/EphemeralAgentRunner';
-import { SessionManager } from '../../core/SessionManager';
 import { WorkspaceIdentity } from '../../core/WorkspaceIdentity';
 import { getSafeFenceMarker } from '../../ui/EditorContext';
 import { InlineEditRequest, InlineEditResult } from '../InlineChatTypes';
+import type { ActiveAgentResolver } from './ActiveAgentResolver';
 import { InlineEditAgent, InlineEditOptions } from './InlineEditAgent';
 
 export class AcpInlineEditAgent implements InlineEditAgent {
   constructor(
     private readonly workspaceIdentity: () => WorkspaceIdentity,
-    private readonly sessionManager: SessionManager,
+    private readonly resolver: ActiveAgentResolver,
     private readonly ephemeralRunner: EphemeralAgentRunner,
   ) {}
 
   async generateEdit(request: InlineEditRequest, options?: InlineEditOptions): Promise<InlineEditResult> {
-    const agentName = this.resolveAgentName();
+    const agentName = this.resolver.resolveRunnableAgent().name;
     const prompt = this.buildPrompt(request);
     const run = await this.ephemeralRunner.run({
       workspaceCwd: this.workspaceIdentity().cwd,
@@ -30,24 +24,6 @@ export class AcpInlineEditAgent implements InlineEditAgent {
     });
 
     return this.parseResponse(request, run.text);
-  }
-
-  private resolveAgentName(): string {
-    const cwd = this.workspaceIdentity().cwd;
-    const activeAgentName = this.sessionManager.getActiveSession()?.agentName;
-
-    if (activeAgentName && !isVirtualAgentName(activeAgentName, cwd)) {
-      return activeAgentName;
-    }
-
-    const names = listSelectableAgentNames(cwd).filter(
-      name => resolveAgent(name, cwd)?.kind === 'configured',
-    );
-    if (names.length === 0) {
-      throw new Error('No ACP agent configured. Add agents in acp.agents settings.');
-    }
-
-    return names[0];
   }
 
   private buildPrompt(request: InlineEditRequest): string {
@@ -128,9 +104,7 @@ export class AcpInlineEditAgent implements InlineEditAgent {
 
   getDisplayName(): string {
     try {
-      const agentName = this.sessionManager.getActiveSession()?.agentName ?? this.resolveAgentName();
-      const cfg = getAgentConfig(agentName);
-      return cfg?.displayName ?? agentName;
+      return this.resolver.resolveRunnableAgent().displayName;
     } catch {
       return 'ACP Agent';
     }

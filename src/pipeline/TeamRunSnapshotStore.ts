@@ -1,20 +1,14 @@
-import type { SessionNotification } from '@agentclientprotocol/sdk';
-
-import { getTeamEntryForAgent } from '../config/AgentTeamCatalog';
-import type { TeamRoleId } from '../config/AgentTeamConfig';
-import { defaultGitCommandRunner } from '../git/GitCommandRunner';
-import { buildReviewerRerunPrompt } from './AgentTeamCompiler';
 import type { PipelineExecutor } from './PipelineExecutor';
 import type { PipelineRunState } from './PipelineRunRegistry';
-import { resolvePipelineStepText } from './PipelineStepCompletion';
+import { TeamReviewerRerun } from './TeamReviewerRerun';
 
 export interface TeamReviewerSessionUpdate {
   sessionId: string;
   phase: string;
-  update: SessionNotification;
+  update: import('@agentclientprotocol/sdk').SessionNotification;
   stepId?: string;
   branchId?: string;
-  role?: TeamRoleId;
+  role?: import('../config/AgentTeamConfig').TeamRoleId;
   agentName?: string;
   teamId?: string;
 }
@@ -37,21 +31,27 @@ export interface TeamRunSnapshotStoreDependencies {
 
 export class TeamRunSnapshotStore {
   private lastTeamRunSnapshot: TeamRunSnapshot | null = null;
-  private reviewerRerunAbortController: AbortController | null = null;
+  private readonly reviewerRerun: TeamReviewerRerun;
 
-  constructor(private readonly dependencies: TeamRunSnapshotStoreDependencies) {}
+  constructor(private readonly dependencies: TeamRunSnapshotStoreDependencies) {
+    this.reviewerRerun = new TeamReviewerRerun({
+      workspaceCwd: dependencies.workspaceCwd,
+      readAgentConfigs: dependencies.readAgentConfigs,
+      executor: dependencies.executor,
+      emitSessionUpdate: dependencies.emitSessionUpdate,
+    });
+  }
 
   getLastTeamRunSnapshot(): TeamRunSnapshot | null {
     return this.lastTeamRunSnapshot;
   }
 
   cancelReviewerRerun(): void {
-    this.reviewerRerunAbortController?.abort();
-    this.reviewerRerunAbortController = null;
+    this.reviewerRerun.cancel();
   }
 
   abortReviewerRerunOnDispose(): void {
-    this.reviewerRerunAbortController?.abort();
+    this.reviewerRerun.abortOnDispose();
   }
 
   persistTeamSnapshot(sessionId: string, state: PipelineRunState, result: any): void {
@@ -86,67 +86,6 @@ export class TeamRunSnapshotStore {
     if (!snapshot) {
       throw new Error('No completed team run is available for reviewer re-run.');
     }
-
-    const entry = getTeamEntryForAgent(
-      teamAgentName,
-      this.dependencies.workspaceCwd(),
-      this.dependencies.readAgentConfigs(),
-    );
-    if (!entry?.pipeline?.metadata) {
-      throw new Error(`Team "${teamAgentName}" is not available.`);
-    }
-
-    const reviewerRole = entry.pipeline.metadata.agentByRole.reviewer;
-    if (!reviewerRole) {
-      throw new Error('Team has no reviewer role configured.');
-    }
-
-    const reviewerInstructions = entry.pipeline.metadata.instructionsByRole?.reviewer;
-    if (!reviewerInstructions) {
-      throw new Error('Team reviewer instructions are unavailable for re-run.');
-    }
-
-    const diff = await this.readWorkspaceDiff();
-    const reviewerPrompt = buildReviewerRerunPrompt({
-      reviewerInstructions,
-      approvedPlan: snapshot.approvedPlan,
-      implementOutput: snapshot.implementOutput,
-      workspaceDiff: diff,
-    });
-
-    this.reviewerRerunAbortController?.abort();
-    const abortController = new AbortController();
-    this.reviewerRerunAbortController = abortController;
-
-    try {
-      const result = await this.dependencies.executor.runAgent(reviewerRole, reviewerPrompt, {
-        signal: abortController.signal,
-        onSessionUpdate: (update: SessionNotification) => {
-          this.dependencies.emitSessionUpdate({
-            sessionId: snapshot.sessionId,
-            phase: 'reviewer-rerun',
-            update,
-            stepId: 'reviewer',
-            role: 'reviewer',
-            agentName: reviewerRole,
-            teamId: snapshot.teamId,
-          });
-        },
-      });
-      return resolvePipelineStepText(result);
-    } finally {
-      if (this.reviewerRerunAbortController === abortController) {
-        this.reviewerRerunAbortController = null;
-      }
-    }
-  }
-
-  private async readWorkspaceDiff(): Promise<string> {
-    try {
-      const result = await defaultGitCommandRunner.exec(this.dependencies.workspaceCwd(), ['diff', 'HEAD']);
-      return result.stdout.trim();
-    } catch {
-      return '';
-    }
+    return this.reviewerRerun.rerun(snapshot, teamAgentName);
   }
 }

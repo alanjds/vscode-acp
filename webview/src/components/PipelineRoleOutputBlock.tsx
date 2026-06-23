@@ -1,10 +1,10 @@
 import type { JSX } from 'react';
 
-import type { PipelineRoleOutputHistoryItem } from '../chatTypes';
+import type { PipelineRoleOutputItem } from '../app/OrchestrationProjector';
 import { MarkdownDisplay } from './MarkdownDisplay';
 
 export interface PipelineRoleOutputBlockProps {
-  item: PipelineRoleOutputHistoryItem;
+  item: PipelineRoleOutputItem;
 }
 
 export function PipelineRoleOutputBlock({ item }: PipelineRoleOutputBlockProps): JSX.Element {

@@ -15,8 +15,9 @@ import { emptyPersistedState } from './helpers';
 import { pipelineReducer, isPipelineAction } from './pipelineReducer';
 import {
   emptyOrchestrationSlice,
+  migratePipelineFromChatHistory,
   type OrchestrationSlice,
-} from './pipelineChatProjection';
+} from '../OrchestrationProjector';
 import {
   isSessionAction,
   normalizeOrchestrationBootstrapState,
@@ -74,10 +75,12 @@ export function createInitialState(persistedValue: unknown): AppState {
   const orchestration = wrapper.orchestration
     ? normalizeOrchestrationBootstrapState(wrapper.orchestration)
     : extractLegacyOrchestrationFromShared(persistedValue) as OrchestrationSlice;
-  const persisted = shared?.persisted ?? normalizePersistedState(sharedSource);
+  const persistedRaw = shared?.persisted ?? normalizePersistedState(sharedSource);
+  const migrated = migratePipelineFromChatHistory(persistedRaw.chatHistory, orchestration);
+  const persisted = { ...persistedRaw, chatHistory: migrated.chatHistory };
   return {
     persisted,
-    orchestration,
+    orchestration: migrated.orchestration,
     promptText: shared?.promptText ?? '',
     inputAreaHeight: shared?.inputAreaHeight ?? DEFAULT_INPUT_AREA_HEIGHT,
     isProcessing: shared?.isProcessing ?? false,

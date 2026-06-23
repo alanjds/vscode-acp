@@ -2,7 +2,7 @@ import type { PipelinePhase, PipelinePlanStatus } from '../chatTypes';
 import {
   applyPipelineStatusToTimeline,
   createDefaultTeamTimeline,
-} from '../components/PipelineRoleTimeline';
+} from './OrchestrationProjector';
 import type { AppAction } from './state';
 
 export type OrchestrationHostMessage = {

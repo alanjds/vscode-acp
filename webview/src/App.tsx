@@ -54,10 +54,8 @@ import { HistoryTurnBlock } from './components/HistoryTurnBlock';
 import { SessionBanner } from './components/SessionBanner';
 import { PlanBlock } from './components/PlanBlock';
 import { PipelinePlanBlock } from './components/PipelinePlanBlock';
-import {
-  createDefaultTeamTimeline,
-  PipelineRoleTimeline,
-} from './components/PipelineRoleTimeline';
+import { PipelineRoleTimeline } from './components/PipelineRoleTimeline';
+import { createDefaultTeamTimeline } from './app/OrchestrationProjector';
 import { PipelineRoleOutputBlock } from './components/PipelineRoleOutputBlock';
 import { getState, onMessage, postMessage, setState } from './vscode';
 import { useFileMentions } from './app/useFileMentions';
@@ -126,20 +124,14 @@ export function App(): JSX.Element {
     () => buildHistoryBlocks(state.persisted.chatHistory, excludedToolIndexes),
     [excludedToolIndexes, state.persisted.chatHistory],
   );
-  const hasPendingPipelinePlan = useMemo(
-    () => state.persisted.chatHistory.some(
-      item => item.kind === 'pipelinePlan' && item.status === 'pending',
-    ),
-    [state.persisted.chatHistory],
-  );
-  const composerPlaceholder = hasPendingPipelinePlan
-    ? 'Send a message to revise the plan, or approve/reject below.'
-    : placeholder;
-
   const pipelineProjection = useMemo(
     () => selectPipelineChatProjection(state),
     [state.orchestration],
   );
+  const hasPendingPipelinePlan = pipelineProjection.hasPendingPlan;
+  const composerPlaceholder = hasPendingPipelinePlan
+    ? 'Send a message to revise the plan, or approve/reject below.'
+    : placeholder;
 
   // Sync shared UI state to extension host and VS Code serializer
   useEffect(() => {
@@ -735,6 +727,22 @@ export function App(): JSX.Element {
           <PipelineRoleTimeline timeline={pipelineProjection.timeline} />
         ) : null}
 
+        {pipelineProjection.plan ? (
+          <PipelinePlanBlock
+            item={pipelineProjection.plan}
+            key="pipeline-plan"
+            onApprove={handleApprovePipelinePlan}
+            onReject={handleRejectPipelinePlan}
+          />
+        ) : null}
+
+        {pipelineProjection.roleOutputs.map((output, index) => (
+          <PipelineRoleOutputBlock
+            item={output}
+            key={`pipeline-role-${output.role}-${index}`}
+          />
+        ))}
+
         {historyBlocks.map((block) => {
           if (block.kind === 'message') {
             return (
@@ -748,26 +756,6 @@ export function App(): JSX.Element {
 
           if (block.kind === 'plan') {
             return <PlanBlock item={block.item} key={`plan-${block.historyIndex}`} />;
-          }
-
-          if (block.kind === 'pipelinePlan') {
-            return (
-              <PipelinePlanBlock
-                item={block.item}
-                key={`pipeline-plan-${block.historyIndex}`}
-                onApprove={handleApprovePipelinePlan}
-                onReject={handleRejectPipelinePlan}
-              />
-            );
-          }
-
-          if (block.kind === 'pipelineRoleOutput') {
-            return (
-              <PipelineRoleOutputBlock
-                item={block.item}
-                key={`pipeline-role-${block.historyIndex}`}
-              />
-            );
           }
 
           const collapsed = getToolCollapseState(block.key, block.toolCalls.length, state.collapsedTools);

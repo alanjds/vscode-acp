@@ -138,8 +138,9 @@ suite('WebviewAppState', () => {
 
     assert.strictEqual(next.currentTurn, null);
     assert.strictEqual(next.isProcessing, false);
-    assert.strictEqual(next.persisted.chatHistory.length, 1);
-    assert.strictEqual(next.persisted.chatHistory[0]?.kind, 'pipelineRoleOutput');
+    assert.strictEqual(next.persisted.chatHistory.length, 0);
+    assert.strictEqual(next.orchestration.roleOutputs.length, 1);
+    assert.strictEqual(next.orchestration.roleOutputs[0]?.role, 'implementer');
   });
 
   test('clearChat resets orchestration slice', () => {

@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 
 import type { SessionNotification } from '@agentclientprotocol/sdk';
-import { Command, INTERRUPT, MemorySaver } from '@langchain/langgraph';
+import { Command, MemorySaver } from '@langchain/langgraph';
 
 import { getAgentConfigs, isSandcastleAgentConfig, type AgentConfigEntry } from '../config/AgentConfig';
 import {
@@ -29,25 +29,16 @@ import {
   PipelineGraphCompiler,
 } from './PipelineGraphCompiler';
 import type { PipelinePlanReadyEvent, PipelineSessionUpdateEvent, PipelineStatus } from './PipelineEvents';
-import { PipelineRunRegistry, type PendingApprovalState, type PipelineRunState } from './PipelineRunRegistry';
-import { assertSingleProposedPlan, extractSingleProposedPlan } from './ProposedPlan';
+import { PipelineRunRegistry, type PipelineRunState } from './PipelineRunRegistry';
+import { assertSingleProposedPlan } from './ProposedPlan';
 import { TeamRunSnapshotStore } from './TeamRunSnapshotStore';
-
-function buildRevisionPrompt(originalUserPrompt: string, currentPlan: string, feedback: string): string {
-  return [
-    'Original user request:',
-    originalUserPrompt,
-    '',
-    'Current proposed plan:',
-    currentPlan,
-    '',
-    'User revision request:',
-    feedback,
-    '',
-    'Revise the plan based on the user\'s feedback.',
-    'Return exactly one <proposed_plan>...</proposed_plan> block.',
-  ].join('\n');
-}
+import { readApprovalInterrupt, revisePendingPlan } from './engine/PipelinePlanRevision';
+import {
+  findPlannerStepId,
+  formatPipelineRoleLabel,
+  getPipelineStepPhase,
+} from './engine/PipelineRoleLabels';
+import { createPipelineTimelineEmitter } from './engine/PipelineTimelineEmitter';
 
 export interface PipelineRunEngineDependencies {
   getPipelineDefinitions?: () => PipelineDefinition[];
@@ -62,6 +53,7 @@ export class PipelineRunEngine extends EventEmitter {
   private readonly checkpointer = new MemorySaver();
   private readonly executor: PipelineExecutor;
   private readonly snapshotStore: TeamRunSnapshotStore;
+  private readonly timeline = createPipelineTimelineEmitter(this);
 
   constructor(
     private readonly workspaceCwd: () => string,
@@ -86,7 +78,7 @@ export class PipelineRunEngine extends EventEmitter {
   async createPlan(sessionId: string, userPrompt: string, pipelineAgentName?: string): Promise<string> {
     const existing = this.registry.get(sessionId);
     if (existing?.pendingApproval) {
-      return this.revisePendingPlan(sessionId, existing, userPrompt);
+      return revisePendingPlan(sessionId, existing, userPrompt, this.timeline, this.planRevisionDeps());
     }
 
     const pipeline = this.readPipelineDefinition(pipelineAgentName);
@@ -205,76 +197,20 @@ export class PipelineRunEngine extends EventEmitter {
     return this.snapshotStore.rerunTeamReviewer(teamAgentName);
   }
 
-  private async revisePendingPlan(
-    sessionId: string,
-    state: PipelineRunState,
-    feedback: string,
-  ): Promise<string> {
-    const pendingApproval = state.pendingApproval;
-    if (!pendingApproval) {
-      throw new Error('No pending pipeline plan for this session.');
-    }
-
-    const plannerStepId = this.findPlannerStepId(state.pipeline);
-    const teamContext = this.readTeamContext(state.pipeline);
-    const plannerRole = teamContext?.roleByStepId[plannerStepId];
-    const plannerPrimitive = this.findPrimitiveForExecutorKind(state.pipeline, plannerStepId);
-    const revisionPrompt = buildRevisionPrompt(
-      state.originalUserPrompt,
-      pendingApproval.plan,
-      feedback,
-    );
-
-    state.revisionCount += 1;
-    state.abortController = new AbortController();
-
-    const statusMessage = plannerRole
-      ? `${this.formatRoleLabel(plannerRole)} (${plannerPrimitive.agent})…`
-      : `Revising plan with ${plannerPrimitive.agent}...`;
-    this.emitStatus(
-      sessionId,
-      'planning',
-      statusMessage,
-      plannerStepId,
-      undefined,
-      teamContext,
-      plannerRole,
-      plannerPrimitive.agent,
-    );
-
-    try {
-      const output = await this.runConfiguredAcpAgent(
-        sessionId,
-        plannerStepId,
-        revisionPrompt,
-        update => {
-          this.emit('session-update', {
-            sessionId,
-            phase: plannerStepId,
-            update,
-            stepId: plannerStepId,
-            role: plannerRole,
-            agentName: plannerRole ? teamContext?.agentByRole[plannerRole] : undefined,
-            teamId: teamContext?.teamId,
-          } satisfies PipelineSessionUpdateEvent);
-        },
-      );
-      const revisedPlan = extractSingleProposedPlan(output);
-      state.pendingApproval = {
-        stepId: pendingApproval.stepId,
-        plan: revisedPlan,
-      };
-      state.stepOutputs.set(plannerStepId, revisedPlan);
-      this.emitPlanReady(sessionId, state, revisedPlan, pendingApproval.stepId, true);
-      return revisedPlan;
-    } catch (e: any) {
-      if (this.isPipelineAborted(sessionId, state, e)) {
+  private planRevisionDeps() {
+    return {
+      findPrimitiveForExecutorKind: this.findPrimitiveForExecutorKind.bind(this),
+      runConfiguredAcpAgent: this.runConfiguredAcpAgent.bind(this),
+      readTeamContext: this.readTeamContext.bind(this),
+      emitPlanReady: this.emitPlanReady.bind(this),
+      emitSessionUpdate: (event: PipelineSessionUpdateEvent) => {
+        this.emit('session-update', event);
+      },
+      isPipelineAborted: this.isPipelineAborted.bind(this),
+      deleteRun: (sessionId: string) => {
         this.registry.delete(sessionId);
-        throw e;
-      }
-      this.emitStatus(sessionId, 'error', e.message || 'Plan revision failed.', plannerStepId);
-      throw e;
-    }
+      },
+    };
   }
 
   private handleGraphResult(
@@ -284,7 +220,7 @@ export class PipelineRunEngine extends EventEmitter {
     completionMessage: string,
   ): string {
     this.registry.throwIfCancelled(state);
-    const interrupt = this.readApprovalInterrupt(result);
+    const interrupt = readApprovalInterrupt(result);
     if (interrupt) {
       assertSingleProposedPlan(interrupt.plan);
       state.pendingApproval = interrupt;
@@ -313,7 +249,7 @@ export class PipelineRunEngine extends EventEmitter {
     revised: boolean,
   ): void {
     const teamContext = this.readTeamContext(state.pipeline);
-    const plannerStepId = this.findPlannerStepId(state.pipeline);
+    const plannerStepId = findPlannerStepId(state.pipeline);
     const plannerRole = teamContext?.roleByStepId[plannerStepId];
     const implementerUsesSandcastle = this.implementerUsesSandcastle(state.pipeline);
     const approvalMessage = revised
@@ -321,42 +257,23 @@ export class PipelineRunEngine extends EventEmitter {
       : implementerUsesSandcastle
         ? 'Plan ready — approve before Sandcastle implementation.'
         : 'Plan ready for review.';
-    this.emit('plan-ready', {
+    this.timeline.emitPlanReady(
       sessionId,
-      plan,
-      stepId: approvalStepId,
-      role: plannerRole,
-      agentName: plannerRole ? teamContext?.agentByRole[plannerRole] : undefined,
-      teamId: teamContext?.teamId,
-      implementerUsesSandcastle,
-      revised,
-    } satisfies PipelinePlanReadyEvent);
-    this.emitStatus(
-      sessionId,
-      'awaiting_approval',
+      {
+        sessionId,
+        plan,
+        stepId: approvalStepId,
+        role: plannerRole,
+        agentName: plannerRole ? teamContext?.agentByRole[plannerRole] : undefined,
+        teamId: teamContext?.teamId,
+        implementerUsesSandcastle,
+        revised,
+      } satisfies PipelinePlanReadyEvent,
       approvalMessage,
       approvalStepId,
-      undefined,
       teamContext,
-      undefined,
-      undefined,
       implementerUsesSandcastle,
     );
-  }
-
-  private readApprovalInterrupt(result: any): PendingApprovalState | null {
-    const interrupts = result?.[INTERRUPT];
-    if (!Array.isArray(interrupts) || interrupts.length === 0) {
-      return null;
-    }
-    const value = interrupts[0]?.value;
-    if (!value || typeof value.stepId !== 'string' || typeof value.plan !== 'string') {
-      throw new Error('Pipeline approval interrupt was malformed.');
-    }
-    return {
-      stepId: value.stepId,
-      plan: value.plan,
-    };
   }
 
   private compileGraph(sessionId: string, pipeline: PipelineDefinition): CompiledPipelineGraph {
@@ -375,10 +292,10 @@ export class PipelineRunEngine extends EventEmitter {
       },
       {
         onStepStart: (stepId, primitive, branchId) => {
-          const phase = this.getStepPhase(pipeline, stepId);
+          const phase = getPipelineStepPhase(pipeline, stepId);
           const role = teamContext?.roleByStepId[stepId];
           const statusMessage = role
-            ? `${this.formatRoleLabel(role)} (${primitive.agent})…`
+            ? `${formatPipelineRoleLabel(role)} (${primitive.agent})…`
             : `Running ${branchId ? `${stepId}/${branchId}` : stepId} with ${primitive.agent}...`;
           this.emitStatus(
             sessionId,
@@ -411,59 +328,8 @@ export class PipelineRunEngine extends EventEmitter {
     return compiler.compile(pipeline);
   }
 
-  private findPlannerStepId(pipeline: PipelineDefinition): string {
-    for (const step of pipeline.steps) {
-      if ('type' in step && step.type === 'approval') {
-        break;
-      }
-      if ('use' in step) {
-        const primitive = pipeline.primitives[step.use];
-        if (primitive.output === 'proposed_plan') {
-          return step.id;
-        }
-      }
-    }
-    throw new Error('Pipeline has no planner step with proposed_plan output.');
-  }
-
-  private getStepPhase(pipeline: PipelineDefinition, stepId: string): PipelineStatus {
-    if (stepId === 'reviewer') {
-      return 'reviewing';
-    }
-    if (stepId === 'tester') {
-      return 'testing';
-    }
-
-    let approvalSeen = false;
-    for (const step of pipeline.steps) {
-      if (step.id === stepId) {
-        if (stepId === 'implementer' || (approvalSeen && stepId !== 'planner')) {
-          return 'implementing';
-        }
-        return approvalSeen ? 'implementing' : 'planning';
-      }
-      if ('type' in step && step.type === 'approval') {
-        approvalSeen = true;
-      }
-    }
-    return 'planning';
-  }
-
   private readTeamContext(pipeline: PipelineDefinition): CompiledTeamMetadata | undefined {
     return pipeline.metadata?.sourceKind === 'team' ? pipeline.metadata : undefined;
-  }
-
-  private formatRoleLabel(role: TeamRoleId): string {
-    switch (role) {
-      case 'planner':
-        return 'Planning';
-      case 'implementer':
-        return 'Implementing';
-      case 'reviewer':
-        return 'Reviewing';
-      case 'tester':
-        return 'Testing';
-    }
   }
 
   private async runConfiguredAcpAgent(
@@ -567,17 +433,17 @@ export class PipelineRunEngine extends EventEmitter {
     agentName?: string,
     implementerUsesSandcastle?: boolean,
   ): void {
-    this.emit('status', {
+    this.timeline.emitStatus(
       sessionId,
       status,
       message,
       stepId,
       branchId,
+      teamContext,
       role,
       agentName,
-      teamId: teamContext?.teamId,
       implementerUsesSandcastle,
-    });
+    );
   }
 
   private readPipelineDefinition(pipelineAgentName?: string): PipelineDefinition {

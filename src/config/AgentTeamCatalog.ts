@@ -13,6 +13,7 @@ import { isPipelineEnabled } from './PipelineConfig';
 import { compileTeamToPipeline, type CompiledTeamMetadata } from '../pipeline/AgentTeamCompiler';
 import type { PipelineDefinition } from './PipelineCatalog';
 import { resolveWorkspaceIdentity } from '../core/WorkspaceIdentity';
+import { resolveAgent } from './VirtualAgentCatalog';
 import {
   getInstructionsMaxBytes,
   InstructionResolver,
@@ -205,7 +206,7 @@ export function isTeamVirtualAgentName(
   workspaceCwd: string = resolveWorkspaceIdentity().cwd,
   agentConfigs: Record<string, unknown> = readAgentConfigs(),
 ): boolean {
-  return getTeamEntryForAgent(agentName, workspaceCwd, agentConfigs) !== null;
+  return resolveAgent(agentName, workspaceCwd, agentConfigs as Record<string, import('./AgentConfig').AgentConfigEntry>)?.kind === 'team';
 }
 
 export function isValidTeamVirtualAgentName(

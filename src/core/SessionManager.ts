@@ -5,7 +5,6 @@ import type {
   PromptResponse,
   SessionConfigOption,
   SessionInfo as ProtocolSessionInfo,
-  SessionNotification,
 } from '@agentclientprotocol/sdk';
 import type { OpenSessionOptions, OpenedSession, SessionInfo } from './session/sessionTypes';
 

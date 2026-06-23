@@ -5,6 +5,7 @@ import type { SessionManager } from '../../core/SessionManager';
 import type { SandcastlePromotion } from '../../sandcastle/SandcastlePromotion';
 import { DefaultEphemeralAgentRunner } from '../../core/EphemeralAgentRunner';
 import { InlineChatController } from '../../inlineChat/InlineChatController';
+import { SessionBackedActiveAgentResolver } from '../../inlineChat/agent/ActiveAgentResolver';
 import { AcpInlineEditAgent } from '../../inlineChat/agent/AcpInlineEditAgent';
 import type { FeaturePlugin } from '../FeaturePlugin';
 
@@ -19,11 +20,15 @@ export class InlineChatPlugin implements FeaturePlugin<InlineChatPluginContext> 
   readonly id = 'inline-chat';
 
   activate(context: InlineChatPluginContext): vscode.Disposable {
+    const activeAgentResolver = new SessionBackedActiveAgentResolver(
+      () => context.workspaceIdentity().cwd,
+      () => context.sessionManager.getActiveSession()?.agentName,
+    );
     const controller = new InlineChatController(
       context.extensionContext,
       new AcpInlineEditAgent(
         context.workspaceIdentity,
-        context.sessionManager,
+        activeAgentResolver,
         new DefaultEphemeralAgentRunner(context.sandcastlePromotion),
       ),
     );

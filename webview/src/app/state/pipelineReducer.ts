@@ -23,59 +23,33 @@ export function pipelineReducer(state: AppState, action: PipelineAction): AppSta
     case 'appendPipelinePlan':
       return {
         ...state,
-        persisted: {
-          ...state.persisted,
-          chatHistory: [
-            ...state.persisted.chatHistory,
-            {
-              kind: 'pipelinePlan',
-              plan: action.plan,
-              status: 'pending',
-              role: action.role,
-              agentName: action.agentName,
-              implementerUsesSandcastle: action.implementerUsesSandcastle,
-            },
-          ],
+        orchestration: {
+          ...state.orchestration,
+          plan: {
+            plan: action.plan,
+            status: 'pending',
+            role: action.role,
+            agentName: action.agentName,
+            implementerUsesSandcastle: action.implementerUsesSandcastle,
+          },
         },
       };
 
-    case 'revisePipelinePlan': {
-      const nextHistory = [...state.persisted.chatHistory];
-      for (let index = nextHistory.length - 1; index >= 0; index -= 1) {
-        const item = nextHistory[index];
-        if (item.kind === 'pipelinePlan' && item.status === 'pending') {
-          nextHistory[index] = {
-            ...item,
-            plan: action.plan,
-            role: action.role ?? item.role,
-            agentName: action.agentName ?? item.agentName,
-            implementerUsesSandcastle: action.implementerUsesSandcastle ?? item.implementerUsesSandcastle,
-          };
-          return {
-            ...state,
-            persisted: { ...state.persisted, chatHistory: nextHistory },
-          };
-        }
-      }
-
+    case 'revisePipelinePlan':
       return {
         ...state,
-        persisted: {
-          ...state.persisted,
-          chatHistory: [
-            ...state.persisted.chatHistory,
-            {
-              kind: 'pipelinePlan',
-              plan: action.plan,
-              status: 'pending',
-              role: action.role,
-              agentName: action.agentName,
-              implementerUsesSandcastle: action.implementerUsesSandcastle,
-            },
-          ],
+        orchestration: {
+          ...state.orchestration,
+          plan: {
+            plan: action.plan,
+            status: 'pending',
+            role: action.role ?? state.orchestration.plan?.role,
+            agentName: action.agentName ?? state.orchestration.plan?.agentName,
+            implementerUsesSandcastle:
+              action.implementerUsesSandcastle ?? state.orchestration.plan?.implementerUsesSandcastle,
+          },
         },
       };
-    }
 
     case 'updatePipelineTimeline':
       return {
@@ -99,12 +73,11 @@ export function pipelineReducer(state: AppState, action: PipelineAction): AppSta
     case 'appendPipelineRoleOutput':
       return {
         ...state,
-        persisted: {
-          ...state.persisted,
-          chatHistory: [
-            ...state.persisted.chatHistory,
+        orchestration: {
+          ...state.orchestration,
+          roleOutputs: [
+            ...state.orchestration.roleOutputs,
             {
-              kind: 'pipelineRoleOutput',
               role: action.role,
               agentName: action.agentName,
               text: action.text,
@@ -131,12 +104,11 @@ export function pipelineReducer(state: AppState, action: PipelineAction): AppSta
 
       return {
         ...state,
-        persisted: {
-          ...state.persisted,
-          chatHistory: [
-            ...state.persisted.chatHistory,
+        orchestration: {
+          ...state.orchestration,
+          roleOutputs: [
+            ...state.orchestration.roleOutputs,
             {
-              kind: 'pipelineRoleOutput' as const,
               role: activeRole,
               agentName: activeAgentName ?? undefined,
               text: state.currentTurn.assistantText,
@@ -150,40 +122,38 @@ export function pipelineReducer(state: AppState, action: PipelineAction): AppSta
     }
 
     case 'updatePipelinePlanStatus': {
-      const nextHistory = [...state.persisted.chatHistory];
-      for (let index = nextHistory.length - 1; index >= 0; index -= 1) {
-        const item = nextHistory[index];
-        if (item.kind === 'pipelinePlan') {
-          nextHistory[index] = {
-            ...item,
-            status: action.status,
-            message: action.message,
-          };
-          break;
-        }
+      const currentPlan = state.orchestration.plan;
+      if (!currentPlan) {
+        return state;
       }
       return {
         ...state,
-        persisted: { ...state.persisted, chatHistory: nextHistory },
+        orchestration: {
+          ...state.orchestration,
+          plan: {
+            ...currentPlan,
+            status: action.status,
+            message: action.message,
+          },
+        },
       };
     }
 
     case 'revertPipelinePlanApproval': {
-      const nextHistory = [...state.persisted.chatHistory];
-      for (let index = nextHistory.length - 1; index >= 0; index -= 1) {
-        const item = nextHistory[index];
-        if (item.kind === 'pipelinePlan') {
-          nextHistory[index] = {
-            ...item,
-            status: 'pending',
-            message: undefined,
-          };
-          break;
-        }
+      const currentPlan = state.orchestration.plan;
+      if (!currentPlan) {
+        return state;
       }
       return {
         ...state,
-        persisted: { ...state.persisted, chatHistory: nextHistory },
+        orchestration: {
+          ...state.orchestration,
+          plan: {
+            ...currentPlan,
+            status: 'pending',
+            message: undefined,
+          },
+        },
       };
     }
 

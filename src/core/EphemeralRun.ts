@@ -7,8 +7,9 @@ import { isSkillsEnabledAgent } from '../skills/SkillsConfig';
 import { prepareCursorSkillsSymlink } from '../skills/SkillsWorkspacePrep';
 import { SkillsCatalog } from '../skills/SkillsCatalog';
 import { log, logError } from '../utils/Logger';
+import { connectEphemeralAcpAgent, createEphemeralAcpSession } from './AgentConnectionFactory';
 import { AgentManager } from './AgentManager';
-import { ConnectionInfo, ConnectionManager } from './ConnectionManager';
+import type { ConnectionInfo } from './ConnectionManager';
 import { RunAbortedError } from './RunAbortedError';
 import { SessionAuthHandler } from './SessionAuthHandler';
 
@@ -49,13 +50,11 @@ export async function runEphemeralRun(input: EphemeralRunInput): Promise<Ephemer
   }
 
   const sessionUpdateHandler = new SessionUpdateHandler();
-  const agentManager = new AgentManager();
-  const connectionManager = new ConnectionManager(sessionUpdateHandler);
-  const authHandler = new SessionAuthHandler(agentManager);
+  const authHandler = new SessionAuthHandler(new AgentManager());
   let sessionId: string | null = null;
   let collectedText = '';
   let connInfo: ConnectionInfo | null = null;
-  let agentId: string | null = null;
+  let disposeRun = (): void => {};
 
   const throwIfAborted = (): void => {
     if (signal?.aborted) {
@@ -72,11 +71,7 @@ export async function runEphemeralRun(input: EphemeralRunInput): Promise<Ephemer
           logError('EphemeralRun: cancel failed', e);
         }
       }
-      if (agentId) {
-        agentManager.killAgent(agentId);
-      } else {
-        agentManager.killAll();
-      }
+      disposeRun();
     })();
   };
 
@@ -100,32 +95,25 @@ export async function runEphemeralRun(input: EphemeralRunInput): Promise<Ephemer
 
   sessionUpdateHandler.addListener(listener);
 
-  const disposeRun = (): void => {
-    agentManager.killAll();
-    connectionManager.dispose();
-    sessionUpdateHandler.dispose();
-  };
-
   let deferCleanup = false;
 
   try {
     throwIfAborted();
     log(`EphemeralRun: starting "${agentName}"`);
-    const agentInstance = agentManager.spawnAgent(agentName, config, cwd);
-    agentId = agentInstance.id;
-    throwIfAborted();
 
-    connInfo = await connectionManager.connect(
-      agentInstance.id,
-      agentInstance.process,
-      cwd,
-      { autoApproveAll: isSandcastleAgentConfig(config) },
-    );
-    throwIfAborted();
-
-    const sessionResponse = await createSessionWithAuth(
+    const connection = await connectEphemeralAcpAgent({
       agentName,
-      agentInstance.id,
+      config,
+      workspaceCwd: cwd,
+      sessionUpdateHandler,
+    });
+    connInfo = connection.connInfo;
+    disposeRun = connection.dispose;
+    throwIfAborted();
+
+    const sessionResponse = await createEphemeralAcpSession(
+      agentName,
+      connection.agentId,
       connInfo,
       cwd,
       authHandler,
@@ -178,27 +166,5 @@ export async function runEphemeralRun(input: EphemeralRunInput): Promise<Ephemer
     if (!deferCleanup) {
       disposeRun();
     }
-  }
-}
-
-async function createSessionWithAuth(
-  agentName: string,
-  agentId: string,
-  connInfo: ConnectionInfo,
-  cwd: string,
-  authHandler: SessionAuthHandler,
-  throwIfAborted: () => void,
-): Promise<{ sessionId: string }> {
-  throwIfAborted();
-
-  try {
-    return await connInfo.connection.newSession({ cwd, mcpServers: [] });
-  } catch (e: any) {
-    if (!authHandler.isAuthRequiredError(e)) {
-      throw e;
-    }
-    await authHandler.runAuthFlow(agentName, agentId, connInfo);
-    throwIfAborted();
-    return connInfo.connection.newSession({ cwd, mcpServers: [] });
   }
 }

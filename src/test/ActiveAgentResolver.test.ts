@@ -84,4 +84,24 @@ suite('ActiveAgentResolver', () => {
     assert.strictEqual(agent.name, 'Vibe');
     assert.strictEqual(agent.displayName, 'Vibe');
   });
+
+  test('no configured agents throws explicit error', () => {
+    vscode.workspace.getConfiguration = function() {
+      return {
+        get: (_key: string, defaultValue?: unknown) => defaultValue,
+      } as ReturnType<typeof vscode.workspace.getConfiguration>;
+    };
+
+    const resolver = new SessionBackedActiveAgentResolver(
+      () => '/tmp/no-acp-agents-workspace',
+      () => undefined,
+    );
+
+    assert.throws(
+      () => resolver.resolveRunnableAgent(),
+      (error: unknown) =>
+        error instanceof Error
+        && error.message.includes('No ACP agent configured'),
+    );
+  });
 });

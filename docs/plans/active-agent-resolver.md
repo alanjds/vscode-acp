@@ -2,7 +2,7 @@
 
 > Réduire le couplage inline chat → SessionManager et rendre testable le cycle de vie `InlineEditSession` (submit / accept / stale / abort).
 
-**Statut :** proposé  
+**Statut :** implémenté  
 **Date :** 2026-06-23  
 **Contexte :** revue d’architecture post-refactor (candidat #7, force Worth exploring)  
 **Alignement :** ADR-0009 (séparation UI ↔ agent), `src/inlineChat/CONTEXT.md` (chemin parallèle EphemeralRun)
@@ -272,12 +272,12 @@ concurrent submit → prior run aborted
 
 ## 8. Critères de succès
 
-- [ ] `AcpInlineEditAgent` n’importe plus `SessionManager`.
-- [ ] `ActiveAgentResolver.test.ts` couvre active / virtual / fallback / erreur.
-- [ ] `InlineEditSession.test.ts` couvre submit, accept (applied + stale), reject, stop, abort.
-- [ ] `InlineChatPlugin` wire `SessionBackedActiveAgentResolver` explicitement.
-- [ ] `src/inlineChat/CONTEXT.md` documente **ActiveAgentResolver** comme seam de sélection d’agent.
-- [ ] Tests existants `PatchDecision`, `InlineEditAbort` passent sans régression.
+- [x] `AcpInlineEditAgent` n’importe plus `SessionManager`.
+- [x] `ActiveAgentResolver.test.ts` couvre active / virtual / fallback / erreur.
+- [x] `InlineEditSession.test.ts` couvre submit, accept (applied + stale), reject, stop, abort.
+- [x] `InlineChatPlugin` wire `SessionBackedActiveAgentResolver` explicitement.
+- [x] `src/inlineChat/CONTEXT.md` documente **ActiveAgentResolver** comme seam de sélection d’agent.
+- [x] Tests existants `PatchDecision`, `InlineEditAbort` passent sans régression.
 
 ---
 

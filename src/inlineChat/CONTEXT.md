@@ -27,7 +27,7 @@ Backend qui transforme une requête InlineEdit en EditProposal. Peut déléguer 
 _À éviter_ : agent inline, fournisseur d’édition
 
 **ActiveAgentResolver** :
-Choix de l’agent exécutable pour un InlineEdit via EphemeralRun (`sideEffects: 'none'`). Règle : ConnectedAgent actif s’il n’est pas VirtualAgent ; sinon premier ConfiguredAgent non virtual du workspace. Le seam `SessionBackedActiveAgentResolver` adapte `SessionManager.getActiveSession()?.agentName` sans créer de Conversation ni SessionRecord — chemin parallèle à l’arbre principal, partage uniquement EphemeralRun.
+Choix de l’agent exécutable pour un InlineEdit via EphemeralRun (`sideEffects: 'none'`). Règle : ConnectedAgent actif s’il n’est pas VirtualAgent (pipeline ou team) ; sinon premier ConfiguredAgent du workspace. Les agents sandcastle comptent comme ConfiguredAgent et peuvent donc être choisis s’ils sont actifs. Le seam `SessionBackedActiveAgentResolver` adapte `SessionManager.getActiveSession()?.agentName` sans créer de Conversation ni SessionRecord — chemin parallèle à l’arbre principal, partage uniquement EphemeralRun.
 _À éviter_ : session inline, agent actif (préférer ConnectedAgent / ConfiguredAgent)
 
 **EditorInset** :

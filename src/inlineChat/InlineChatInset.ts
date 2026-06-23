@@ -1,9 +1,8 @@
 import * as vscode from 'vscode';
 import { getInlineChatHtml } from './webview/inlineChatHtml';
 import { InlineEditAgent } from './agent/InlineEditAgent';
-import { PatchApplyService } from './patch/PatchApplyService';
-import { InlineChatMessage, InlineChatResponse, InlineEditRequest, InlineEditResult } from './InlineChatTypes';
-import { RunAbortedError, isRunAbortedError } from '../core/RunAbortedError';
+import { InlineChatMessage, InlineChatResponse } from './InlineChatTypes';
+import { InlineEditSession } from './InlineEditSession';
 
 // Import the proposed API types
 // This will be available when running in VS Code Insiders with enabled proposed APIs
@@ -23,17 +22,19 @@ interface WebviewEditorInset {
 export class InlineChatInset implements vscode.Disposable {
   private inset?: WebviewEditorInset;
   private disposables: vscode.Disposable[] = [];
-  private pendingEdits?: vscode.TextEdit[];
-  private activeRun?: AbortController;
-  private readonly documentVersion: number;
+  private readonly session: InlineEditSession;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
     private readonly editor: vscode.TextEditor,
-    private readonly agent: InlineEditAgent,
-    private readonly patchApplyService: PatchApplyService
+    agent: InlineEditAgent,
   ) {
-    this.documentVersion = editor.document.version;
+    this.session = new InlineEditSession(editor, agent, {
+      post: message => this.post(message),
+      close: () => this.dispose(),
+      showWarning: message => { void vscode.window.showWarningMessage(message); },
+      showError: message => { void vscode.window.showErrorMessage(message); },
+    });
   }
 
   /**
@@ -102,26 +103,7 @@ export class InlineChatInset implements vscode.Disposable {
 
     this.disposables.push(
       this.inset.webview.onDidReceiveMessage(async (message: InlineChatMessage) => {
-        switch (message.type) {
-          case 'submit':
-            await this.handleSubmit(message.prompt);
-            break;
-          case 'accept':
-            await this.accept();
-            break;
-          case 'reject':
-            this.abortActiveRun();
-            this.dispose();
-            break;
-          case 'stop':
-            this.abortActiveRun();
-            await this.post({ type: 'status', value: 'ready' } as InlineChatResponse);
-            break;
-          case 'cancel':
-            this.abortActiveRun();
-            this.dispose();
-            break;
-        }
+        await this.session.handleMessage(message);
       })
     );
   }
@@ -163,136 +145,6 @@ export class InlineChatInset implements vscode.Disposable {
   }
 
   /**
-   * Handle prompt submission from user
-   */
-  private async handleSubmit(prompt: string): Promise<void> {
-    const document = this.editor.document;
-    const selection = this.editor.selection;
-
-    this.activeRun?.abort();
-    const runController = new AbortController();
-    this.activeRun = runController;
-
-    // Post thinking status including agent display name (if available)
-    let agentName = 'Damien';
-    try {
-      const display = (this.agent as any).getDisplayName?.();
-      agentName = display instanceof Promise ? await display : (display ?? agentName);
-    } catch {
-      // ignore and fallback to default
-    }
-
-    await this.post({ type: 'status', value: 'thinking', agent: agentName } as InlineChatResponse);
-
-    try {
-      const selectedText = document.getText(selection);
-      const contextText = this.getContextText(document, selection.active.line);
-
-      // Create request for the agent
-      const request: InlineEditRequest = {
-        prompt,
-        uri: document.uri.toString(),
-        languageId: document.languageId,
-        fileName: document.fileName,
-        selection,
-        selectedText,
-        contextText
-      };
-
-      // Get edit proposal from agent
-      const result: InlineEditResult = await this.agent.generateEdit(request, {
-        signal: runController.signal,
-      });
-
-      if (runController.signal.aborted) {
-        return;
-      }
-
-      // Convert to VS Code text edits
-      this.pendingEdits = result.edits.map((edit: InlineEditResult['edits'][number]) =>
-        new vscode.TextEdit(
-          new vscode.Range(
-            new vscode.Position(edit.range.start.line, edit.range.start.character),
-            new vscode.Position(edit.range.end.line, edit.range.end.character)
-          ),
-          edit.newText
-        )
-      );
-
-      await this.post({
-        type: 'proposal',
-        summary: result.summary,
-        editsCount: result.edits.length
-      } as InlineChatResponse);
-
-    } catch (error) {
-      if (isRunAbortedError(error) || runController.signal.aborted) {
-        return;
-      }
-      console.error('Error generating edit:', error);
-      await this.post({ type: 'status', value: 'error' } as InlineChatResponse);
-      vscode.window.showErrorMessage(`Error generating edit: ${error}`);
-    } finally {
-      if (this.activeRun === runController) {
-        this.activeRun = undefined;
-      }
-    }
-  }
-
-  /**
-   * Accept the current proposal and apply edits
-   */
-  private async accept(): Promise<void> {
-    if (!this.pendingEdits?.length) {
-      return;
-    }
-
-    // Check if document has changed since proposal was generated
-    if (this.editor.document.version !== this.documentVersion) {
-      vscode.window.showWarningMessage(
-        'The document changed since the inline proposal was generated. ' +
-        'Please retry the inline chat.'
-      );
-      return;
-    }
-
-    try {
-      // Apply the edits
-      const success = await this.patchApplyService.apply(
-        this.editor,
-        this.pendingEdits
-      );
-
-      if (success) {
-        // Clear pending edits
-        this.pendingEdits = undefined;
-        // Close the inset
-        this.dispose();
-      } else {
-        vscode.window.showErrorMessage('Failed to apply edits');
-      }
-    } catch (error) {
-      console.error('Error applying edits:', error);
-      vscode.window.showErrorMessage(`Error applying edits: ${error}`);
-    }
-  }
-
-  /**
-   * Get context text around the current line
-   */
-  private getContextText(document: vscode.TextDocument, line: number): string {
-    const before = Math.max(0, line - 80);
-    const after = Math.min(document.lineCount - 1, line + 80);
-
-    const range = new vscode.Range(
-      new vscode.Position(before, 0),
-      document.lineAt(after).range.end
-    );
-
-    return document.getText(range);
-  }
-
-  /**
    * Send message to webview
    */
   private async post(message: InlineChatResponse): Promise<void> {
@@ -303,7 +155,7 @@ export class InlineChatInset implements vscode.Disposable {
    * Dispose of the inset and clean up resources
    */
   dispose(): void {
-    this.abortActiveRun();
+    this.session.dispose();
     this.inset?.dispose();
     this.inset = undefined;
 
@@ -311,12 +163,5 @@ export class InlineChatInset implements vscode.Disposable {
       disposable.dispose();
     }
     this.disposables = [];
-
-    this.pendingEdits = undefined;
-  }
-
-  private abortActiveRun(): void {
-    this.activeRun?.abort();
-    this.activeRun = undefined;
   }
 }

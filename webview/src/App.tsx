@@ -15,8 +15,6 @@ import type {
   FileSearchResult,
   ModelOption,
   ModeOption,
-  PipelinePhase,
-  PipelinePlanStatus,
   PersistedWebviewState,
   ChatWebviewSharedState,
   SessionConfigOption,
@@ -35,7 +33,19 @@ import {
   normalizeSessionUpdate,
 } from './app/normalizers';
 import { mapSessionUpdateToActions } from './app/sessionUpdates';
-import { appReducer, buildSharedSnapshot, createInitialState } from './app/state';
+import {
+  mapOrchestrationMessageToActions,
+  mapSessionOrchestrationMetaToActions,
+  normalizePipelinePhase,
+  shouldFinalizeTeamRoleTurn,
+  type OrchestrationHostMessage,
+} from './app/orchestrationEvents';
+import {
+  appReducer,
+  buildWebviewPersistedBundle,
+  createInitialState,
+  selectPipelineChatProjection,
+} from './app/state';
 import { MessageBubble } from './components/MessageBubble';
 import { ChatComposer } from './components/ChatComposer';
 import { CurrentTurnBlock } from './components/CurrentTurnBlock';
@@ -45,7 +55,6 @@ import { SessionBanner } from './components/SessionBanner';
 import { PlanBlock } from './components/PlanBlock';
 import { PipelinePlanBlock } from './components/PipelinePlanBlock';
 import {
-  applyPipelineStatusToTimeline,
   createDefaultTeamTimeline,
   PipelineRoleTimeline,
 } from './components/PipelineRoleTimeline';
@@ -53,6 +62,7 @@ import { PipelineRoleOutputBlock } from './components/PipelineRoleOutputBlock';
 import { getState, onMessage, postMessage, setState } from './vscode';
 import { useFileMentions } from './app/useFileMentions';
 import { useSessionDisplay } from './app/useSessionDisplay';
+import { shouldAcceptIncomingSharedState } from '../../src/ui/ChatWebviewSharedStateCore';
 
 export function App(): JSX.Element {
   const [state, dispatch] = useReducer(appReducer, getState<PersistedWebviewState>(), createInitialState);
@@ -126,6 +136,11 @@ export function App(): JSX.Element {
     ? 'Send a message to revise the plan, or approve/reject below.'
     : placeholder;
 
+  const pipelineProjection = useMemo(
+    () => selectPipelineChatProjection(state),
+    [state.orchestration],
+  );
+
   // Sync shared UI state to extension host and VS Code serializer
   useEffect(() => {
     if (skipSharedSyncRef.current) {
@@ -135,13 +150,13 @@ export function App(): JSX.Element {
 
     sharedVersionRef.current += 1;
     sharedUpdatedAtRef.current = Date.now();
-    const snapshot = buildSharedSnapshot(
+    const bundle = buildWebviewPersistedBundle(
       state,
       sharedVersionRef.current,
       sharedUpdatedAtRef.current,
     );
-    setState(snapshot);
-    postMessage({ type: 'sharedStateChanged', state: snapshot });
+    setState(bundle);
+    postMessage({ type: 'sharedStateChanged', state: bundle.shared });
   }, [
     state.persisted,
     state.promptText,
@@ -149,9 +164,7 @@ export function App(): JSX.Element {
     state.isProcessing,
     state.currentTurn,
     state.collapsedTools,
-    state.pipelineTimeline,
-    state.activePipelineRole,
-    state.activePipelineAgentName,
+    state.orchestration,
     state.composerUnlocked,
   ]);
 
@@ -174,11 +187,10 @@ export function App(): JSX.Element {
         case 'sharedStateUpdated':
           if (message.state && typeof message.state === 'object') {
             const sharedState = message.state as ChatWebviewSharedState;
-            const isStale =
-              sharedState.version < sharedVersionRef.current
-              || (sharedState.version === sharedVersionRef.current
-                && sharedState.updatedAt <= sharedUpdatedAtRef.current);
-            if (isStale) {
+            if (!shouldAcceptIncomingSharedState(
+              { version: sharedVersionRef.current, updatedAt: sharedUpdatedAtRef.current },
+              sharedState,
+            )) {
               break;
             }
             sharedVersionRef.current = sharedState.version;
@@ -229,7 +241,15 @@ export function App(): JSX.Element {
           break;
 
         case 'promptEnd': {
-          dispatch({ type: 'promptEnd' });
+          const current = stateRef.current;
+          if (shouldFinalizeTeamRoleTurn(
+            current.orchestration.activeRole,
+            current.currentTurn?.assistantText,
+          )) {
+            dispatch({ type: 'finalizeTeamRoleTurn' });
+          } else {
+            dispatch({ type: 'promptEnd' });
+          }
           break;
         }
 
@@ -252,76 +272,16 @@ export function App(): JSX.Element {
           break;
 
         case 'pipelinePlanReady':
-          if (typeof message.plan === 'string') {
-            const planAction = message.revised === true
-              ? {
-                  type: 'revisePipelinePlan' as const,
-                  plan: message.plan,
-                  role: normalizePipelinePhase(message.role),
-                  agentName: typeof message.agentName === 'string' ? message.agentName : undefined,
-                  implementerUsesSandcastle: message.implementerUsesSandcastle === true,
-                }
-              : {
-                  type: 'appendPipelinePlan' as const,
-                  plan: message.plan,
-                  role: normalizePipelinePhase(message.role),
-                  agentName: typeof message.agentName === 'string' ? message.agentName : undefined,
-                  implementerUsesSandcastle: message.implementerUsesSandcastle === true,
-                };
-            dispatch(planAction);
-            if (typeof message.teamId === 'string' && message.revised !== true) {
-              dispatch({
-                type: 'updatePipelineTimeline',
-                timeline: createDefaultTeamTimeline(false),
-              });
-            }
-          }
-          break;
-
         case 'pipelinePlanApprovalFailed':
-          dispatch({ type: 'revertPipelinePlanApproval' });
-          break;
-
-        case 'pipelineStatus': {
-          const status = normalizePipelineStatus(message.status);
-          if (status) {
-            dispatch({
-              type: 'updatePipelinePlanStatus',
-              status,
-              message: typeof message.message === 'string' ? message.message : undefined,
-            });
-          }
-          if (typeof message.teamId === 'string') {
-            dispatch({
-              type: 'updatePipelineTimeline',
-              timeline: applyPipelineStatusToTimeline(
-                stateRef.current.pipelineTimeline.length > 0
-                  ? stateRef.current.pipelineTimeline
-                  : createDefaultTeamTimeline(false),
-                typeof message.status === 'string' ? message.status : undefined,
-                typeof message.stepId === 'string' ? message.stepId : undefined,
-              ),
-            });
-          }
-          const role = normalizePipelinePhase(message.role);
-          if (role) {
-            dispatch({
-              type: 'setActivePipelineRole',
-              role,
-              agentName: typeof message.agentName === 'string' ? message.agentName : null,
-            });
-          }
-          break;
-        }
-
+        case 'pipelineStatus':
         case 'reviewerRerunReady':
-          if (typeof message.output === 'string') {
-            dispatch({
-              type: 'appendPipelineRoleOutput',
-              role: 'reviewer-rerun',
-              text: message.output,
-              title: 'Review (rerun)',
-            });
+          for (const action of mapOrchestrationMessageToActions(
+            message as OrchestrationHostMessage,
+            stateRef.current.orchestration.timeline.length > 0
+              ? stateRef.current.orchestration.timeline
+              : createDefaultTeamTimeline(false),
+          )) {
+            dispatch(action);
           }
           break;
 
@@ -332,12 +292,11 @@ export function App(): JSX.Element {
           )) {
             dispatch(action);
           }
-          if (message.role || message.agentName) {
-            dispatch({
-              type: 'setActivePipelineRole',
-              role: normalizePipelinePhase(message.role ?? message.phase) ?? null,
-              agentName: typeof message.agentName === 'string' ? message.agentName : null,
-            });
+          for (const action of mapSessionOrchestrationMetaToActions(
+            normalizePipelinePhase(message.role ?? message.phase),
+            typeof message.agentName === 'string' ? message.agentName : undefined,
+          )) {
+            dispatch(action);
           }
           break;
 
@@ -772,8 +731,8 @@ export function App(): JSX.Element {
           <EmptyState onAddAgent={handleAddAgent} onConnectAgent={handleConnectAgent} />
         ) : null}
 
-        {state.pipelineTimeline.length > 0 ? (
-          <PipelineRoleTimeline timeline={state.pipelineTimeline} />
+        {pipelineProjection.hasTimeline ? (
+          <PipelineRoleTimeline timeline={pipelineProjection.timeline} />
         ) : null}
 
         {historyBlocks.map((block) => {
@@ -885,30 +844,4 @@ export function App(): JSX.Element {
       />
     </>
   );
-}
-
-// Local normalization functions (not in normalizers.ts)
-function normalizePipelineStatus(status: unknown): PipelinePlanStatus | null {
-  switch (status) {
-    case 'awaiting_approval':
-      return 'pending';
-    case 'implementing':
-    case 'completed':
-    case 'rejected':
-    case 'error':
-    case 'cancelled':
-      return status;
-    default:
-      return null;
-  }
-}
-
-function normalizePipelinePhase(phase: unknown): PipelinePhase | undefined {
-  return phase === 'planner'
-    || phase === 'implementer'
-    || phase === 'reviewer'
-    || phase === 'tester'
-    || phase === 'reviewer-rerun'
-    ? phase
-    : undefined;
 }

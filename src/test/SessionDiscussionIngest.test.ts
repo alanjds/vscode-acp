@@ -1,20 +1,102 @@
 import * as assert from 'assert';
 
+import {
+  collectConversationUpdateEffects,
+  projectConversationUpdate,
+} from '../core/ConversationUpdateIngestor';
 import { SessionManager } from '../core/SessionManager';
 import { workspaceIdentityFromCwd } from '../core/WorkspaceIdentity';
 
-suite('SessionManager.ingestSessionUpdate', () => {
-  test('persists assistant chunks from agent_message_chunk updates', () => {
-    const assistantChunks: string[] = [];
-    const manager = createManager({ assistantChunks });
+suite('ConversationUpdateIngestor', () => {
+  test('collects session metadata and transcript effects from ACP updates', () => {
+    assert.deepStrictEqual(
+      collectConversationUpdateEffects({
+        sessionId: 'session-1',
+        update: {
+          sessionUpdate: 'available_commands_update',
+          availableCommands: [{ name: 'review', description: 'Review code' }],
+        },
+      } as any, { isLoading: false }),
+      {
+        sessionId: 'session-1',
+        availableCommands: [{ name: 'review', description: 'Review code' }],
+      },
+    );
 
-    manager.ingestSessionUpdate('session-1', {
+    assert.deepStrictEqual(
+      collectConversationUpdateEffects({
+        sessionId: 'session-1',
+        update: {
+          sessionUpdate: 'session_info_update',
+          title: 'A better title',
+          updatedAt: '2026-06-23T08:00:00.000Z',
+        },
+      } as any, { isLoading: false }),
+      {
+        sessionId: 'session-1',
+        sessionInfo: {
+          title: 'A better title',
+          updatedAt: '2026-06-23T08:00:00.000Z',
+        },
+      },
+    );
+
+    assert.deepStrictEqual(
+      collectConversationUpdateEffects({
+        sessionId: 'session-1',
+        update: {
+          sessionUpdate: 'user_message_chunk',
+          content: { type: 'text', text: 'replayed prompt' },
+        },
+      } as any, { isLoading: true }),
+      {
+        sessionId: 'session-1',
+        replayedUserMessageChunk: 'replayed prompt',
+      },
+    );
+  });
+
+  test('projects forwarding only for the active conversation', () => {
+    const notification = {
       sessionId: 'session-1',
       update: {
         sessionUpdate: 'agent_message_chunk',
         content: { type: 'text', text: 'hello' },
       },
-    } as any);
+    } as any;
+
+    assert.strictEqual(
+      projectConversationUpdate(notification, 'session-1').shouldForwardToActiveConversation,
+      true,
+    );
+    assert.strictEqual(
+      projectConversationUpdate(notification, 'session-2').shouldForwardToActiveConversation,
+      false,
+    );
+  });
+});
+
+suite('SessionManager.projectAndApply', () => {
+  test('persists assistant chunks from agent_message_chunk updates', () => {
+    const assistantChunks: string[] = [];
+    const manager = createManager({ assistantChunks });
+
+    manager.projectAndApply(
+      {
+        kind: 'acp-session-update',
+        notification: {
+          sessionId: 'session-1',
+          update: {
+            sessionUpdate: 'agent_message_chunk',
+            content: { type: 'text', text: 'hello' },
+          },
+        } as any,
+      },
+      {
+        activeSessionId: 'session-1',
+        isLoading: () => false,
+      },
+    );
 
     assert.deepStrictEqual(assistantChunks, ['hello']);
   });
@@ -24,23 +106,41 @@ suite('SessionManager.ingestSessionUpdate', () => {
     const manager = createManager({ userChunks });
     (manager as any).sessionState.markLoading('session-1');
 
-    manager.ingestSessionUpdate('session-1', {
-      sessionId: 'session-1',
-      update: {
-        sessionUpdate: 'user_message_chunk',
-        content: { type: 'text', text: 'replay' },
+    manager.projectAndApply(
+      {
+        kind: 'acp-session-update',
+        notification: {
+          sessionId: 'session-1',
+          update: {
+            sessionUpdate: 'user_message_chunk',
+            content: { type: 'text', text: 'replay' },
+          },
+        } as any,
       },
-    } as any);
+      {
+        activeSessionId: 'session-1',
+        isLoading: (sessionId) => manager.isLoading(sessionId),
+      },
+    );
     assert.deepStrictEqual(userChunks, ['replay']);
 
     (manager as any).sessionState.unmarkLoading('session-1');
-    manager.ingestSessionUpdate('session-1', {
-      sessionId: 'session-1',
-      update: {
-        sessionUpdate: 'user_message_chunk',
-        content: { type: 'text', text: 'ignored' },
+    manager.projectAndApply(
+      {
+        kind: 'acp-session-update',
+        notification: {
+          sessionId: 'session-1',
+          update: {
+            sessionUpdate: 'user_message_chunk',
+            content: { type: 'text', text: 'ignored' },
+          },
+        } as any,
       },
-    } as any);
+      {
+        activeSessionId: 'session-1',
+        isLoading: (sessionId) => manager.isLoading(sessionId),
+      },
+    );
     assert.deepStrictEqual(userChunks, ['replay']);
   });
 });

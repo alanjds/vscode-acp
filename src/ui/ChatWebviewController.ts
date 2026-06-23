@@ -1,5 +1,4 @@
 import * as vscode from 'vscode';
-import * as path from 'path';
 import { marked } from 'marked';
 import type { SessionNotification } from '@agentclientprotocol/sdk';
 
@@ -8,16 +7,17 @@ import { classifyAgentError, formatAgentErrorMessage } from '../core/AgentError'
 import { DebugTraceStore } from '../core/DebugTraceStore';
 import { SessionUpdateHandler, SessionUpdateListener } from '../handlers/SessionUpdateHandler';
 import { ALLOWED_WEBVIEW_COMMANDS } from '../security/SecurityPolicy';
+import { ChatFileSearchService } from './chat/ChatFileSearchService';
+import {
+  ChatWebviewTransport,
+  type AttachWebviewOptions,
+  type ChatWebviewEndpointKind,
+  type WebviewMessage,
+} from './chat/ChatWebviewTransport';
 import { HtmlSanitizer } from './HtmlSanitizer';
 import { log, logError } from '../utils/Logger';
 import { sendEvent } from '../utils/TelemetryManager';
 import { buildPromptWithEditorContext, type EditorContext } from './EditorContext';
-import {
-  createFileSearchIndex,
-  searchIndexedFiles,
-  type FileSearchEntry,
-  type IndexedFile,
-} from './FileSearchIndex';
 import { getReactShellHtmlContent } from './WebviewHtml';
 import { ChatWebviewStateStore } from './ChatWebviewStateStore';
 import {
@@ -28,46 +28,20 @@ import {
 type GetEditorContext = () => EditorContext | null;
 type OpenDebugSnapshot = (chatState: unknown) => void | Promise<void>;
 
-type WebviewMessage = {
-  type: string;
-  [key: string]: unknown;
-};
-
 export type ChatWebviewMessageHandler = (message: WebviewMessage) => void | Promise<void>;
 
-export type ChatWebviewEndpointKind = 'view' | 'editorPanel';
-
-export interface AttachWebviewOptions {
-  id: string;
-  kind: ChatWebviewEndpointKind;
-  webview: vscode.Webview;
-  onDispose?: () => void;
-}
-
-interface ChatWebviewEndpoint {
-  id: string;
-  kind: ChatWebviewEndpointKind;
-  webview: vscode.Webview;
-  ready: boolean;
-  pendingMessages: WebviewMessage[];
-  disposables: vscode.Disposable[];
-}
-
-const FILE_SEARCH_RESULT_LIMIT = 30;
-const FILE_SEARCH_INDEX_LIMIT = 5000;
+export type { AttachWebviewOptions, ChatWebviewEndpointKind };
 
 /**
  * Orchestrates ACP chat behavior and broadcasts UI/session events to all attached webviews.
  */
 export class ChatWebviewController implements vscode.Disposable {
-  private readonly endpoints = new Map<string, ChatWebviewEndpoint>();
+  private readonly transport: ChatWebviewTransport;
+  private readonly fileSearch: ChatFileSearchService;
   private readonly updateListener: SessionUpdateListener;
   private editorContextLinked = false;
   private readonly featureMessageHandlers = new Map<string, ChatWebviewMessageHandler>();
-  private fileSearchIndexPromise: Promise<{ index: ReturnType<typeof createFileSearchIndex>; files: IndexedFile[] }> | null = null;
-  private readonly fileSearchDisposables: vscode.Disposable[] = [];
   private readonly promptInFlightBySession = new Set<string>();
-  private nextEndpointId = 0;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -83,12 +57,10 @@ export class ChatWebviewController implements vscode.Disposable {
       gfm: true,
     });
 
-    this.fileSearchDisposables.push(
-      vscode.workspace.onDidCreateFiles(() => this.invalidateFileSearchIndex()),
-      vscode.workspace.onDidDeleteFiles(() => this.invalidateFileSearchIndex()),
-      vscode.workspace.onDidRenameFiles(() => this.invalidateFileSearchIndex()),
-      vscode.workspace.onDidChangeWorkspaceFolders(() => this.invalidateFileSearchIndex()),
+    this.transport = new ChatWebviewTransport((endpointId, message) =>
+      this.handleWebviewMessage(endpointId, message),
     );
+    this.fileSearch = new ChatFileSearchService();
 
     this.updateListener = (update: SessionNotification) => {
       this.handleSessionUpdate(update);
@@ -106,48 +78,15 @@ export class ChatWebviewController implements vscode.Disposable {
   }
 
   attachWebview(options: AttachWebviewOptions): vscode.Disposable {
-    const endpoint: ChatWebviewEndpoint = {
-      id: options.id,
-      kind: options.kind,
-      webview: options.webview,
-      ready: false,
-      pendingMessages: [],
-      disposables: [],
-    };
-
-    endpoint.disposables.push(
-      options.webview.onDidReceiveMessage(async (message: WebviewMessage) => {
-        await this.handleWebviewMessage(endpoint.id, message);
-      }),
-    );
-
-    if (options.onDispose) {
-      endpoint.disposables.push({ dispose: options.onDispose });
-    }
-
-    this.endpoints.set(endpoint.id, endpoint);
-    return {
-      dispose: () => {
-        this.detachWebview(endpoint.id);
-      },
-    };
+    return this.transport.attachWebview(options);
   }
 
   detachWebview(endpointId: string): void {
-    const endpoint = this.endpoints.get(endpointId);
-    if (!endpoint) {
-      return;
-    }
-
-    for (const disposable of endpoint.disposables) {
-      disposable.dispose();
-    }
-    this.endpoints.delete(endpointId);
+    this.transport.detachWebview(endpointId);
   }
 
   createEndpointId(kind: ChatWebviewEndpointKind): string {
-    this.nextEndpointId += 1;
-    return `${kind}-${this.nextEndpointId}`;
+    return this.transport.createEndpointId(kind);
   }
 
   async getHtmlContent(webview: vscode.Webview): Promise<string> {
@@ -225,50 +164,23 @@ export class ChatWebviewController implements vscode.Disposable {
   }
 
   private markEndpointReady(endpointId: string): void {
-    const endpoint = this.endpoints.get(endpointId);
-    if (!endpoint) {
-      return;
-    }
-
-    endpoint.ready = true;
+    this.transport.markEndpointReady(endpointId);
     this.sendHydrateSharedState(endpointId);
     this.sendCurrentState(endpointId);
-    this.flushPendingMessages(endpointId);
+    this.transport.flushPendingMessages(endpointId);
   }
 
   private handleSessionUpdate(update: SessionNotification): void {
-    const updateData = update.update as any;
-
-    if (updateData?.sessionUpdate === 'available_commands_update') {
-      this.sessionManager.applyAvailableCommands(
-        update.sessionId,
-        updateData.availableCommands || [],
-      );
+    const projection = this.sessionManager.projectAndApply(
+      { kind: 'acp-session-update', notification: update },
+      {
+        activeSessionId: this.sessionManager.getActiveSessionId(),
+        isLoading: (sessionId) => this.sessionManager.isLoading(sessionId),
+      },
+    );
+    for (const message of projection.webviewMessages) {
+      this.postMessage(message);
     }
-    if (updateData?.sessionUpdate === 'config_option_update') {
-      this.sessionManager.applyConfigOptions(
-        update.sessionId,
-        updateData.configOptions || [],
-      );
-    }
-    if (updateData?.sessionUpdate === 'session_info_update') {
-      this.sessionManager.applySessionInfoUpdate(update.sessionId, {
-        title: updateData.title,
-        updatedAt: updateData.updatedAt,
-      });
-    }
-    this.sessionManager.ingestSessionUpdate(update.sessionId, update);
-
-    const activeId = this.sessionManager.getActiveSessionId();
-    if (update.sessionId !== activeId) {
-      return;
-    }
-
-    this.postMessage({
-      type: 'sessionUpdate',
-      update: update.update,
-      sessionId: update.sessionId,
-    });
   }
 
   private async handleSendPrompt(text: string, agentPromptText?: string): Promise<void> {
@@ -430,53 +342,8 @@ export class ChatWebviewController implements vscode.Disposable {
   }
 
   private async handleSearchFiles(query: string, requestId: number): Promise<void> {
-    try {
-      const { index, files } = await this.getFileSearchIndex();
-      const results = disambiguateFileSearchResults(
-        searchIndexedFiles(index, files, query.replace(/\\/g, '/'), FILE_SEARCH_RESULT_LIMIT),
-      );
-
-      this.postMessage({ type: 'fileSearchResults', requestId, results });
-    } catch (e: any) {
-      logError('File search failed', e);
-      this.postMessage({ type: 'fileSearchResults', requestId, results: [] });
-    }
-  }
-
-  private getFileSearchIndex(): Promise<{ index: ReturnType<typeof createFileSearchIndex>; files: IndexedFile[] }> {
-    this.fileSearchIndexPromise ??= this.buildFileSearchIndex();
-    return this.fileSearchIndexPromise;
-  }
-
-  private async buildFileSearchIndex(): Promise<{ index: ReturnType<typeof createFileSearchIndex>; files: IndexedFile[] }> {
-    const uris = await vscode.workspace.findFiles(
-      '**/*',
-      '**/{node_modules,.git,dist,out}/**',
-      FILE_SEARCH_INDEX_LIMIT,
-    );
-
-    const files = uris.map((uri, index) => {
-      const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
-      const relativePath = workspaceFolder
-        ? path.relative(workspaceFolder.uri.fsPath, uri.fsPath).replace(/\\/g, '/')
-        : uri.fsPath.replace(/\\/g, '/');
-
-      return {
-        id: `${index}:${relativePath}`,
-        path: relativePath,
-        name: uri.fsPath.split(/[\\/]/).pop() || relativePath,
-        content: '',
-      };
-    });
-
-    return {
-      index: createFileSearchIndex(files),
-      files,
-    };
-  }
-
-  private invalidateFileSearchIndex(): void {
-    this.fileSearchIndexPromise = null;
+    const results = await this.fileSearch.search(query);
+    this.postMessage({ type: 'fileSearchResults', requestId, results });
   }
 
   private async handleOpenFile(filePath: string): Promise<void> {
@@ -548,17 +415,7 @@ export class ChatWebviewController implements vscode.Disposable {
     endpointId?: string,
     exceptEndpointId?: string,
   ): void {
-    if (endpointId) {
-      this.postMessageToEndpoint(endpointId, message);
-      return;
-    }
-
-    for (const [id] of this.endpoints) {
-      if (id === exceptEndpointId) {
-        continue;
-      }
-      this.postMessageToEndpoint(id, message);
-    }
+    this.transport.postMessage(message, endpointId, exceptEndpointId);
   }
 
   registerFeatureMessageHandler(type: string, handler: ChatWebviewMessageHandler): vscode.Disposable {
@@ -571,33 +428,6 @@ export class ChatWebviewController implements vscode.Disposable {
         this.featureMessageHandlers.delete(type);
       }
     });
-  }
-
-  private postMessageToEndpoint(endpointId: string, message: WebviewMessage): void {
-    const endpoint = this.endpoints.get(endpointId);
-    if (!endpoint) {
-      return;
-    }
-
-    if (!endpoint.ready) {
-      endpoint.pendingMessages.push(message);
-      return;
-    }
-
-    void endpoint.webview.postMessage(message);
-  }
-
-  private flushPendingMessages(endpointId: string): void {
-    const endpoint = this.endpoints.get(endpointId);
-    if (!endpoint || !endpoint.ready || endpoint.pendingMessages.length === 0) {
-      return;
-    }
-
-    const messages = endpoint.pendingMessages;
-    endpoint.pendingMessages = [];
-    for (const message of messages) {
-      void endpoint.webview.postMessage(message);
-    }
   }
 
   notifyActiveSessionChanged(): void {
@@ -666,48 +496,7 @@ export class ChatWebviewController implements vscode.Disposable {
   dispose(): void {
     this.sessionUpdateHandler.removeListener(this.updateListener);
     this.featureMessageHandlers.clear();
-    for (const disposable of this.fileSearchDisposables) {
-      disposable.dispose();
-    }
-    for (const endpointId of [...this.endpoints.keys()]) {
-      this.detachWebview(endpointId);
-    }
+    this.fileSearch.dispose();
+    this.transport.dispose();
   }
-}
-
-function disambiguateFileSearchResults(
-  results: FileSearchEntry[],
-): FileSearchEntry[] {
-  const byName = new Map<string, FileSearchEntry[]>();
-  for (const result of results) {
-    const bucket = byName.get(result.name) ?? [];
-    bucket.push(result);
-    byName.set(result.name, bucket);
-  }
-
-  return results.map(result => {
-    const duplicates = byName.get(result.name) ?? [];
-    if (duplicates.length <= 1) {
-      return result;
-    }
-    return {
-      ...result,
-      name: shortestUniqueSuffix(result.path, duplicates.map(candidate => candidate.path)),
-    };
-  });
-}
-
-function shortestUniqueSuffix(pathValue: string, allPaths: string[]): string {
-  const parts = pathValue.split('/').filter(Boolean);
-  for (let count = 1; count <= parts.length; count += 1) {
-    const suffix = parts.slice(parts.length - count).join('/');
-    const matches = allPaths.filter(candidate => {
-      const candidateParts = candidate.split('/').filter(Boolean);
-      return candidateParts.slice(candidateParts.length - count).join('/') === suffix;
-    });
-    if (matches.length === 1) {
-      return suffix;
-    }
-  }
-  return pathValue;
 }

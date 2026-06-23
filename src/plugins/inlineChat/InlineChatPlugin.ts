@@ -3,9 +3,9 @@ import * as vscode from 'vscode';
 import type { WorkspaceIdentity } from '../../core/WorkspaceIdentity';
 import type { SessionManager } from '../../core/SessionManager';
 import type { SandcastlePromotion } from '../../sandcastle/SandcastlePromotion';
+import { DefaultEphemeralAgentRunner } from '../../core/EphemeralAgentRunner';
 import { InlineChatController } from '../../inlineChat/InlineChatController';
 import { AcpInlineEditAgent } from '../../inlineChat/agent/AcpInlineEditAgent';
-import { PatchApplyService } from '../../inlineChat/patch/PatchApplyService';
 import type { FeaturePlugin } from '../FeaturePlugin';
 
 export interface InlineChatPluginContext {
@@ -24,9 +24,8 @@ export class InlineChatPlugin implements FeaturePlugin<InlineChatPluginContext> 
       new AcpInlineEditAgent(
         context.workspaceIdentity,
         context.sessionManager,
-        context.sandcastlePromotion,
+        new DefaultEphemeralAgentRunner(context.sandcastlePromotion),
       ),
-      new PatchApplyService(),
     );
     const command = vscode.commands.registerCommand('damien.inlineChat.open', async () => {
       await controller.open();

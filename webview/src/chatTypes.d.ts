@@ -155,10 +155,12 @@ export type ChatWebviewSharedState = {
     isProcessing: boolean;
     currentTurn: CurrentTurn | null;
     collapsedTools: Record<string, boolean>;
-    pipelineTimeline: PipelineTimelineStep[];
-    activePipelineRole: PipelinePhase | null;
-    activePipelineAgentName: string | null;
     composerUnlocked?: boolean;
+};
+export type OrchestrationWebviewState = {
+    timeline: PipelineTimelineStep[];
+    activeRole: PipelinePhase | null;
+    activeAgentName: string | null;
 };
 export type FileSearchResult = {
     path: string;

@@ -98,9 +98,6 @@ suite('ChatWebviewProvider', () => {
       isProcessing: false,
       currentTurn: null,
       collapsedTools: {},
-      pipelineTimeline: [],
-      activePipelineRole: null,
-      activePipelineAgentName: null,
     }, 'view-1');
 
     assert.strictEqual(provider.hasChatContent, true);

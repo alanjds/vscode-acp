@@ -38,7 +38,21 @@ suite('ChatWebviewController', () => {
       recordUserMessage: (_sessionId: string, prompt: string) => {
         recordedPrompts.push(prompt);
       },
-      ingestSessionUpdate: () => undefined,
+      projectAndApply: (input: any) => {
+        const update = input.notification;
+        return {
+          sessionId: update.sessionId,
+          sessionEffects: { sessionId: update.sessionId },
+          webviewMessages: update.sessionId === 'session-1'
+            ? [{
+                type: 'sessionUpdate',
+                update: update.update,
+                sessionId: update.sessionId,
+              }]
+            : [],
+          shouldForwardToActiveConversation: update.sessionId === 'session-1',
+        };
+      },
       sendPrompt: async (_sessionId: string, prompt: string) => {
         sentPrompts.push(prompt);
         return { stopReason: 'end_turn' };

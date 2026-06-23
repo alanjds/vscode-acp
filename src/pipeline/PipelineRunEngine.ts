@@ -1,0 +1,608 @@
+import { EventEmitter } from 'node:events';
+
+import type { SessionNotification } from '@agentclientprotocol/sdk';
+import { Command, INTERRUPT, MemorySaver } from '@langchain/langgraph';
+
+import { getAgentConfigs, isSandcastleAgentConfig, type AgentConfigEntry } from '../config/AgentConfig';
+import {
+  getPipelineDefinitionForAgent,
+  getPipelineDefinitions,
+  type PipelineDefinition,
+  type PipelinePrimitiveDefinition,
+} from '../config/PipelineCatalog';
+import type { TeamRoleId } from '../config/AgentTeamConfig';
+import { isRunAbortedError } from '../core/RunAbortedError';
+import { DefaultEphemeralAgentRunner } from '../core/EphemeralAgentRunner';
+import type { SandcastlePromotion } from '../sandcastle/SandcastlePromotion';
+import { SandcastleApplyError } from '../sandcastle/SandcastlePromotion';
+import type { CompiledTeamMetadata } from './AgentTeamCompiler';
+import {
+  isPipelineStepCancelled,
+  isPipelineStepRejected,
+  type PipelineStepRunResult,
+} from './PipelineStepCompletion';
+import { PipelineExecutor } from './PipelineExecutor';
+import {
+  type AcpRunCallback,
+  type CompiledPipelineGraph,
+  createInitialPipelineState,
+  PipelineGraphCompiler,
+} from './PipelineGraphCompiler';
+import type { PipelinePlanReadyEvent, PipelineSessionUpdateEvent, PipelineStatus } from './PipelineEvents';
+import { PipelineRunRegistry, type PendingApprovalState, type PipelineRunState } from './PipelineRunRegistry';
+import { assertSingleProposedPlan, extractSingleProposedPlan } from './ProposedPlan';
+import { TeamRunSnapshotStore } from './TeamRunSnapshotStore';
+
+function buildRevisionPrompt(originalUserPrompt: string, currentPlan: string, feedback: string): string {
+  return [
+    'Original user request:',
+    originalUserPrompt,
+    '',
+    'Current proposed plan:',
+    currentPlan,
+    '',
+    'User revision request:',
+    feedback,
+    '',
+    'Revise the plan based on the user\'s feedback.',
+    'Return exactly one <proposed_plan>...</proposed_plan> block.',
+  ].join('\n');
+}
+
+export interface PipelineRunEngineDependencies {
+  getPipelineDefinitions?: () => PipelineDefinition[];
+  getPipelineDefinitionForAgent?: (agentName: string) => PipelineDefinition | null;
+  getAgentConfigs?: () => Record<string, unknown>;
+  runAcpAgent?: (...args: Parameters<AcpRunCallback>) => Promise<PipelineStepRunResult>;
+  sandcastlePromotion?: SandcastlePromotion;
+}
+
+export class PipelineRunEngine extends EventEmitter {
+  private readonly registry = new PipelineRunRegistry();
+  private readonly checkpointer = new MemorySaver();
+  private readonly executor: PipelineExecutor;
+  private readonly snapshotStore: TeamRunSnapshotStore;
+
+  constructor(
+    private readonly workspaceCwd: () => string,
+    private readonly dependencies: PipelineRunEngineDependencies = {},
+  ) {
+    super();
+    this.executor = new PipelineExecutor({
+      workspaceCwd: this.workspaceCwd,
+      ephemeralRunner: new DefaultEphemeralAgentRunner(this.dependencies.sandcastlePromotion),
+      runAcpAgent: this.dependencies.runAcpAgent,
+    });
+    this.snapshotStore = new TeamRunSnapshotStore({
+      workspaceCwd: this.workspaceCwd,
+      readAgentConfigs: () => this.readAgentConfigs(),
+      executor: this.executor,
+      emitSessionUpdate: event => {
+        this.emit('session-update', event);
+      },
+    });
+  }
+
+  async createPlan(sessionId: string, userPrompt: string, pipelineAgentName?: string): Promise<string> {
+    const existing = this.registry.get(sessionId);
+    if (existing?.pendingApproval) {
+      return this.revisePendingPlan(sessionId, existing, userPrompt);
+    }
+
+    const pipeline = this.readPipelineDefinition(pipelineAgentName);
+    this.assertConfiguredAgents(pipeline);
+
+    const state: PipelineRunState = {
+      pipeline,
+      graph: this.compileGraph(sessionId, pipeline),
+      pendingApproval: null,
+      originalUserPrompt: userPrompt,
+      revisionCount: 0,
+      cancelled: false,
+      abortController: new AbortController(),
+      stepOutputs: new Map(),
+    };
+    this.registry.set(sessionId, state);
+
+    try {
+      const result = await state.graph.invoke(
+        createInitialPipelineState(userPrompt),
+        this.graphConfig(sessionId),
+      );
+      return this.handleGraphResult(sessionId, state, result, 'Pipeline completed.');
+    } catch (e: any) {
+      if (this.handlePipelineStepStop(sessionId, e)) {
+        return '';
+      }
+      if (this.isPipelineAborted(sessionId, state, e)) {
+        this.registry.delete(sessionId);
+        throw e;
+      }
+      this.emitStatus(sessionId, 'error', e.message || 'Pipeline failed.');
+      this.registry.delete(sessionId);
+      throw e;
+    }
+  }
+
+  async approvePlan(sessionId: string, approvedPlan: string): Promise<string> {
+    const state = this.registry.get(sessionId);
+    if (!state?.pendingApproval) {
+      throw new Error('No pending pipeline plan for this session.');
+    }
+
+    const approvedOutput = approvedPlan.trim();
+    assertSingleProposedPlan(approvedOutput);
+    state.pendingApproval = null;
+    state.approvedPlan = approvedOutput;
+    state.abortController = new AbortController();
+
+    try {
+      const result = await state.graph.invoke(
+        new Command({ resume: { approved: true, plan: approvedOutput } }),
+        this.graphConfig(sessionId),
+      );
+      return this.handleGraphResult(sessionId, state, result, 'Pipeline completed.');
+    } catch (e: any) {
+      if (this.handlePipelineStepStop(sessionId, e)) {
+        return '';
+      }
+      if (this.isPipelineAborted(sessionId, state, e)) {
+        this.registry.delete(sessionId);
+        throw e;
+      }
+      this.emitStatus(
+        sessionId,
+        'error',
+        e.message || 'Pipeline implementation failed.',
+        e instanceof SandcastleApplyError ? 'implementer' : undefined,
+      );
+      this.registry.delete(sessionId);
+      throw e;
+    }
+  }
+
+  rejectPlan(sessionId: string): void {
+    this.registry.markCancelled(sessionId);
+    this.registry.delete(sessionId);
+    this.emitStatus(sessionId, 'rejected', 'Pipeline plan rejected.');
+  }
+
+  cancel(sessionId: string): void {
+    this.registry.markCancelled(sessionId);
+    this.registry.delete(sessionId);
+    this.emitStatus(sessionId, 'cancelled', 'Pipeline cancelled.');
+  }
+
+  async dispose(): Promise<void> {
+    this.snapshotStore.abortReviewerRerunOnDispose();
+    for (const [sessionId, state] of this.registry.entries()) {
+      state.cancelled = true;
+      state.abortController.abort();
+      this.emitStatus(sessionId, 'cancelled', 'Pipeline cancelled.');
+    }
+    this.registry.clear();
+    this.removeAllListeners();
+  }
+
+  getLastTeamRunSnapshot() {
+    return this.snapshotStore.getLastTeamRunSnapshot();
+  }
+
+  getCompiledPipelineForTeam(agentName: string): PipelineDefinition | null {
+    const definition = this.dependencies.getPipelineDefinitionForAgent?.(agentName)
+      ?? getPipelineDefinitionForAgent(agentName, this.workspaceCwd(), this.readAgentConfigs());
+    if (!definition?.metadata || definition.metadata.sourceKind !== 'team') {
+      return null;
+    }
+    return definition;
+  }
+
+  cancelReviewerRerun(): void {
+    this.snapshotStore.cancelReviewerRerun();
+  }
+
+  async rerunTeamReviewer(teamAgentName: string): Promise<string> {
+    return this.snapshotStore.rerunTeamReviewer(teamAgentName);
+  }
+
+  private async revisePendingPlan(
+    sessionId: string,
+    state: PipelineRunState,
+    feedback: string,
+  ): Promise<string> {
+    const pendingApproval = state.pendingApproval;
+    if (!pendingApproval) {
+      throw new Error('No pending pipeline plan for this session.');
+    }
+
+    const plannerStepId = this.findPlannerStepId(state.pipeline);
+    const teamContext = this.readTeamContext(state.pipeline);
+    const plannerRole = teamContext?.roleByStepId[plannerStepId];
+    const plannerPrimitive = this.findPrimitiveForExecutorKind(state.pipeline, plannerStepId);
+    const revisionPrompt = buildRevisionPrompt(
+      state.originalUserPrompt,
+      pendingApproval.plan,
+      feedback,
+    );
+
+    state.revisionCount += 1;
+    state.abortController = new AbortController();
+
+    const statusMessage = plannerRole
+      ? `${this.formatRoleLabel(plannerRole)} (${plannerPrimitive.agent})…`
+      : `Revising plan with ${plannerPrimitive.agent}...`;
+    this.emitStatus(
+      sessionId,
+      'planning',
+      statusMessage,
+      plannerStepId,
+      undefined,
+      teamContext,
+      plannerRole,
+      plannerPrimitive.agent,
+    );
+
+    try {
+      const output = await this.runConfiguredAcpAgent(
+        sessionId,
+        plannerStepId,
+        revisionPrompt,
+        update => {
+          this.emit('session-update', {
+            sessionId,
+            phase: plannerStepId,
+            update,
+            stepId: plannerStepId,
+            role: plannerRole,
+            agentName: plannerRole ? teamContext?.agentByRole[plannerRole] : undefined,
+            teamId: teamContext?.teamId,
+          } satisfies PipelineSessionUpdateEvent);
+        },
+      );
+      const revisedPlan = extractSingleProposedPlan(output);
+      state.pendingApproval = {
+        stepId: pendingApproval.stepId,
+        plan: revisedPlan,
+      };
+      state.stepOutputs.set(plannerStepId, revisedPlan);
+      this.emitPlanReady(sessionId, state, revisedPlan, pendingApproval.stepId, true);
+      return revisedPlan;
+    } catch (e: any) {
+      if (this.isPipelineAborted(sessionId, state, e)) {
+        this.registry.delete(sessionId);
+        throw e;
+      }
+      this.emitStatus(sessionId, 'error', e.message || 'Plan revision failed.', plannerStepId);
+      throw e;
+    }
+  }
+
+  private handleGraphResult(
+    sessionId: string,
+    state: PipelineRunState,
+    result: any,
+    completionMessage: string,
+  ): string {
+    this.registry.throwIfCancelled(state);
+    const interrupt = this.readApprovalInterrupt(result);
+    if (interrupt) {
+      assertSingleProposedPlan(interrupt.plan);
+      state.pendingApproval = interrupt;
+      this.emitPlanReady(sessionId, state, interrupt.plan, interrupt.stepId, false);
+      return interrupt.plan;
+    }
+
+    this.snapshotStore.persistTeamSnapshot(sessionId, state, result);
+    this.emitStatus(
+      sessionId,
+      'completed',
+      completionMessage,
+      undefined,
+      undefined,
+      this.readTeamContext(state.pipeline),
+    );
+    this.registry.delete(sessionId);
+    return typeof result?.lastOutput === 'string' ? result.lastOutput : '';
+  }
+
+  private emitPlanReady(
+    sessionId: string,
+    state: PipelineRunState,
+    plan: string,
+    approvalStepId: string,
+    revised: boolean,
+  ): void {
+    const teamContext = this.readTeamContext(state.pipeline);
+    const plannerStepId = this.findPlannerStepId(state.pipeline);
+    const plannerRole = teamContext?.roleByStepId[plannerStepId];
+    const implementerUsesSandcastle = this.implementerUsesSandcastle(state.pipeline);
+    const approvalMessage = revised
+      ? 'Plan revised — review and approve.'
+      : implementerUsesSandcastle
+        ? 'Plan ready — approve before Sandcastle implementation.'
+        : 'Plan ready for review.';
+    this.emit('plan-ready', {
+      sessionId,
+      plan,
+      stepId: approvalStepId,
+      role: plannerRole,
+      agentName: plannerRole ? teamContext?.agentByRole[plannerRole] : undefined,
+      teamId: teamContext?.teamId,
+      implementerUsesSandcastle,
+      revised,
+    } satisfies PipelinePlanReadyEvent);
+    this.emitStatus(
+      sessionId,
+      'awaiting_approval',
+      approvalMessage,
+      approvalStepId,
+      undefined,
+      teamContext,
+      undefined,
+      undefined,
+      implementerUsesSandcastle,
+    );
+  }
+
+  private readApprovalInterrupt(result: any): PendingApprovalState | null {
+    const interrupts = result?.[INTERRUPT];
+    if (!Array.isArray(interrupts) || interrupts.length === 0) {
+      return null;
+    }
+    const value = interrupts[0]?.value;
+    if (!value || typeof value.stepId !== 'string' || typeof value.plan !== 'string') {
+      throw new Error('Pipeline approval interrupt was malformed.');
+    }
+    return {
+      stepId: value.stepId,
+      plan: value.plan,
+    };
+  }
+
+  private compileGraph(sessionId: string, pipeline: PipelineDefinition): CompiledPipelineGraph {
+    const teamContext = this.readTeamContext(pipeline);
+    const compiler = new PipelineGraphCompiler(
+      async (kind, promptText, onSessionUpdate) => {
+        const output = await this.runConfiguredAcpAgent(sessionId, kind, promptText, onSessionUpdate);
+        const state = this.registry.get(sessionId);
+        if (state) {
+          state.stepOutputs.set(kind, output);
+          if (kind === 'implementer') {
+            state.implementOutput = output;
+          }
+        }
+        return output;
+      },
+      {
+        onStepStart: (stepId, primitive, branchId) => {
+          const phase = this.getStepPhase(pipeline, stepId);
+          const role = teamContext?.roleByStepId[stepId];
+          const statusMessage = role
+            ? `${this.formatRoleLabel(role)} (${primitive.agent})…`
+            : `Running ${branchId ? `${stepId}/${branchId}` : stepId} with ${primitive.agent}...`;
+          this.emitStatus(
+            sessionId,
+            phase,
+            statusMessage,
+            stepId,
+            branchId,
+            teamContext,
+            role,
+            primitive.agent,
+          );
+        },
+        onStepSessionUpdate: (stepId, update, branchId) => {
+          const role = teamContext?.roleByStepId[stepId];
+          const agentName = role ? teamContext?.agentByRole[role] : undefined;
+          this.emit('session-update', {
+            sessionId,
+            phase: branchId ? `${stepId}/${branchId}` : stepId,
+            update,
+            stepId,
+            branchId,
+            role,
+            agentName,
+            teamId: teamContext?.teamId,
+          });
+        },
+      },
+      this.checkpointer,
+    );
+    return compiler.compile(pipeline);
+  }
+
+  private findPlannerStepId(pipeline: PipelineDefinition): string {
+    for (const step of pipeline.steps) {
+      if ('type' in step && step.type === 'approval') {
+        break;
+      }
+      if ('use' in step) {
+        const primitive = pipeline.primitives[step.use];
+        if (primitive.output === 'proposed_plan') {
+          return step.id;
+        }
+      }
+    }
+    throw new Error('Pipeline has no planner step with proposed_plan output.');
+  }
+
+  private getStepPhase(pipeline: PipelineDefinition, stepId: string): PipelineStatus {
+    if (stepId === 'reviewer') {
+      return 'reviewing';
+    }
+    if (stepId === 'tester') {
+      return 'testing';
+    }
+
+    let approvalSeen = false;
+    for (const step of pipeline.steps) {
+      if (step.id === stepId) {
+        if (stepId === 'implementer' || (approvalSeen && stepId !== 'planner')) {
+          return 'implementing';
+        }
+        return approvalSeen ? 'implementing' : 'planning';
+      }
+      if ('type' in step && step.type === 'approval') {
+        approvalSeen = true;
+      }
+    }
+    return 'planning';
+  }
+
+  private readTeamContext(pipeline: PipelineDefinition): CompiledTeamMetadata | undefined {
+    return pipeline.metadata?.sourceKind === 'team' ? pipeline.metadata : undefined;
+  }
+
+  private formatRoleLabel(role: TeamRoleId): string {
+    switch (role) {
+      case 'planner':
+        return 'Planning';
+      case 'implementer':
+        return 'Implementing';
+      case 'reviewer':
+        return 'Reviewing';
+      case 'tester':
+        return 'Testing';
+    }
+  }
+
+  private async runConfiguredAcpAgent(
+    sessionId: string,
+    kind: string,
+    promptText: string,
+    onSessionUpdate?: (update: SessionNotification) => void,
+  ): Promise<string> {
+    const state = this.registry.get(sessionId);
+    if (!state || state.cancelled) {
+      throw new Error('Pipeline cancelled.');
+    }
+
+    const primitive = this.findPrimitiveForExecutorKind(state.pipeline, kind);
+
+    return this.executor.runStep(kind, primitive, promptText, {
+      signal: state.abortController.signal,
+      approvedPlan: state.approvedPlan,
+      onSessionUpdate,
+    });
+  }
+
+  private isPipelineAborted(sessionId: string, state: PipelineRunState, error: unknown): boolean {
+    const aborted = state.cancelled
+      || isRunAbortedError(error)
+      || (error instanceof Error && error.message === 'Pipeline cancelled.');
+    if (!aborted) {
+      return false;
+    }
+    if (!state.cancelled) {
+      state.cancelled = true;
+      this.emitStatus(sessionId, 'cancelled', 'Pipeline cancelled.');
+    }
+    return true;
+  }
+
+  private handlePipelineStepStop(sessionId: string, error: unknown): boolean {
+    if (isPipelineStepRejected(error)) {
+      this.emitStatus(sessionId, 'rejected', 'Sandcastle changes were rejected.', 'implementer');
+      this.registry.delete(sessionId);
+      return true;
+    }
+    if (isPipelineStepCancelled(error)) {
+      this.emitStatus(sessionId, 'cancelled', 'Sandcastle promotion was cancelled.', 'implementer');
+      this.registry.delete(sessionId);
+      return true;
+    }
+    return false;
+  }
+
+  private findPrimitiveForExecutorKind(
+    pipeline: PipelineDefinition,
+    kind: string,
+  ): PipelinePrimitiveDefinition {
+    for (const step of pipeline.steps) {
+      if ('use' in step && step.id === kind) {
+        return pipeline.primitives[step.use];
+      }
+      if ('type' in step && step.type === 'parallel') {
+        for (const branch of step.branches) {
+          if (`${step.id}__${branch.id}` === kind) {
+            return pipeline.primitives[branch.use];
+          }
+        }
+      }
+    }
+    throw new Error(`Unable to resolve pipeline executor "${kind}".`);
+  }
+
+  private assertConfiguredAgents(pipeline: PipelineDefinition): void {
+    const agents = this.readAgentConfigs();
+    const missing = Object.values(pipeline.primitives)
+      .map(primitive => primitive.agent)
+      .filter((agentName, index, names) => !agents[agentName] && names.indexOf(agentName) === index);
+    if (missing.length > 0) {
+      throw new Error(`Missing configured ACP pipeline agent(s): ${missing.join(', ')}.`);
+    }
+  }
+
+  private graphConfig(sessionId: string): { configurable: { thread_id: string } } {
+    return { configurable: { thread_id: sessionId } };
+  }
+
+  private implementerUsesSandcastle(pipeline: PipelineDefinition): boolean {
+    const implementer = pipeline.primitives.implementer;
+    if (!implementer?.agent) {
+      return false;
+    }
+    const config = this.readAgentConfigs()[implementer.agent] as AgentConfigEntry | undefined;
+    return config ? isSandcastleAgentConfig(config) : false;
+  }
+
+  private emitStatus(
+    sessionId: string,
+    status: PipelineStatus,
+    message: string,
+    stepId?: string,
+    branchId?: string,
+    teamContext?: CompiledTeamMetadata,
+    role?: TeamRoleId,
+    agentName?: string,
+    implementerUsesSandcastle?: boolean,
+  ): void {
+    this.emit('status', {
+      sessionId,
+      status,
+      message,
+      stepId,
+      branchId,
+      role,
+      agentName,
+      teamId: teamContext?.teamId,
+      implementerUsesSandcastle,
+    });
+  }
+
+  private readPipelineDefinition(pipelineAgentName?: string): PipelineDefinition {
+    if (pipelineAgentName) {
+      const definition = this.dependencies.getPipelineDefinitionForAgent?.(pipelineAgentName)
+        ?? getPipelineDefinitionForAgent(pipelineAgentName, this.workspaceCwd(), this.readAgentConfigs());
+      if (definition) {
+        return definition;
+      }
+    }
+
+    const definitions = this.dependencies.getPipelineDefinitions?.()
+      ?? getPipelineDefinitions(this.workspaceCwd(), this.readAgentConfigs());
+    const definition = pipelineAgentName
+      ? definitions.find(candidate => candidate.title === pipelineAgentName)
+      : definitions[0];
+    if (!definition) {
+      throw new Error(pipelineAgentName
+        ? `Unknown ACP pipeline "${pipelineAgentName}".`
+        : 'No ACP pipelines are configured.');
+    }
+    return definition;
+  }
+
+  private readAgentConfigs(): Record<string, unknown> {
+    return this.dependencies.getAgentConfigs?.() ?? getAgentConfigs();
+  }
+}

@@ -81,6 +81,44 @@ export class SessionState {
     return Array.from(this.agentSessions.keys());
   }
 
+  // --- Conversation Lifecycle ---
+
+  activateSession(agentName: string, sessionId: string): void {
+    this.setAgentSession(agentName, sessionId);
+    this.setActiveSessionId(sessionId);
+  }
+
+  removeSessionForAgent(agentName: string): string | null {
+    const sessionId = this.getAgentSession(agentName);
+    if (!sessionId) {
+      return null;
+    }
+
+    this.deleteSession(sessionId);
+    this.deleteAgentSession(agentName);
+    if (this.activeSessionId === sessionId) {
+      this.activeSessionId = null;
+    }
+    this.loadingSessionIds.delete(sessionId);
+    return sessionId;
+  }
+
+  replaceActiveSession(nextSessionId: string): string | null {
+    const previousSessionId = this.activeSessionId;
+    if (!previousSessionId || previousSessionId === nextSessionId) {
+      return null;
+    }
+
+    const previousSession = this.getSession(previousSessionId);
+    if (previousSession) {
+      this.deleteAgentSession(previousSession.agentName);
+    }
+    this.deleteSession(previousSessionId);
+    this.loadingSessionIds.delete(previousSessionId);
+    this.activeSessionId = null;
+    return previousSessionId;
+  }
+
   // --- Capabilities Cache ---
 
   getCachedCapabilities(agentName: string): AgentCapabilitySummary | undefined {

@@ -58,6 +58,14 @@ _À éviter_ : session, SessionRecord
 Comment une Conversation est exécutée : `nativeAcp` (processus ACP sur l’hôte), `sandcastle` (bridge ACP vers isolation Docker), ou `virtual` (orchestration in-process, sans enfant ACP direct pour l’agent virtual lui-même).
 _À éviter_ : runtime (ambigu), mode
 
+**EphemeralAgentRunner** :
+Seam partagé pour EphemeralRun — route vers ACP natif ou Sandcastle selon le ConfiguredAgent. Utilisé par PipelineExecutor et InlineEditAgent.
+_À éviter_ : runEphemeralSandcastleAgent (détail d’implémentation Sandcastle)
+
+**VirtualAgentCatalog** :
+Résolution unifiée des noms d’agents (configured, pipeline, team) pour l’arbre Agents et les runtimes.
+_À éviter_ : getAgentNames + isPipelineVirtualAgentName + isTeamVirtualAgentName (combinaison historique)
+
 ## Partage de contexte
 
 **EditorContext** :
@@ -79,3 +87,7 @@ _À éviter_ : contexte en attente, contexte partagé (comme nom)
 ## Présentation (webview)
 
 L’application React du panneau chat détient ChatHistory et SessionSnapshot. C’est une projection de la Conversation, pas une seconde source de vérité pour le handoff ni le contexte provider Sandcastle.
+
+**ConversationProjector** :
+Seam de projection unique côté extension host : transforme les mises à jour entrantes (ACP natif, Sandcastle, OrchestrationRun) en effets **Discussion** / **SessionRecord** et en messages webview pour **ChatHistory**. `SessionManager.applyConversationEffects` applique les effets session ; les appelants (`ChatWebviewController`, `OrchestrationRuntime`) relaient les `webviewMessages`.
+_À éviter_ : chemins d’ingest parallèles hors `projectAndApply`

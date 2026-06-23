@@ -1,8 +1,9 @@
-import type { PromptResponse, SessionNotification } from '@agentclientprotocol/sdk';
+import type { PromptResponse } from '@agentclientprotocol/sdk';
 import type * as vscode from 'vscode';
 
-import { getTeamEntryForAgent, isTeamVirtualAgentName, isValidTeamVirtualAgentName } from '../../config/AgentTeamCatalog';
-import { getPipelineDefinitionForAgent, isPipelineVirtualAgentName } from '../../config/PipelineCatalog';
+import { getTeamEntryForAgent, isValidTeamVirtualAgentName } from '../../config/AgentTeamCatalog';
+import { getPipelineDefinitionForAgent } from '../../config/PipelineCatalog';
+import { isVirtualAgentName, resolveAgent } from '../../config/VirtualAgentCatalog';
 import type { SessionManager } from '../../core/SessionManager';
 import type { VirtualSessionDescriptor, VirtualSessionRuntime } from '../../core/VirtualSessionRuntime';
 import type {
@@ -13,16 +14,6 @@ import type {
 } from '../../pipeline/PipelineService';
 import type { ChatWebviewController } from '../../ui/ChatWebviewController';
 import { logError } from '../../utils/Logger';
-
-function assistantTextUpdate(text: string, sessionId: string): SessionNotification {
-  return {
-    sessionId,
-    update: {
-      sessionUpdate: 'agent_message_chunk',
-      content: { type: 'text', text },
-    },
-  } as SessionNotification;
-}
 
 /** Owns every runtime concern of virtual orchestration conversations. */
 export class OrchestrationRuntime implements VirtualSessionRuntime, vscode.Disposable {
@@ -59,11 +50,12 @@ export class OrchestrationRuntime implements VirtualSessionRuntime, vscode.Dispo
   }
 
   canHandle(agentName: string): boolean {
-    return isPipelineVirtualAgentName(agentName) || isTeamVirtualAgentName(agentName);
+    return isVirtualAgentName(agentName);
   }
 
   createSession(agentName: string, cwd: string): VirtualSessionDescriptor {
-    if (isTeamVirtualAgentName(agentName) && !isValidTeamVirtualAgentName(agentName)) {
+    const resolution = resolveAgent(agentName, cwd);
+    if (resolution?.kind === 'team' && !isValidTeamVirtualAgentName(agentName)) {
       const entry = getTeamEntryForAgent(agentName);
       throw new Error(`Invalid agent team: ${entry?.errors.join('; ') ?? 'configuration error'}`);
     }
@@ -85,51 +77,32 @@ export class OrchestrationRuntime implements VirtualSessionRuntime, vscode.Dispo
     this.pipelines.cancel(sessionId);
   }
 
+  private projectorContext() {
+    return {
+      activeSessionId: this.sessions.getActiveSessionId(),
+      isLoading: (sessionId: string) => this.sessions.isLoading(sessionId),
+    };
+  }
+
+  private forwardProjection(
+    input: Parameters<SessionManager['projectAndApply']>[0],
+  ): void {
+    const projection = this.sessions.projectAndApply(input, this.projectorContext());
+    for (const message of projection.webviewMessages) {
+      this.chat.postMessage(message);
+    }
+  }
+
   private readonly handleStatus = (event: PipelineStatusEvent): void => {
-    if (event.sessionId !== this.sessions.getActiveSessionId()) { return; }
-    this.chat.postMessage({
-      type: 'pipelineStatus',
-      status: event.status,
-      message: event.message,
-      stepId: event.stepId,
-      role: event.role,
-      agentName: event.agentName,
-      teamId: event.teamId,
-      implementerUsesSandcastle: event.implementerUsesSandcastle,
-    });
+    this.forwardProjection({ kind: 'pipeline-status', event });
   };
 
   private readonly handlePlanReady = (event: PipelinePlanReadyEvent): void => {
-    if (event.plan) {
-      this.sessions.ingestSessionUpdate(
-        event.sessionId,
-        assistantTextUpdate(event.plan, event.sessionId),
-      );
-    }
-    if (event.sessionId !== this.sessions.getActiveSessionId()) { return; }
-    this.chat.postMessage({
-      type: 'pipelinePlanReady',
-      plan: event.plan,
-      role: event.role,
-      agentName: event.agentName,
-      teamId: event.teamId,
-      implementerUsesSandcastle: event.implementerUsesSandcastle,
-      revised: event.revised === true,
-    });
+    this.forwardProjection({ kind: 'pipeline-plan-ready', event });
   };
 
   private readonly handleSessionUpdate = (event: PipelineSessionUpdateEvent): void => {
-    this.sessions.ingestSessionUpdate(event.sessionId, event.update);
-    if (event.sessionId !== this.sessions.getActiveSessionId()) { return; }
-    this.chat.postMessage({
-      type: 'sessionUpdate',
-      update: event.update.update,
-      sessionId: event.sessionId,
-      phase: event.phase,
-      role: event.role,
-      agentName: event.agentName,
-      teamId: event.teamId,
-    });
+    this.forwardProjection({ kind: 'pipeline-session-update', event });
   };
 
   private async approve(plan: string): Promise<void> {

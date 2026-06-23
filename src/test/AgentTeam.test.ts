@@ -134,6 +134,7 @@ suite('Agent teams', () => {
     assert.match(compiled.pipeline!.primitives.planner.prompt, /Plan with care/);
     assert.match(compiled.pipeline!.primitives.reviewer.prompt, /Review the diff/);
     assert.deepStrictEqual(compiled.pipeline!.metadata?.roleByStepId.implementer, 'implementer');
+    assert.strictEqual(compiled.pipeline!.metadata?.instructionsByRole.reviewer, 'Review the diff.');
   });
 
   test('loads valid team entries from workspace directory', () => {

@@ -1,6 +1,5 @@
 import * as vscode from 'vscode';
-import { getTeamAgentDisplayNames } from './AgentTeamCatalog';
-import { getPipelineAgentNames } from './PipelineCatalog';
+import { listSelectableAgentNames } from './VirtualAgentCatalog';
 
 /**
  * Configuration for a single ACP agent.
@@ -60,14 +59,7 @@ export function getAgentNames(
   workspaceCwd?: string,
   agentConfigs: Record<string, AgentConfigEntry> = getAgentConfigs(),
 ): string[] {
-  const agentNames = Object.keys(agentConfigs);
-  const pipelineNames = getPipelineAgentNames(workspaceCwd, agentConfigs);
-  const teamNames = getTeamAgentDisplayNames(workspaceCwd, agentConfigs)
-    .filter(name => !pipelineNames.includes(name.replace(/ \(invalid\)$/, '')));
-  const virtualNames = [...pipelineNames, ...teamNames]
-    .filter(name => !agentNames.includes(name));
-
-  return [...agentNames, ...virtualNames];
+  return listSelectableAgentNames(workspaceCwd, agentConfigs);
 }
 
 /**

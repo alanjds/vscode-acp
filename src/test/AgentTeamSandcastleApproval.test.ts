@@ -3,6 +3,7 @@ import * as assert from 'assert';
 import type { PipelineDefinition } from '../config/PipelineCatalog';
 import type { CompiledTeamMetadata } from '../pipeline/AgentTeamCompiler';
 import { PipelineService } from '../pipeline/PipelineService';
+import { PipelineRunEngine } from '../pipeline/PipelineRunEngine';
 
 const FEATURE_TEAM_PIPELINE: PipelineDefinition = {
   version: 2,
@@ -68,6 +69,12 @@ const FEATURE_TEAM_PIPELINE: PipelineDefinition = {
       implementer: 'Cursor Sandcastle',
       reviewer: 'Cursor CLI',
       tester: 'Vibe',
+    },
+    instructionsByRole: {
+      planner: 'Plan the work.',
+      implementer: 'Implement the plan.',
+      reviewer: 'Review the implementation.',
+      tester: 'Test the feature.',
     },
   } satisfies CompiledTeamMetadata,
 };
@@ -160,7 +167,7 @@ suite('AgentTeamSandcastleApproval', () => {
   });
 
   test('workspace side effects fail when plan was not approved', async () => {
-    const service = createService({
+    const engine = createEngine({
       runAcpAgent: async (kind) => {
         if (kind === 'planner') {
           return '<proposed_plan>\nPlan\n</proposed_plan>';
@@ -170,14 +177,14 @@ suite('AgentTeamSandcastleApproval', () => {
     });
 
     try {
-      await service.createPlan('session-1', 'build feature', FEATURE_TEAM_PIPELINE.title);
+      await engine.createPlan('session-1', 'build feature', FEATURE_TEAM_PIPELINE.title);
 
       await assert.rejects(
-        () => (service as any).runConfiguredAcpAgent('session-1', 'implementer', 'prompt'),
+        () => (engine as any).runConfiguredAcpAgent('session-1', 'implementer', 'prompt'),
         /approved plan/,
       );
     } finally {
-      await service.dispose();
+      await engine.dispose();
     }
   });
 
@@ -266,15 +273,30 @@ function createService(options: {
 }): PipelineService {
   return new PipelineService(
     () => '/repo',
-    {
-      getPipelineDefinitions: () => [FEATURE_TEAM_PIPELINE],
-      getPipelineDefinitionForAgent: (agentName) =>
-        agentName === FEATURE_TEAM_PIPELINE.title ? FEATURE_TEAM_PIPELINE : null,
-      getAgentConfigs: () => ({
-        'Cursor CLI': { transport: 'acp', command: 'cursor', args: [] },
-        'Cursor Sandcastle': { transport: 'sandcastle', provider: 'cursor', model: 'composer-2' },
-      }),
-      runAcpAgent: options.runAcpAgent,
-    },
+    createEngineDependencies(options),
   );
+}
+
+function createEngine(options: {
+  runAcpAgent: NonNullable<ConstructorParameters<typeof PipelineRunEngine>[1]>['runAcpAgent'];
+}): PipelineRunEngine {
+  return new PipelineRunEngine(
+    () => '/repo',
+    createEngineDependencies(options),
+  );
+}
+
+function createEngineDependencies(options: {
+  runAcpAgent: NonNullable<ConstructorParameters<typeof PipelineRunEngine>[1]>['runAcpAgent'];
+}): ConstructorParameters<typeof PipelineRunEngine>[1] {
+  return {
+    getPipelineDefinitions: () => [FEATURE_TEAM_PIPELINE],
+    getPipelineDefinitionForAgent: (agentName) =>
+      agentName === FEATURE_TEAM_PIPELINE.title ? FEATURE_TEAM_PIPELINE : null,
+    getAgentConfigs: () => ({
+      'Cursor CLI': { transport: 'acp', command: 'cursor', args: [] },
+      'Cursor Sandcastle': { transport: 'sandcastle', provider: 'cursor', model: 'composer-2' },
+    }),
+    runAcpAgent: options.runAcpAgent,
+  };
 }

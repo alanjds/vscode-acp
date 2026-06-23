@@ -4,6 +4,11 @@ export declare const MAX_INPUT_HEIGHT = 400;
 export declare const DEFAULT_INPUT_HEIGHT = 140;
 export type AppState = {
     persisted: PersistedWebviewState;
+    orchestration: {
+        timeline: PipelineTimelineStep[];
+        activeRole: PipelinePhase | null;
+        activeAgentName: string | null;
+    };
     promptText: string;
     inputAreaHeight: number;
     isProcessing: boolean;
@@ -18,9 +23,6 @@ export type AppState = {
     currentTurn: CurrentTurn | null;
     collapsedTools: Record<string, boolean>;
     isLoadingSession: boolean;
-    pipelineTimeline: PipelineTimelineStep[];
-    activePipelineRole: PipelinePhase | null;
-    activePipelineAgentName: string | null;
 };
 export type AppAction = {
     type: 'setPromptText';
@@ -157,6 +159,8 @@ export type AppAction = {
 } | {
     type: 'resetPipelineTimeline';
 } | {
+    type: 'finalizeTeamRoleTurn';
+} | {
     type: 'loadSessionStart';
 } | {
     type: 'loadSessionEnd';
@@ -172,7 +176,26 @@ export type AppAction = {
     state: ChatWebviewSharedState;
 };
 export declare function emptyPersistedState(): PersistedWebviewState;
+export declare function emptyOrchestrationSlice(): {
+    timeline: PipelineTimelineStep[];
+    activeRole: PipelinePhase | null;
+    activeAgentName: string | null;
+};
+export declare function selectPipelineChatProjection(state: AppState): {
+    timeline: PipelineTimelineStep[];
+    activeRole: PipelinePhase | null;
+    activeAgentName: string | null;
+    hasTimeline: boolean;
+};
 export declare function createCurrentTurn(turnId: string): CurrentTurn;
 export declare function buildSharedSnapshot(state: AppState, version: number, updatedAt: number): ChatWebviewSharedState;
+export declare function buildWebviewPersistedBundle(state: AppState, version: number, updatedAt: number): {
+    shared: ChatWebviewSharedState;
+    orchestration: {
+        timeline: PipelineTimelineStep[];
+        activeRole: PipelinePhase | null;
+        activeAgentName: string | null;
+    };
+};
 export declare function createInitialState(persistedValue: unknown): AppState;
 export declare function appReducer(state: AppState, action: AppAction): AppState;

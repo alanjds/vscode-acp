@@ -1,9 +1,12 @@
-import { getAgentNames, getAgentConfig } from '../../config/AgentConfig';
-import { isPipelineVirtualAgentName } from '../../config/PipelineCatalog';
+import { getAgentConfig } from '../../config/AgentConfig';
+import {
+  isVirtualAgentName,
+  listSelectableAgentNames,
+  resolveAgent,
+} from '../../config/VirtualAgentCatalog';
+import type { EphemeralAgentRunner } from '../../core/EphemeralAgentRunner';
 import { SessionManager } from '../../core/SessionManager';
 import { WorkspaceIdentity } from '../../core/WorkspaceIdentity';
-import { runEphemeralSandcastleAgent } from '../../sandcastle/EphemeralSandcastleRun';
-import type { SandcastlePromotion } from '../../sandcastle/SandcastlePromotion';
 import { getSafeFenceMarker } from '../../ui/EditorContext';
 import { InlineEditRequest, InlineEditResult } from '../InlineChatTypes';
 import { InlineEditAgent, InlineEditOptions } from './InlineEditAgent';
@@ -12,13 +15,13 @@ export class AcpInlineEditAgent implements InlineEditAgent {
   constructor(
     private readonly workspaceIdentity: () => WorkspaceIdentity,
     private readonly sessionManager: SessionManager,
-    private readonly sandcastlePromotion: SandcastlePromotion,
+    private readonly ephemeralRunner: EphemeralAgentRunner,
   ) {}
 
   async generateEdit(request: InlineEditRequest, options?: InlineEditOptions): Promise<InlineEditResult> {
     const agentName = this.resolveAgentName();
     const prompt = this.buildPrompt(request);
-    const run = await runEphemeralSandcastleAgent(this.sandcastlePromotion, {
+    const run = await this.ephemeralRunner.run({
       workspaceCwd: this.workspaceIdentity().cwd,
       agentName,
       promptText: prompt,
@@ -33,11 +36,13 @@ export class AcpInlineEditAgent implements InlineEditAgent {
     const cwd = this.workspaceIdentity().cwd;
     const activeAgentName = this.sessionManager.getActiveSession()?.agentName;
 
-    if (activeAgentName && !isPipelineVirtualAgentName(activeAgentName, cwd)) {
+    if (activeAgentName && !isVirtualAgentName(activeAgentName, cwd)) {
       return activeAgentName;
     }
 
-    const names = getAgentNames(cwd).filter(name => !isPipelineVirtualAgentName(name, cwd));
+    const names = listSelectableAgentNames(cwd).filter(
+      name => resolveAgent(name, cwd)?.kind === 'configured',
+    );
     if (names.length === 0) {
       throw new Error('No ACP agent configured. Add agents in acp.agents settings.');
     }

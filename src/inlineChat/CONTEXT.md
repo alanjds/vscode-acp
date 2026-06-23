@@ -13,12 +13,12 @@ Réponse structurée de l’agent à un InlineEdit : court résumé plus une ou 
 _À éviter_ : réponse, suggestion, complétion
 
 **Patch** :
-Ensemble validé de remplacements de texte dérivé d’un EditProposal, prêt à être appliqué au document.
+Ensemble validé de remplacements de texte dérivé d’un EditProposal, prêt à être appliqué au document. Matérialisé par `PatchProposal` (edits + version document).
 _À éviter_ : diff, edit (ambigu avec InlineEdit)
 
 **PatchDecision** :
-Acceptation ou rejet par l’utilisateur d’un Patch après revue dans l’UI inset.
-_À éviter_ : apply (quand on parle de Promotion Sandcastle), confirmer
+Module qui transforme un EditProposal en Patch, vérifie la fraîcheur du document et retourne le résultat d’une acceptation (`applied`, `stale`, `failed`, `empty`) sans dépendre de l’UI inset.
+_À éviter_ : apply (quand on parle de Promotion Sandcastle), PatchApplyService
 
 ## Exécution
 

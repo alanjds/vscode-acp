@@ -32,7 +32,20 @@ _À éviter_ : session pipeline (ambigu avec SessionRecord)
 
 **EphemeralRun** :
 Lancement ACP de courte durée utilisé dans un PipelineStep (ou édition inline) pour appeler un ConfiguredAgent sous-jacent. N’est pas un ConnectedAgent et n’apparaît pas dans l’arbre des sessions. Détruit à la fin de l’étape.
+_Routage_ : `EphemeralAgentRunner` choisit native ACP ou Sandcastle+Promotion selon la config agent.
 _À éviter_ : sous-session, session enfant, mini-session
+
+**PipelineExecutor** :
+Module qui exécute un PipelineStep (primitive + prompt) et normalise la sortie adapter en texte d’étape.
+_À éviter_ : runConfiguredAcpAgent (nom historique)
+
+**PipelineRunEngine** :
+Exécution complète d'un OrchestrationRun : registry, compilation graphe LangGraph, PlanApprovalGate, abort/Sandcastle stop, émission des événements `status` / `plan-ready` / `session-update`.
+_À éviter_ : PipelineService (quand on parle de la logique run, pas du wiring extension)
+
+**PipelineService** :
+Façade wiring pour l'extension VS Code : construit le moteur, délègue createPlan/approve/reject/cancel, forward les événements EventEmitter vers OrchestrationRuntime.
+_À éviter_ : service pipeline (générique)
 
 **PipelineTimeline** :
 Séquence ordonnée des statuts d’étapes et libellés de rôles affichés dans ChatHistory pendant un OrchestrationRun.

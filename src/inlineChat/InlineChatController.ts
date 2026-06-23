@@ -1,8 +1,6 @@
 import * as vscode from 'vscode';
 import { InlineChatInset } from './InlineChatInset';
 import { InlineEditAgent } from './agent/InlineEditAgent';
-import { PatchApplyService } from './patch/PatchApplyService';
-
 /**
  * Controller for managing inline chat sessions
  */
@@ -13,7 +11,6 @@ export class InlineChatController implements vscode.Disposable {
   constructor(
     private readonly context: vscode.ExtensionContext,
     private readonly agent: InlineEditAgent,
-    private readonly patchApplyService: PatchApplyService
   ) {}
 
   /**
@@ -35,7 +32,6 @@ export class InlineChatController implements vscode.Disposable {
       this.context,
       editor,
       this.agent,
-      this.patchApplyService
     );
 
     await this.currentInset.show();

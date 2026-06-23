@@ -1,7 +1,14 @@
 import * as assert from 'assert';
 
-import { appReducer, createInitialState, emptyPersistedState } from '../../webview/src/app/state';
-import type { ChatWebviewSharedState } from '../../webview/src/chatTypes';
+import {
+  appReducer,
+  createInitialState,
+  emptyPersistedState,
+  emptyOrchestrationSlice,
+  selectPipelineChatProjection,
+  shouldAcceptIncomingSharedState,
+  type ChatWebviewSharedState,
+} from '../../webview/src/testing';
 
 suite('WebviewAppState', () => {
   test('submitUserMessage appends message and clears prompt in one transition', () => {
@@ -42,9 +49,14 @@ suite('WebviewAppState', () => {
     );
   });
 
-  test('hydrateSharedState restores promptText from newer snapshot', () => {
+  test('hydrateSharedState restores promptText without touching orchestration slice', () => {
     const initial = createInitialState(emptyPersistedState());
-    const cleared = appReducer(initial, { type: 'submitUserMessage', text: 'sent' });
+    const withOrchestration = appReducer(initial, {
+      type: 'setActivePipelineRole',
+      role: 'implementer',
+      agentName: 'coder',
+    });
+    const cleared = appReducer(withOrchestration, { type: 'submitUserMessage', text: 'sent' });
 
     const snapshot: ChatWebviewSharedState = {
       version: 2,
@@ -57,32 +69,103 @@ suite('WebviewAppState', () => {
       isProcessing: false,
       currentTurn: null,
       collapsedTools: {},
-      pipelineTimeline: [],
-      activePipelineRole: null,
-      activePipelineAgentName: null,
       composerUnlocked: false,
     };
 
     const hydrated = appReducer(cleared, { type: 'hydrateSharedState', state: snapshot });
     assert.strictEqual(hydrated.promptText, 'restored draft');
+    assert.strictEqual(hydrated.orchestration.activeRole, 'implementer');
+    assert.strictEqual(hydrated.orchestration.activeAgentName, 'coder');
   });
 
-  test('stale shared snapshot guard rejects older versions', () => {
+  test('createInitialState restores orchestration from serializer bundle', () => {
+    const state = createInitialState({
+      shared: {
+        version: 1,
+        updatedAt: 100,
+        chatHistory: [],
+        sessionState: null,
+        hasActiveSession: false,
+        promptText: '',
+        inputAreaHeight: 140,
+        isProcessing: false,
+        currentTurn: null,
+        collapsedTools: {},
+      },
+      orchestration: {
+        timeline: [{ id: 'planner', label: 'Plan', status: 'done' }],
+        activeRole: 'implementer',
+        activeAgentName: 'builder',
+      },
+    });
+
+    assert.strictEqual(state.orchestration.activeRole, 'implementer');
+    assert.strictEqual(selectPipelineChatProjection(state).hasTimeline, true);
+  });
+
+  test('createInitialState migrates legacy pipeline fields from shared snapshot', () => {
+    const state = createInitialState({
+      version: 1,
+      updatedAt: 100,
+      chatHistory: [],
+      sessionState: null,
+      hasActiveSession: false,
+      promptText: '',
+      inputAreaHeight: 140,
+      isProcessing: false,
+      currentTurn: null,
+      collapsedTools: {},
+      pipelineTimeline: [{ id: 'reviewer', label: 'Review', status: 'running' }],
+      activePipelineRole: 'reviewer',
+      activePipelineAgentName: 'review-bot',
+    });
+
+    assert.strictEqual(state.orchestration.activeRole, 'reviewer');
+    assert.strictEqual(state.orchestration.timeline.length, 1);
+  });
+
+  test('finalizeTeamRoleTurn appends pipeline output without standard prompt commit', () => {
+    let state = createInitialState(emptyPersistedState());
+    state = appReducer(state, { type: 'promptStart', turnId: 'turn-1' });
+    state = appReducer(state, { type: 'appendAssistantChunk', text: 'implemented feature' });
+    state = appReducer(state, {
+      type: 'setActivePipelineRole',
+      role: 'implementer',
+      agentName: 'builder',
+    });
+
+    const next = appReducer(state, { type: 'finalizeTeamRoleTurn' });
+
+    assert.strictEqual(next.currentTurn, null);
+    assert.strictEqual(next.isProcessing, false);
+    assert.strictEqual(next.persisted.chatHistory.length, 1);
+    assert.strictEqual(next.persisted.chatHistory[0]?.kind, 'pipelineRoleOutput');
+  });
+
+  test('clearChat resets orchestration slice', () => {
+    let state = createInitialState(emptyPersistedState());
+    state = appReducer(state, {
+      type: 'updatePipelineTimeline',
+      timeline: [{ id: 'planner', label: 'Plan', status: 'running' }],
+    });
+
+    const cleared = appReducer(state, { type: 'clearChat' });
+    assert.deepStrictEqual(cleared.orchestration, emptyOrchestrationSlice());
+  });
+
+  test('shared snapshot guard rejects older versions', () => {
     const localVersion = 5;
     const localUpdatedAt = 500;
+    const current = { version: localVersion, updatedAt: localUpdatedAt };
 
     const olderVersion = { version: 4, updatedAt: 600 };
     const sameVersionOlderTime = { version: 5, updatedAt: 400 };
     const sameVersionSameTime = { version: 5, updatedAt: 500 };
     const newer = { version: 5, updatedAt: 501 };
 
-    const isStale = (incoming: { version: number; updatedAt: number }) =>
-      incoming.version < localVersion
-      || (incoming.version === localVersion && incoming.updatedAt <= localUpdatedAt);
-
-    assert.strictEqual(isStale(olderVersion), true);
-    assert.strictEqual(isStale(sameVersionOlderTime), true);
-    assert.strictEqual(isStale(sameVersionSameTime), true);
-    assert.strictEqual(isStale(newer), false);
+    assert.strictEqual(shouldAcceptIncomingSharedState(current, olderVersion), false);
+    assert.strictEqual(shouldAcceptIncomingSharedState(current, sameVersionOlderTime), false);
+    assert.strictEqual(shouldAcceptIncomingSharedState(current, sameVersionSameTime), false);
+    assert.strictEqual(shouldAcceptIncomingSharedState(current, newer), true);
   });
 });

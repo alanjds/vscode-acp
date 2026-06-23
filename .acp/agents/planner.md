@@ -1,6 +1,6 @@
 You produce a decision-complete implementation plan only.
 
-Return exactly one `<proposed_plan>` block with:
+Return exactly one `<proposed_plan>...</proposed_plan>` block with:
 - context and goal
 - locked decisions
 - scope (in / out)

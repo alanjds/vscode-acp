@@ -1,4 +1,5 @@
 import * as assert from 'assert';
+import { JSDOM } from 'jsdom';
 
 import {
   getMarkdownEditableCursorPosition,
@@ -6,10 +7,12 @@ import {
   renderMarkdownEditableContent,
   setMarkdownEditableCursorPosition,
   type MarkdownFileMention,
-} from '../../webview/src/components/markdownEditableDom';
+} from '../../webview/src/testing';
 
 const mentionToken = '[@f](file://a)';
 const fileMentions: MarkdownFileMention[] = [{ token: mentionToken, path: 'a', name: 'f' }];
+
+let dom: JSDOM | undefined;
 
 function createEditor(value: string, mentions: MarkdownFileMention[] = fileMentions): HTMLDivElement {
   const editor = document.createElement('div');
@@ -25,9 +28,27 @@ function assertCursorRoundTrip(editor: HTMLDivElement, value: string, cursorPosi
 }
 
 suite('MarkdownEditableDom', () => {
+  setup(() => {
+    dom = new JSDOM('<!doctype html><html><body></body></html>');
+    (globalThis as any).window = dom.window;
+    (globalThis as any).document = dom.window.document;
+    (globalThis as any).Node = dom.window.Node;
+    (globalThis as any).HTMLElement = dom.window.HTMLElement;
+    (globalThis as any).HTMLDivElement = dom.window.HTMLDivElement;
+    (globalThis as any).Range = dom.window.Range;
+  });
+
   teardown(() => {
     document.body.replaceChildren();
     window.getSelection()?.removeAllRanges();
+    dom?.window.close();
+    dom = undefined;
+    delete (globalThis as any).window;
+    delete (globalThis as any).document;
+    delete (globalThis as any).Node;
+    delete (globalThis as any).HTMLElement;
+    delete (globalThis as any).HTMLDivElement;
+    delete (globalThis as any).Range;
   });
 
   test('case A: cursor after newline following a mention', () => {

@@ -8,6 +8,7 @@ export interface CompiledTeamMetadata {
   teamId: string;
   roleByStepId: Record<string, TeamRoleId>;
   agentByRole: Record<TeamRoleId, string>;
+  instructionsByRole: Partial<Record<TeamRoleId, string>>;
 }
 
 export interface TeamCompileResult {
@@ -24,7 +25,7 @@ function buildPlannerPrompt(instructions: string): string {
     'User request:',
     '{{userPrompt}}',
     '',
-    'Return exactly one <proposed_plan> block with a decision-complete implementation plan.',
+    'Return exactly one <proposed_plan>...</proposed_plan> block with a decision-complete implementation plan.',
   ].join('\n');
 }
 
@@ -147,6 +148,7 @@ export function compileTeamToPipeline(
     teamId: team.id,
     roleByStepId,
     agentByRole,
+    instructionsByRole: { ...resolvedInstructions },
   };
 
   const pipeline: PipelineDefinition = {
@@ -188,4 +190,29 @@ export function compileTeamToPipeline(
 export function serializeCompiledTeamPipeline(pipeline: PipelineDefinition): string {
   const { metadata, ...rest } = pipeline;
   return JSON.stringify({ ...rest, metadata }, null, 2);
+}
+
+export interface ReviewerRerunPromptInput {
+  reviewerInstructions: string;
+  approvedPlan: string;
+  implementOutput: string;
+  workspaceDiff: string;
+}
+
+export function buildReviewerRerunPrompt(input: ReviewerRerunPromptInput): string {
+  return [
+    input.reviewerInstructions.trim(),
+    '',
+    'Original request:',
+    '(see archived team run)',
+    '',
+    'Approved plan:',
+    input.approvedPlan,
+    '',
+    'Implementation output:',
+    input.implementOutput,
+    '',
+    'Current workspace diff (git diff HEAD):',
+    input.workspaceDiff || '(no diff detected)',
+  ].join('\n');
 }

@@ -9,6 +9,7 @@ import {
   type SandcastlePromotionMode,
   type SandcastlePromotionOutcome,
 } from './SandcastlePromotionUi';
+import { decidePromotionPolicy } from './PromotionPolicy';
 
 export type { SandcastlePromotionMode, SandcastlePromotionOutcome };
 
@@ -87,20 +88,20 @@ export class SandcastlePromotion {
    */
   async promote(connection: SandcastleBridgeConnection, sessionId: string): Promise<SandcastlePromotionOutcome> {
     const preview = await this.ui.preview(connection, sessionId);
-    if (preview.filesChanged === 0) {
+    const decision = decidePromotionPolicy(preview, this.getPromotionMode());
+
+    if (decision === 'discard_no_changes') {
       await this.ui.discard(connection, sessionId);
       void vscode.window.showInformationMessage('Sandcastle run completed with no file changes.');
       return 'no_changes';
     }
-
-    const mode = this.getPromotionMode();
-    if (mode === 'autoApply') {
+    if (decision === 'auto_apply') {
       if (!(await this.ui.apply(connection, sessionId))) {
         throw new SandcastleApplyError();
       }
       return 'applied';
     }
-    if (mode === 'autoReject') {
+    if (decision === 'auto_reject') {
       await this.ui.reject(connection, sessionId);
       return 'rejected';
     }

@@ -411,56 +411,7 @@
           "type": "object",
           "description": "Agent configurations. Each key is the agent name, value has command, args, and env.",
           "default": {
-            "GitHub Copilot": {
-              "command": "npx",
-              "args": [
-                "@github/copilot-language-server@latest",
-                "--acp"
-              ],
-              "env": {}
-            },
-            "Claude Code": {
-              "command": "npx",
-              "args": [
-                "@agentclientprotocol/claude-agent-acp@latest"
-              ],
-              "env": {}
-            },
-            "Gemini CLI": {
-              "command": "npx",
-              "args": [
-                "@google/gemini-cli@latest",
-                "--experimental-acp"
-              ],
-              "env": {}
-            },
-            "Qwen Code": {
-              "command": "npx",
-              "args": [
-                "@qwen-code/qwen-code@latest",
-                "--acp",
-                "--experimental-skills"
-              ],
-              "env": {}
-            },
-            "Auggie CLI": {
-              "command": "npx",
-              "args": [
-                "@augmentcode/auggie@latest",
-                "--acp"
-              ],
-              "env": {
-                "AUGMENT_DISABLE_AUTO_UPDATE": "1"
-              }
-            },
-            "Qoder CLI": {
-              "command": "npx",
-              "args": [
-                "@qoder-ai/qodercli@latest",
-                "--acp"
-              ],
-              "env": {}
-            },
+           
             "Codex CLI": {
               "command": "npx",
               "args": [
@@ -497,28 +448,6 @@
               "command": "npx",
               "args": [
                 "opencode-ai@latest",
-                "acp"
-              ],
-              "env": {}
-            },
-            "OpenClaw": {
-              "command": "npx",
-              "args": [
-                "openclaw",
-                "acp"
-              ],
-              "env": {}
-            },
-            "Kiro CLI": {
-              "command": "kiro-cli",
-              "args": [
-                "acp"
-              ],
-              "env": {}
-            },
-            "Hermes Agent": {
-              "command": "hermes",
-              "args": [
                 "acp"
               ],
               "env": {}
@@ -605,7 +534,8 @@
     "watch": "webpack --watch",
     "package": "webpack --mode production --devtool hidden-source-map",
     "vsx": "npm run compile  && vsce package",
-    "compile-tests": "tsc -p tsconfig.compile-tests.json --incremental false",
+    "clean-tests": "node -e \"require('fs').rmSync('out', { recursive: true, force: true })\"",
+    "compile-tests": "npm run clean-tests && tsc -p tsconfig.compile-tests.json --incremental false",
     "watch-tests": "tsc -p tsconfig.compile-tests.json -w",
     "lint": "eslint src --max-warnings 0",
     "sandcastle:smoke:codex": "npm run compile && node scripts/sandcastle-smoke.mjs codex apply",

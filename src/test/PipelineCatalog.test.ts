@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 import { parsePipelineYaml } from '../config/PipelineCatalog';
+import { repoRoot } from './repoRoot';
 
 const VALID_PIPELINE = `
 version: 2
@@ -84,13 +85,13 @@ suite('PipelineCatalog', () => {
 
   test('parses the repository example pipeline', () => {
     const text = fs.readFileSync(
-      path.join(__dirname, '..', '..', '.acp', 'pipelines', 'plan-execute-verify.yaml'),
+      path.join(repoRoot(), '.acp', 'pipelines', 'plan-execute-verify.yaml'),
       'utf8',
     );
     const result = parsePipelineYaml(
       text,
       '/repo/.acp/pipelines/plan-execute-verify.yaml',
-      { 'Gemini CLI': {}, Vibe: {}, 'Codex CLI': {}, 'Claude Code': {} },
+      { 'Cursor CLI': {}, Vibe: {}, 'Codex CLI': {}, 'Claude Code': {} },
     );
 
     assert.deepStrictEqual(result.errors, []);

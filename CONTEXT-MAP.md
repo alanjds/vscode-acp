@@ -143,7 +143,7 @@ Après l’envoi du prochain prompt, PendingHandoff est consommé — la Discuss
 | Resume vs reset ChatHistory | Ouvrir via resume peut ne pas effacer ChatHistory comme load | Traiter comme écart d’implémentation ; le terme **historyReplayed** distingue load de resume |
 | EphemeralRun duplique le cycle connexion | Second chemin spawn / connect hors ConnectedAgent | Garder le terme **EphemeralRun** ; consolidation = refactor structurel futur |
 | Inline chat orphelin | Pas d’arbre, pas de SessionRecord, pas de handoff | Accepter comme contexte séparé ; documenté dans [Inline chat](./src/inlineChat/CONTEXT.md) |
-| Champs pipeline dans l’état chat partagé | La timeline pipeline vit dans l’état webview générique | Fuite de domaine Pipeline → présentation — pas faux fonctionnellement, propriété floue |
+| Champs pipeline dans l’état chat partagé | La timeline pipeline vit dans l’état webview générique | Fuite de domaine Pipeline → présentation — **ConversationProjector** unifie la projection host ; l’isolation de `OrchestrationState` (slice webview) reste un travail séparé |
 | Documentation scindée | `docs/` EN vs `doc_fr/` pas à 100 % alignés | Glossaires en français avec termes canoniques EN ; README.fr non synchronisé automatiquement |
 | Plans avancés (`docs/plans/omnigent/`) | Décrit un domaine absent de `src/` | Hors périmètre de ces glossaires tant que non implémenté |
 

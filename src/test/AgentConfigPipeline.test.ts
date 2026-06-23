@@ -1,8 +1,8 @@
 import * as assert from 'assert';
-import * as path from 'path';
 import * as vscode from 'vscode';
 
 import { getAgentNames } from '../config/AgentConfig';
+import { repoRoot } from './repoRoot';
 
 suite('AgentConfig pipeline', () => {
   let originalGetConfiguration: typeof vscode.workspace.getConfiguration;
@@ -26,6 +26,7 @@ suite('AgentConfig pipeline', () => {
                 'Codex CLI': { command: 'codex' },
                 'Claude Code': { command: 'claude' },
                 'Cursor CLI': { command: 'cursor' },
+                'Cursor Sandcastle': { transport: 'sandcastle', provider: 'cursor', model: 'composer-2' },
                 Vibe: { command: 'vibe' },
               };
             case 'pipeline.enabled':
@@ -70,6 +71,7 @@ suite('AgentConfig pipeline', () => {
                 'Codex CLI': { command: 'codex' },
                 'Claude Code': { command: 'claude' },
                 'Cursor CLI': { command: 'cursor' },
+                'Cursor Sandcastle': { transport: 'sandcastle', provider: 'cursor', model: 'composer-2' },
                 Vibe: { command: 'vibe' },
               };
             case 'pipeline.enabled':
@@ -81,7 +83,7 @@ suite('AgentConfig pipeline', () => {
       } as any;
     };
 
-    const names = getAgentNames(path.join(__dirname, '..', '..'));
+    const names = getAgentNames(repoRoot());
     assert.ok(names.includes('Plan Execute Verify'));
     assert.ok(names.includes('Feature Team'));
   });

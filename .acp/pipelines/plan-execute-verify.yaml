@@ -4,12 +4,12 @@ title: Plan Execute Verify
 
 primitives:
   planner:
-    agent: Gemini CLI
+    agent: Cursor CLI
     output: proposed_plan
     sideEffects: none
     prompt: |
       Create a decision-complete implementation plan only.
-      Return exactly one <proposed_plan> block.
+      Return exactly one <proposed_plan>...</proposed_plan> block.
 
       User request:
       {{userPrompt}}
@@ -28,7 +28,7 @@ primitives:
       {{steps.approval.output}}
 
   verifier:
-    agent: Gemini CLI
+    agent: Cursor CLI
     output: markdown
     sideEffects: none
     prompt: |

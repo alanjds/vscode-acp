@@ -4,7 +4,10 @@ import {
   CHAT_STATE_KEY,
   ChatWebviewSharedState,
   emptySharedState,
+  cloneSharedState,
   normalizeSharedState,
+  patchSharedState,
+  shouldAcceptIncomingSharedState,
 } from './ChatWebviewSharedState';
 
 const PERSIST_DEBOUNCE_MS = 150;
@@ -24,15 +27,12 @@ export class ChatWebviewStateStore implements vscode.Disposable {
   }
 
   getSnapshot(): ChatWebviewSharedState {
-    return { ...this.snapshot, collapsedTools: { ...this.snapshot.collapsedTools } };
+    return cloneSharedState(this.snapshot);
   }
 
   updateFromWebview(next: ChatWebviewSharedState, sourceEndpointId: string): boolean {
     const normalized = normalizeSharedState(next);
-    if (
-      normalized.version <= this.snapshot.version
-      && normalized.updatedAt <= this.snapshot.updatedAt
-    ) {
+    if (!shouldAcceptIncomingSharedState(this.snapshot, normalized)) {
       return false;
     }
 
@@ -43,19 +43,14 @@ export class ChatWebviewStateStore implements vscode.Disposable {
   }
 
   patchFromHost(patch: Partial<ChatWebviewSharedState>): void {
-    this.snapshot = normalizeSharedState({
-      ...this.snapshot,
-      ...patch,
-      version: this.snapshot.version + 1,
-      updatedAt: Date.now(),
-    });
+    this.snapshot = patchSharedState(this.snapshot, patch, Date.now());
     this.schedulePersist();
     this.notify();
   }
 
   hydrateFromSerializer(state: unknown): void {
     const incoming = normalizeSharedState(state);
-    if (incoming.updatedAt >= this.snapshot.updatedAt) {
+    if (shouldAcceptIncomingSharedState(this.snapshot, incoming)) {
       this.snapshot = incoming;
       this.schedulePersist();
       this.notify();

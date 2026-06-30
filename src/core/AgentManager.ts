@@ -95,11 +95,25 @@ export class AgentManager extends EventEmitter {
       // nvm, Homebrew, and other user-installed tool directories.
       const { shell, useLoginFlag } = resolveUnixShell();
       const commandStr = [config.command, ...(config.args || [])].map(shellEscape).join(' ');
-      const shellArgs = useLoginFlag ? ['-l', '-c', commandStr] : ['-c', commandStr];
 
-      log(`Using shell: ${shell} ${shellArgs.join(' ')}`);
+      log(`Using shell: ${shell}, login=${useLoginFlag}`);
       const shellName = shell.split('/').pop() || shell;
       sendEvent('agent/spawn/shell', { shell: shellName, useLoginFlag: String(useLoginFlag) });
+
+      if (useLoginFlag) {
+        // Login shells source profile scripts which may consume fd 0 (stdin).
+        // Redirect the ACP pipe to fd 3 so profile scripts run with /dev/null
+        // on fd 0 and cannot interfere with the protocol stream.
+        // Confirmed fix for distrobox_profile.sh calling host-spawn on fd 0.
+        const shellArgs = ['-l', '-c', `exec ${commandStr} <&3`, '3<&0'];
+        return spawn(shell, shellArgs, {
+          stdio: ['pipe', 'pipe', 'pipe'],
+          env: { ...process.env, ...(config.env || {}) },
+          cwd: cwd || undefined,
+        });
+      }
+
+      const shellArgs = ['-c', commandStr];
       return spawn(shell, shellArgs, {
         stdio: ['pipe', 'pipe', 'pipe'],
         env: { ...process.env, ...(config.env || {}) },

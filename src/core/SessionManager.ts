@@ -126,6 +126,11 @@ export class SessionManager extends EventEmitter {
   }
 
   private getWorkspaceCwd(): string {
+    const config = vscode.workspace.getConfiguration('acp');
+    const defaultCwd = config.get<string>('defaultWorkingDirectory', '');
+    if (defaultCwd) {
+      return defaultCwd;
+    }
     const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     return cwd || process.cwd();
   }

@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as path from 'node:path';
 import { log, logError } from '../utils/Logger';
 
 import type {
@@ -7,6 +8,23 @@ import type {
   WriteTextFileRequest,
   WriteTextFileResponse,
 } from '@agentclientprotocol/sdk';
+
+/**
+ * Verify that the requested path is within one of the open workspace folders.
+ * Throws if the path escapes the workspace (path traversal guard).
+ */
+function assertWithinWorkspace(filePath: string): void {
+  const folders = vscode.workspace.workspaceFolders;
+  if (!folders || folders.length === 0) {
+    // No workspace open — allow without restriction (single-file mode)
+    return;
+  }
+  const normalised = path.resolve(filePath);
+  const inside = folders.some(f => normalised.startsWith(f.uri.fsPath + path.sep) || normalised === f.uri.fsPath);
+  if (!inside) {
+    throw new Error(`Access denied: path "${filePath}" is outside the workspace`);
+  }
+}
 
 /**
  * Handles ACP file system requests using VS Code's workspace filesystem API.
@@ -19,6 +37,7 @@ export class FileSystemHandler {
    */
   async readTextFile(params: ReadTextFileRequest): Promise<ReadTextFileResponse> {
     log(`readTextFile: ${params.path}`);
+    assertWithinWorkspace(params.path);
 
     try {
       const uri = vscode.Uri.file(params.path);
@@ -60,6 +79,7 @@ export class FileSystemHandler {
    */
   async writeTextFile(params: WriteTextFileRequest): Promise<WriteTextFileResponse> {
     log(`writeTextFile: ${params.path}`);
+    assertWithinWorkspace(params.path);
 
     try {
       const uri = vscode.Uri.file(params.path);

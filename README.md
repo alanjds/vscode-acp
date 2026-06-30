@@ -1,5 +1,7 @@
 # ACP Client for VS Code
 
+[![Gitter](https://badges.gitter.im/alanjds/vscode-acp.svg)](https://gitter.im/alanjds/vscode-acp)
+
 A [Visual Studio Code extension](https://marketplace.visualstudio.com/items?itemName=formulahendry.acp-client) that provides a client for the [Agent Client Protocol (ACP)](https://agentclientprotocol.com/) — connect to any ACP-compatible AI coding agent directly from your editor.
 
 ![ACP Client Screenshot](resources/screenshot.png)
@@ -40,7 +42,7 @@ The extension comes with default configurations for:
 
 | Agent | Command |
 |-------|---------|
-| GitHub Copilot | `npx @github/copilot-language-server@latest --acp` |
+| GitHub Copilot | `npx @github/copilot@latest --acp` |
 | Claude Code | `npx @agentclientprotocol/claude-agent-acp@latest` |
 | Gemini CLI | `npx @google/gemini-cli@latest --experimental-acp` |
 | Qwen Code | `npx @qwen-code/qwen-code@latest --acp --experimental-skills` |
@@ -51,6 +53,10 @@ The extension comes with default configurations for:
 | OpenClaw | `npx openclaw acp` |
 | [Kiro CLI](https://kiro.dev/docs/cli/acp/) | `kiro-cli acp` |
 | [Hermes Agent](https://hermes-agent.nousresearch.com/docs/user-guide/features/acp) | `hermes acp` |
+| Grok Build | `grok agent stdio` |
+| openHarness | `oh acp` |
+| siGit Code | `npx sigit-code@latest acp` |
+| Reasonix | `npx reasonix@latest acp` |
 
 You can add custom agent configurations in settings.
 

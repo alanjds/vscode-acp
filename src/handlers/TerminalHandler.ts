@@ -43,17 +43,21 @@ export class TerminalHandler {
 
     log(`createTerminal: ${params.command} ${(params.args || []).join(' ')} (id=${terminalId})`);
 
+    const BLOCKED_ENV = new Set(['LD_PRELOAD', 'LD_LIBRARY_PATH', 'DYLD_INSERT_LIBRARIES',
+      'DYLD_LIBRARY_PATH', 'NODE_OPTIONS', 'NODE_PATH']);
     const env: Record<string, string> = { ...process.env } as Record<string, string>;
     if (params.env) {
       for (const v of params.env) {
-        env[v.name] = v.value;
+        if (!BLOCKED_ENV.has(v.name)) {
+          env[v.name] = v.value;
+        }
       }
     }
 
     const child = spawn(params.command, params.args || [], {
       cwd: params.cwd || undefined,
       env,
-      shell: true,
+      shell: false,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 

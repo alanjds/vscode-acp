@@ -1,7 +1,7 @@
 {
   "name": "acp-client",
   "displayName": "ACP Client",
-  "description": "Agent Client Protocol client for VS Code — connect to GitHub Copilot, Claude Code, Gemini CLI, Qwen Code, Codex CLI, OpenCode, OpenClaw, Kiro CLI, Hermes Agent, and any ACP-compatible AI coding agent",
+  "description": "Agent Client Protocol client for VS Code \u2014 connect to GitHub Copilot, Claude Code, Gemini CLI, Qwen Code, Codex CLI, OpenCode, OpenClaw, Kiro CLI, Hermes Agent, and any ACP-compatible AI coding agent",
   "version": "0.2.0",
   "publisher": "formulahendry",
   "license": "MIT",
@@ -157,6 +157,11 @@
         "command": "acp.restartAgent",
         "title": "ACP: Restart Agent",
         "icon": "$(debug-restart)"
+      },
+      {
+        "command": "acp.toggleEditorContext",
+        "title": "ACP: Toggle Editor Context Link",
+        "icon": "$(link)"
       }
     ],
     "menus": {
@@ -284,7 +289,7 @@
             "GitHub Copilot": {
               "command": "npx",
               "args": [
-                "@github/copilot-language-server@latest",
+                "@github/copilot@latest",
                 "--acp"
               ],
               "env": {}
@@ -364,6 +369,37 @@
             "Hermes Agent": {
               "command": "hermes",
               "args": [
+                "acp"
+              ],
+              "env": {}
+            },
+            "Grok Build": {
+              "command": "grok",
+              "args": [
+                "agent",
+                "stdio"
+              ],
+              "env": {}
+            },
+            "openHarness": {
+              "command": "oh",
+              "args": [
+                "acp"
+              ],
+              "env": {}
+            },
+            "siGit Code": {
+              "command": "npx",
+              "args": [
+                "sigit-code@latest",
+                "acp"
+              ],
+              "env": {}
+            },
+            "Reasonix": {
+              "command": "npx",
+              "args": [
+                "reasonix@latest",
                 "acp"
               ],
               "env": {}

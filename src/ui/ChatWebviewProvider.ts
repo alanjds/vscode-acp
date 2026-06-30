@@ -4,6 +4,7 @@ import { SessionManager } from '../core/SessionManager';
 import { SessionUpdateHandler, SessionUpdateListener } from '../handlers/SessionUpdateHandler';
 import type { SessionNotification } from '@agentclientprotocol/sdk';
 import { logError } from '../utils/Logger';
+import { captureEditorContext } from './EditorContext';
 import { sendEvent } from '../utils/TelemetryManager';
 
 /**
@@ -16,6 +17,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
   private view?: vscode.WebviewView;
   private updateListener: SessionUpdateListener;
   private _hasChatContent = false;
+  private _editorContextEnabled = false;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -174,6 +176,16 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     }, {
       messageLength: text.length,
     });
+
+    // Prepend editor context when the user has enabled the context link
+    if (this._editorContextEnabled) {
+      const ctx = captureEditorContext();
+      if (ctx) {
+        text = ctx + text;
+      } else {
+        vscode.window.showInformationMessage('No active editor — sending prompt without context.');
+      }
+    }
 
     // Record the first prompt for the history store (used as a label
     // fallback when no title is supplied by the agent).
@@ -358,6 +370,13 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
    */
   get hasChatContent(): boolean {
     return this._hasChatContent;
+  }
+
+  get editorContextEnabled(): boolean { return this._editorContextEnabled; }
+
+  toggleEditorContext(): boolean {
+    this._editorContextEnabled = !this._editorContextEnabled;
+    return this._editorContextEnabled;
   }
 
   /**

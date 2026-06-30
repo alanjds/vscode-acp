@@ -147,9 +147,11 @@ export function activate(context: vscode.ExtensionContext): void {
         {
           location: vscode.ProgressLocation.Notification,
           title: `Connecting to ${agentName}...`,
-          cancellable: false,
+          cancellable: true,
         },
-        async () => {
+        async (_progress, token) => {
+          const cts = new vscode.CancellationTokenSource();
+          token.onCancellationRequested(() => { log(`Connect to ${agentName} cancelled`); cts.cancel(); });
           await sessionManager.connectToAgent(agentName!);
         },
       );
@@ -183,9 +185,10 @@ export function activate(context: vscode.ExtensionContext): void {
         {
           location: vscode.ProgressLocation.Notification,
           title: `Starting new conversation with ${activeSession.agentDisplayName}...`,
-          cancellable: false,
+          cancellable: true,
         },
-        async () => {
+        async (_progress, token) => {
+          token.onCancellationRequested(() => log(`New conversation cancelled`));
           await sessionManager.newConversation();
         },
       );
@@ -216,6 +219,14 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.executeCommand('acp-chat.focus');
   });
 
+  // Toggle Editor Context Link (PR #42)
+  const toggleEditorContextCmd = vscode.commands.registerCommand('acp.toggleEditorContext', () => {
+    const enabled = chatWebviewProvider.toggleEditorContext();
+    vscode.window.showInformationMessage(
+      enabled ? 'Editor context link enabled — prompts will include file/cursor info.' : 'Editor context link disabled.'
+    );
+  });
+
   // Cancel Turn
   const cancelTurnCmd = vscode.commands.registerCommand('acp.cancelTurn', async () => {
     const activeId = sessionManager.getActiveSessionId();
@@ -239,9 +250,10 @@ export function activate(context: vscode.ExtensionContext): void {
         {
           location: vscode.ProgressLocation.Notification,
           title: `Restarting ${activeSession.agentDisplayName}...`,
-          cancellable: false,
+          cancellable: true,
         },
-        async () => {
+        async (_progress, token) => {
+          token.onCancellationRequested(() => log(`Restart of ${agentName} cancelled`));
           await sessionManager.disconnectAgent(agentName);
           await sessionManager.connectToAgent(agentName);
         },
@@ -503,6 +515,7 @@ export function activate(context: vscode.ExtensionContext): void {
     disconnectAgentCmd,
     openChatCmd,
     sendPromptCmd,
+    toggleEditorContextCmd,
     cancelTurnCmd,
     restartAgentCmd,
     showLogCmd,
